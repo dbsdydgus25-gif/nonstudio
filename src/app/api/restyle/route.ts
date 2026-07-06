@@ -162,34 +162,13 @@ export async function POST(req: Request) {
       }
     }
 
-    // 같은 배치 안에서 나온 여러 장이 서로 다른 몸/사람처럼 보이면 안 되므로,
-    // 1번 변형을 먼저 "앵커"로 생성한 뒤 그 결과 이미지를 2번 이후 변형들의 참고 이미지로 그대로 재사용한다.
-    // (텍스트 스펙만으로는 같은 요청 안에서도 매번 다른 몸이 나올 수 있음 — 실제 픽셀 참고가 훨씬 강하게 먹힘)
-    const settled: PromiseSettledResult<VariationResult>[] = [];
-
-    let anchorResult: VariationResult | null = null;
-    try {
-      anchorResult = await generateVariation(0, savedReferenceImage);
-      settled.push({ status: 'fulfilled', value: anchorResult });
-    } catch (err) {
-      settled.push({ status: 'rejected', reason: err });
-    }
-
-    if (count > 1) {
-      let anchorImageForChaining: { buffer: Buffer; mimeType: string } | null = savedReferenceImage;
-      if (anchorResult) {
-        try {
-          anchorImageForChaining = await resultImageToBuffer(anchorResult.imageUrl);
-        } catch (bufErr) {
-          console.warn('[api/restyle] 앵커 이미지 buffer 변환 실패, 기존 참고 이미지로 대체:', bufErr);
-        }
-      }
-
-      const remaining = await Promise.allSettled(
-        Array.from({ length: count - 1 }).map((_, idx) => generateVariation(idx + 1, anchorImageForChaining)),
-      );
-      settled.push(...remaining);
-    }
+    // 변형끼리 앵커로 체이닝(순차 생성)하면 Vercel 서버리스 함수 시간 제한(504)을 넘기기 쉬워서
+    // 다시 전체 병렬 생성으로 되돌림. 배치 내 일관성은 Supabase에 승격해둔 기준 이미지(savedReferenceImage)로
+    // 확보한다 — 처음 한 번 마음에 드는 결과에 👍를 눌러 기준으로 저장해두면, 그 다음부터는
+    // 같은 배치 안의 모든 변형이 그 기준 이미지를 함께 참고해서 서로도 일관되게 나온다.
+    const settled = await Promise.allSettled(
+      Array.from({ length: count }).map((_, i) => generateVariation(i, savedReferenceImage)),
+    );
 
     const images = settled
       .filter((r): r is PromiseFulfilledResult<VariationResult> => r.status === 'fulfilled')
