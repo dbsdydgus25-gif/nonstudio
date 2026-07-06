@@ -111,20 +111,25 @@ export async function POST(req: Request) {
     // 승격된 기준 참고 이미지 조회 (없으면 null — Supabase 미설정/미승격 상태에서도 정상 동작)
     const savedReferenceImage = await getActiveReferenceImage('restyle');
 
+    // 코디 제안(배경·하의·신발·액세서리)은 요청당 딱 한 번만 생성해서 모든 변형이 공유한다.
+    // 예전엔 변형마다 따로 호출해서 매번 배경/하의/가방이 다르게 지어졌음 —
+    // 그러면 같은 배치의 사진들이 서로 다른 화보처럼 보여서 "같은 사람 아닌 것 같다"는 문제가 생김.
+    // 변형 간 차이는 이제 gpt-image-2 자체의 렌더링 편차 정도로만 남는다.
+    const stylingSuggestion = await generateStylingSuggestion(
+      sourcedCategory,
+      garmentAnalysis,
+      poseDescription,
+      geminiApiKey,
+      openaiApiKey,
+      userPreferenceHint,
+    );
+
     type VariationResult = { imageUrl: string; engineUsed: string; prompt: string; variationLabel: string; generationId: string | null };
 
     async function generateVariation(
       i: number,
       referenceImage: { buffer: Buffer; mimeType: string } | null,
     ): Promise<VariationResult> {
-      const stylingSuggestion = await generateStylingSuggestion(
-        sourcedCategory,
-        garmentAnalysis,
-        poseDescription,
-        geminiApiKey,
-        openaiApiKey,
-        userPreferenceHint,
-      );
       const prompt = buildRestylePrompt(
         sourcedCategory,
         garmentAnalysis,
