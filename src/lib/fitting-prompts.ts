@@ -15,10 +15,10 @@ export const PERSONAL_BODY_SPEC = `
 - Well-proportioned upper body — balanced shoulder-to-waist ratio, not top-heavy.
 - Skin tone: light tan with warm undertone — a common, natural Korean skin tone (NOT pale white, NOT deeply dark).
 - Build: athletic and visibly toned, lean muscular definition — NOT a bulky bodybuilder, NOT skinny.
-- Arms: defined, toned forearms and biceps with VISIBLE VASCULARITY — subtle visible veins on the forearms and hands, muscle definition visible under the skin, especially when the arm is flexed or holding an object.
+- Arms: defined, toned forearms and biceps with natural muscle definition visible under the skin. At most one or two very faint forearm veins may show when the arm is flexed or holding an object — this must read as ordinary healthy skin, like a fit regular person, NOT a bodybuilder. Avoid thick, dark, prominent, or excessive vein lines.
 - Chest: firm and toned with well-defined pecs. Absolutely NOT soft, puffy, or sagging — no gynecomastia-like chest under any circumstance.
 - Legs: moderately toned and firm, athletic proportion — NOT the thin/skinny-lean leg type.
-- This exact physique (toned build, visible forearm vascularity, defined chest) is a FIXED personal standard and must be reproduced identically in every single generation — not a random variation per photo.
+- This exact physique (toned build, subtle natural arm definition, defined chest) is a FIXED personal standard and must be reproduced identically in every single generation — not a random variation per photo.
 `.trim();
 
 // ─────────────────────────────────────────────────────────────────
@@ -134,6 +134,10 @@ Studio environment:
 - Captured on a professional 35mm lens, f/4 aperture, sharp focus on garment details.
 - Authentic human skin texture with natural fine pores and subtle film grain. No CGI look.
 `.trim();
+
+// 모델 피팅과 동일한 기본 배경 문구 — 리스타일링에서 사용자가 배경을 따로 지시하지 않았을 때
+// AI가 매번 다른 장소를 지어내지 않도록, 이 고정 문구를 그대로 재사용한다.
+export const DEFAULT_STUDIO_BACKGROUND = 'Clean minimalist white studio background with soft professional photographic lighting — same neutral studio backdrop as standard product shots, no colorful gels, no outdoor or location scenery.';
 
 // ─────────────────────────────────────────────────────────────────
 // 하의 피팅 고정 프롬프트 (얼굴 유무와 상관없이 항상 하체 위주)

@@ -11,7 +11,7 @@
 import { NextResponse } from 'next/server';
 import OpenAI, { toFile } from 'openai';
 import { analyzeGarment, analyzePose, generateStylingSuggestion } from '@/lib/garment-agent';
-import { buildRestylePrompt, type SourcedCategory } from '@/lib/fitting-prompts';
+import { buildRestylePrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCategory } from '@/lib/fitting-prompts';
 import { getActiveReferenceImage, saveGeneration } from '@/lib/generation-store';
 
 export const runtime = 'nodejs';
@@ -80,6 +80,7 @@ export async function POST(req: Request) {
       geminiApiKey,
       openaiApiKey,
       userAdditions,
+      backgroundHint,
       variationCount,
       userPreferenceHint,
     } = await req.json();
@@ -123,6 +124,12 @@ export async function POST(req: Request) {
       openaiApiKey,
       userPreferenceHint,
     );
+
+    // 배경은 사용자가 명시적으로 지시했을 때만 그 내용을 쓰고, 없으면 모델 피팅과 동일한
+    // 고정 흰색 스튜디오 배경으로 강제 통일한다 — AI가 매번 다른 장소를 지어내지 않도록.
+    stylingSuggestion.background = backgroundHint?.trim()
+      ? backgroundHint.trim()
+      : DEFAULT_STUDIO_BACKGROUND;
 
     type VariationResult = { imageUrl: string; engineUsed: string; prompt: string; variationLabel: string; generationId: string | null };
 

@@ -65,8 +65,8 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys }: RestyleSect
     setCurrentResult(null);
     setBatchImages([]);
 
+    // 배경은 서버에서 별도 처리(지시 없으면 고정 흰색 스튜디오 유지)하므로 여기서는 빼고 전달한다
     const userAdditions = [
-      backgroundHint.trim() && `배경 지시: ${backgroundHint.trim()}`,
       poseHint.trim() && `자세 지시: ${poseHint.trim()}`,
       outfitHint.trim() && `상하의 스타일 지시: ${outfitHint.trim()}`,
     ]
@@ -83,6 +83,7 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys }: RestyleSect
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
           userAdditions,
+          backgroundHint,
           variationCount,
         }),
       });
