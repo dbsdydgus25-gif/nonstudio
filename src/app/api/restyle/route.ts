@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 import OpenAI, { toFile } from 'openai';
 import { analyzeGarment, analyzePose, generateStylingSuggestion } from '@/lib/garment-agent';
 import { buildRestylePrompt, type SourcedCategory } from '@/lib/fitting-prompts';
+import { getActiveReferenceImage, saveGeneration } from '@/lib/generation-store';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -29,17 +30,35 @@ async function toOpenAIFile(buffer: Buffer, mimeType: string, name: string) {
   return await toFile(buffer, name, { type: mimeType });
 }
 
+/** OpenAI 응답 이미지(URL 또는 base64 data URL)를 Buffer로 통일 — Supabase 업로드용 */
+async function resultImageToBuffer(imageUrl: string): Promise<{ buffer: Buffer; mimeType: string }> {
+  if (imageUrl.startsWith('data:')) {
+    return parseBase64Image(imageUrl);
+  }
+  const res = await fetch(imageUrl);
+  const arrayBuffer = await res.arrayBuffer();
+  const mimeType = res.headers.get('content-type') || 'image/png';
+  return { buffer: Buffer.from(arrayBuffer), mimeType };
+}
+
 async function runSingleRestyle(
   openai: OpenAI,
   photoBuf: Buffer,
   photoMime: string,
   prompt: string,
+  referenceImage?: { buffer: Buffer; mimeType: string } | null,
 ): Promise<{ imageUrl: string; engineUsed: string }> {
   const photoFile = await toOpenAIFile(photoBuf, photoMime, `photo.${photoMime.split('/')[1] || 'jpg'}`);
 
+  // 승격된 기준 참고 이미지가 있으면 두 번째 입력 이미지로 같이 넣어 체형 일관성을 강화한다
+  // (텍스트 설명만으로 몸을 재형성하는 것보다 실제 참고 사진 한 장이 훨씬 강하게 먹힘 — 모델 피팅 파이프라인과 동일한 방식)
+  const imageInput = referenceImage
+    ? [photoFile, await toOpenAIFile(referenceImage.buffer, referenceImage.mimeType, `reference.${referenceImage.mimeType.split('/')[1] || 'jpg'}`)]
+    : photoFile;
+
   const res = await (openai.images as any).edit({
     model: 'gpt-image-2',
-    image: photoFile,
+    image: imageInput,
     prompt: prompt.slice(0, 4000),
     n: 1,
     size: '1024x1536',
@@ -50,7 +69,7 @@ async function runSingleRestyle(
   const item = res?.data?.[0];
   const imageUrl = item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : '');
   if (!imageUrl) throw new Error('빈 이미지 응답 (gpt-image-2 restyle edit)');
-  return { imageUrl, engineUsed: 'gpt-image-2 (restyle)' };
+  return { imageUrl, engineUsed: referenceImage ? 'gpt-image-2 (restyle + reference)' : 'gpt-image-2 (restyle)' };
 }
 
 export async function POST(req: Request) {
@@ -89,6 +108,9 @@ export async function POST(req: Request) {
 
     const openai = new OpenAI({ apiKey: openaiApiKey });
 
+    // 승격된 기준 참고 이미지 조회 (없으면 null — Supabase 미설정/미승격 상태에서도 정상 동작)
+    const referenceImage = await getActiveReferenceImage('restyle');
+
     // ② 프롬프트 작성 + ③ 이미지 생성 (variationCount만큼 병렬, OpenAI 전용)
     const tasks = Array.from({ length: count }).map(async (_, i) => {
       const stylingSuggestion = await generateStylingSuggestion(
@@ -106,13 +128,32 @@ export async function POST(req: Request) {
         stylingSuggestion,
         userAdditions || '',
       );
+      const variationLabel = `스타일 변형 #${i + 1}`;
       try {
-        const { imageUrl, engineUsed } = await runSingleRestyle(openai, photoBuf, photoMime, prompt);
+        const { imageUrl, engineUsed } = await runSingleRestyle(openai, photoBuf, photoMime, prompt, referenceImage);
+
+        // 생성 기록 저장 (실패해도 결과 반환에는 영향 없음 — saveGeneration 내부에서 흡수)
+        let generationId: string | null = null;
+        try {
+          const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
+          generationId = await saveGeneration({
+            pipeline: 'restyle',
+            modeOrCategory: sourcedCategory,
+            prompt,
+            poseLabel: variationLabel,
+            outputBuffer: outBuf,
+            outputMimeType: outMime,
+          });
+        } catch (logErr) {
+          console.warn('[api/restyle] 생성 기록 저장 실패 (결과 반환은 정상 진행):', logErr);
+        }
+
         return {
           imageUrl,
           engineUsed,
           prompt,
-          variationLabel: `스타일 변형 #${i + 1}`,
+          variationLabel,
+          generationId,
         };
       } catch (taskErr: any) {
         console.error(
@@ -125,7 +166,7 @@ export async function POST(req: Request) {
 
     const settled = await Promise.allSettled(tasks);
     const images = settled
-      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof runSingleRestyle>> & { prompt: string; variationLabel: string }> => r.status === 'fulfilled')
+      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof runSingleRestyle>> & { prompt: string; variationLabel: string; generationId: string | null }> => r.status === 'fulfilled')
       .map((r) => r.value);
     const errors = settled
       .filter((r): r is PromiseRejectedResult => r.status === 'rejected')

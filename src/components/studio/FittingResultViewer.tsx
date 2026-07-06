@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export interface HistoryItem {
   id: string;
@@ -11,11 +11,13 @@ export interface HistoryItem {
 }
 
 interface FittingResultViewerProps {
-  currentResult: { imageUrl: string; prompt: string; revisedPrompt?: string } | null;
+  currentResult: { imageUrl: string; prompt: string; revisedPrompt?: string; generationId?: string | null } | null;
   history: HistoryItem[];
   onSelectHistory: (item: HistoryItem) => void;
   isGenerating: boolean;
   loadingStage: string;
+  /** 일관성 학습 피드백 — 지정하면 결과 이미지 위에 👍/👎 버튼이 표시됨 */
+  onRate?: (generationId: string, rating: 'good' | 'bad', promote: boolean) => void;
 }
 
 export function FittingResultViewer({
@@ -24,8 +26,20 @@ export function FittingResultViewer({
   onSelectHistory,
   isGenerating,
   loadingStage,
+  onRate,
 }: FittingResultViewerProps) {
   const [isZoomed, setIsZoomed] = useState(false);
+  const [ratedAs, setRatedAs] = useState<'good' | 'bad' | null>(null);
+
+  useEffect(() => {
+    setRatedAs(null);
+  }, [currentResult?.generationId, currentResult?.imageUrl]);
+
+  const handleRate = (rating: 'good' | 'bad', promote: boolean) => {
+    if (!currentResult?.generationId || !onRate) return;
+    setRatedAs(rating);
+    onRate(currentResult.generationId, rating, promote);
+  };
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -45,15 +59,43 @@ export function FittingResultViewer({
             </div>
           </div>
           {currentResult && (
-            <a
-              href={currentResult.imageUrl}
-              target="_blank"
-              rel="noreferrer"
-              download="AI_Fitting_Result.png"
-              className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-900 font-bold text-xs flex items-center gap-2 transition border border-gray-200"
-            >
-              <span>⬇️ HD 원본 다운로드</span>
-            </a>
+            <div className="flex items-center gap-2">
+              {onRate && currentResult.generationId && (
+                <div className="flex items-center gap-1.5 mr-1">
+                  <button
+                    onClick={() => handleRate('good', true)}
+                    title="이 결과가 좋아요 — 다음 생성 때 기준 참고 이미지로 승격"
+                    className={`px-3 py-2 rounded-xl border text-xs font-bold transition flex items-center gap-1 ${
+                      ratedAs === 'good'
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                        : 'bg-white border-gray-200 text-gray-500 hover:text-emerald-600 hover:border-emerald-300'
+                    }`}
+                  >
+                    👍 {ratedAs === 'good' ? '기준으로 저장됨' : '이거다'}
+                  </button>
+                  <button
+                    onClick={() => handleRate('bad', false)}
+                    title="이 결과는 아니에요"
+                    className={`px-3 py-2 rounded-xl border text-xs font-bold transition flex items-center gap-1 ${
+                      ratedAs === 'bad'
+                        ? 'bg-rose-50 border-rose-300 text-rose-700'
+                        : 'bg-white border-gray-200 text-gray-500 hover:text-rose-600 hover:border-rose-300'
+                    }`}
+                  >
+                    👎 아니야
+                  </button>
+                </div>
+              )}
+              <a
+                href={currentResult.imageUrl}
+                target="_blank"
+                rel="noreferrer"
+                download="AI_Fitting_Result.png"
+                className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-900 font-bold text-xs flex items-center gap-2 transition border border-gray-200"
+              >
+                <span>⬇️ HD 원본 다운로드</span>
+              </a>
+            </div>
           )}
         </div>
 

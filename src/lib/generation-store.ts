@@ -1,0 +1,130 @@
+/**
+ * generation-store.ts
+ * Supabase에 생성 결과를 기록하고, 승격된 "기준" 참고 이미지를 다음 생성 호출에 재사용하기 위한 헬퍼.
+ * gpt-image-2는 seed가 없어 텍스트 프롬프트만으로는 결과가 흔들린다 — 사람이 고른 좋은 결과물을
+ * 다음 이미지 입력(레퍼런스)으로 같이 넣어주는 방식으로 일관성을 보강한다.
+ */
+
+import { getSupabaseAdmin, GENERATIONS_BUCKET } from './supabase';
+
+export type Pipeline = 'fitting' | 'restyle';
+
+interface SaveGenerationInput {
+  pipeline: Pipeline;
+  modeOrCategory?: string;
+  prompt: string;
+  poseLabel?: string;
+  referenceImageIds?: string[];
+  outputBuffer: Buffer;
+  outputMimeType: string;
+}
+
+function extFromMime(mime: string): string {
+  if (mime.includes('png')) return 'png';
+  if (mime.includes('webp')) return 'webp';
+  return 'jpg';
+}
+
+/** 생성된 이미지를 Storage에 올리고 generations 테이블에 기록. 실패해도 메인 파이프라인은 막지 않는다. */
+export async function saveGeneration(input: SaveGenerationInput): Promise<string | null> {
+  try {
+    const supabase = getSupabaseAdmin();
+    const path = `${input.pipeline}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${extFromMime(input.outputMimeType)}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(GENERATIONS_BUCKET)
+      .upload(path, input.outputBuffer, { contentType: input.outputMimeType, upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { data, error: insertError } = await supabase
+      .from('generations')
+      .insert({
+        pipeline: input.pipeline,
+        mode_or_category: input.modeOrCategory,
+        prompt: input.prompt,
+        pose_label: input.poseLabel,
+        reference_image_ids: input.referenceImageIds ?? [],
+        output_storage_path: path,
+      })
+      .select('id')
+      .single();
+    if (insertError) throw insertError;
+
+    return data.id as string;
+  } catch (err) {
+    console.warn('[generation-store] saveGeneration 실패 (기록만 실패, 생성 자체는 정상 진행):', err);
+    return null;
+  }
+}
+
+/** 좋아요/싫어요 평가 저장. */
+export async function rateGeneration(generationId: string, rating: 'good' | 'bad', note?: string) {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from('generations')
+    .update({ rating, rating_note: note ?? null })
+    .eq('id', generationId);
+  if (error) throw error;
+}
+
+/**
+ * 좋다고 고른 생성 결과를 "기준 참고 이미지"로 승격.
+ * 같은 파이프라인의 기존 활성 참고 이미지는 비활성화(단일 기준 이미지 유지 — 여러 장이 섞이면 오히려 헷갈림).
+ */
+export async function promoteToReference(generationId: string, pipeline: Pipeline, label?: string): Promise<void> {
+  const supabase = getSupabaseAdmin();
+
+  const { data: gen, error: genError } = await supabase
+    .from('generations')
+    .select('output_storage_path')
+    .eq('id', generationId)
+    .single();
+  if (genError) throw genError;
+
+  await supabase
+    .from('reference_images')
+    .update({ is_active: false })
+    .eq('pipeline', pipeline)
+    .eq('is_active', true);
+
+  const { error: insertError } = await supabase.from('reference_images').insert({
+    pipeline,
+    label: label ?? `승격됨 ${new Date().toLocaleString('ko-KR')}`,
+    storage_path: (gen as any).output_storage_path,
+    is_active: true,
+    source_generation_id: generationId,
+  });
+  if (insertError) throw insertError;
+}
+
+/** 현재 활성화된 기준 참고 이미지 1장을 buffer로 다운로드 (없으면 null). */
+export async function getActiveReferenceImage(
+  pipeline: Pipeline,
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data: refRow, error } = await supabase
+      .from('reference_images')
+      .select('storage_path')
+      .eq('pipeline', pipeline)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (!refRow) return null;
+
+    const { data: fileBlob, error: downloadError } = await supabase.storage
+      .from(GENERATIONS_BUCKET)
+      .download((refRow as any).storage_path);
+    if (downloadError) throw downloadError;
+
+    const arrayBuffer = await fileBlob.arrayBuffer();
+    const path: string = (refRow as any).storage_path;
+    const mimeType = path.endsWith('.png') ? 'image/png' : path.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    return { buffer: Buffer.from(arrayBuffer), mimeType };
+  } catch (err) {
+    console.warn('[generation-store] getActiveReferenceImage 실패 (참고 이미지 없이 진행):', err);
+    return null;
+  }
+}

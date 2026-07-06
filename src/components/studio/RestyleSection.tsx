@@ -29,9 +29,26 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys }: RestyleSect
   const [isRunning, setIsRunning] = useState(false);
   const [stageMsg, setStageMsg] = useState('');
 
-  const [batchImages, setBatchImages] = useState<Array<{ imageUrl: string; variationLabel: string }>>([]);
-  const [currentResult, setCurrentResult] = useState<{ imageUrl: string; prompt: string; revisedPrompt?: string } | null>(null);
+  const [batchImages, setBatchImages] = useState<Array<{ imageUrl: string; variationLabel: string; generationId?: string | null }>>([]);
+  const [currentResult, setCurrentResult] = useState<{ imageUrl: string; prompt: string; revisedPrompt?: string; generationId?: string | null } | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+
+  const handleRate = async (generationId: string, rating: 'good' | 'bad', promote: boolean) => {
+    try {
+      const res = await fetch('/api/generations/rate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ generationId, rating, promote, pipeline: 'restyle' }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '평가 저장 실패');
+      if (promote) {
+        alert('저장했습니다 — 다음 생성부터 이 사진을 기준 체형 참고 이미지로 같이 사용합니다.');
+      }
+    } catch (err: any) {
+      alert(err.message || '평가 저장 중 오류가 발생했습니다.');
+    }
+  };
 
   const handleRunRestyle = async () => {
     if (!photo) {
@@ -78,9 +95,10 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys }: RestyleSect
         throw new Error((data.error || '리스타일링 처리에 실패했습니다.') + detail);
       }
 
-      const imgs: Array<{ imageUrl: string; variationLabel: string }> = (data.images || []).map((img: any) => ({
+      const imgs: Array<{ imageUrl: string; variationLabel: string; generationId?: string | null }> = (data.images || []).map((img: any) => ({
         imageUrl: img.imageUrl,
         variationLabel: img.variationLabel || '',
+        generationId: img.generationId ?? null,
       }));
       setBatchImages(imgs);
 
@@ -89,6 +107,7 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys }: RestyleSect
           imageUrl: imgs[0].imageUrl,
           prompt: data.images?.[0]?.prompt || '',
           revisedPrompt: data.images?.[0]?.engineUsed || '',
+          generationId: imgs[0].generationId,
         });
       }
 
@@ -259,6 +278,7 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys }: RestyleSect
             onSelectHistory={(item) => setCurrentResult({ imageUrl: item.imageUrl, prompt: item.prompt, revisedPrompt: item.revisedPrompt })}
             isGenerating={isRunning && batchImages.length === 0}
             loadingStage={stageMsg}
+            onRate={handleRate}
           />
 
           {batchImages.length > 1 && (
@@ -267,7 +287,7 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys }: RestyleSect
                 <div
                   key={i}
                   className="group relative rounded-2xl overflow-hidden border border-gray-200 hover:border-amber-400 transition cursor-pointer shadow-sm"
-                  onClick={() => setCurrentResult({ imageUrl: img.imageUrl, prompt: '', revisedPrompt: img.variationLabel })}
+                  onClick={() => setCurrentResult({ imageUrl: img.imageUrl, prompt: '', revisedPrompt: img.variationLabel, generationId: img.generationId })}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={img.imageUrl} alt={img.variationLabel} className="w-full aspect-[2/3] object-cover" />
