@@ -109,10 +109,14 @@ export async function POST(req: Request) {
     const openai = new OpenAI({ apiKey: openaiApiKey });
 
     // 승격된 기준 참고 이미지 조회 (없으면 null — Supabase 미설정/미승격 상태에서도 정상 동작)
-    const referenceImage = await getActiveReferenceImage('restyle');
+    const savedReferenceImage = await getActiveReferenceImage('restyle');
 
-    // ② 프롬프트 작성 + ③ 이미지 생성 (variationCount만큼 병렬, OpenAI 전용)
-    const tasks = Array.from({ length: count }).map(async (_, i) => {
+    type VariationResult = { imageUrl: string; engineUsed: string; prompt: string; variationLabel: string; generationId: string | null };
+
+    async function generateVariation(
+      i: number,
+      referenceImage: { buffer: Buffer; mimeType: string } | null,
+    ): Promise<VariationResult> {
       const stylingSuggestion = await generateStylingSuggestion(
         sourcedCategory,
         garmentAnalysis,
@@ -148,13 +152,7 @@ export async function POST(req: Request) {
           console.warn('[api/restyle] 생성 기록 저장 실패 (결과 반환은 정상 진행):', logErr);
         }
 
-        return {
-          imageUrl,
-          engineUsed,
-          prompt,
-          variationLabel,
-          generationId,
-        };
+        return { imageUrl, engineUsed, prompt, variationLabel, generationId };
       } catch (taskErr: any) {
         console.error(
           `[api/restyle] 변형 #${i + 1} 생성 실패 — status: ${taskErr?.status}, message: ${taskErr?.message}, detail:`,
@@ -162,11 +160,39 @@ export async function POST(req: Request) {
         );
         throw taskErr;
       }
-    });
+    }
 
-    const settled = await Promise.allSettled(tasks);
+    // 같은 배치 안에서 나온 여러 장이 서로 다른 몸/사람처럼 보이면 안 되므로,
+    // 1번 변형을 먼저 "앵커"로 생성한 뒤 그 결과 이미지를 2번 이후 변형들의 참고 이미지로 그대로 재사용한다.
+    // (텍스트 스펙만으로는 같은 요청 안에서도 매번 다른 몸이 나올 수 있음 — 실제 픽셀 참고가 훨씬 강하게 먹힘)
+    const settled: PromiseSettledResult<VariationResult>[] = [];
+
+    let anchorResult: VariationResult | null = null;
+    try {
+      anchorResult = await generateVariation(0, savedReferenceImage);
+      settled.push({ status: 'fulfilled', value: anchorResult });
+    } catch (err) {
+      settled.push({ status: 'rejected', reason: err });
+    }
+
+    if (count > 1) {
+      let anchorImageForChaining: { buffer: Buffer; mimeType: string } | null = savedReferenceImage;
+      if (anchorResult) {
+        try {
+          anchorImageForChaining = await resultImageToBuffer(anchorResult.imageUrl);
+        } catch (bufErr) {
+          console.warn('[api/restyle] 앵커 이미지 buffer 변환 실패, 기존 참고 이미지로 대체:', bufErr);
+        }
+      }
+
+      const remaining = await Promise.allSettled(
+        Array.from({ length: count - 1 }).map((_, idx) => generateVariation(idx + 1, anchorImageForChaining)),
+      );
+      settled.push(...remaining);
+    }
+
     const images = settled
-      .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof runSingleRestyle>> & { prompt: string; variationLabel: string; generationId: string | null }> => r.status === 'fulfilled')
+      .filter((r): r is PromiseFulfilledResult<VariationResult> => r.status === 'fulfilled')
       .map((r) => r.value);
     const errors = settled
       .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
