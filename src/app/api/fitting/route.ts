@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { analyzeGarment, analyzePose, analyzeBackground } from '@/lib/garment-agent';
 import { getCachedAnalysis, saveAnalysisToCache } from '@/lib/analysis-cache';
+import { listModelPhotoNames, getModelPhotoBuffer, getModelPhotoBase64 } from '@/lib/model-photos';
 import {
   buildFittingPromptWithPose,
   TOP_POSES,
@@ -140,13 +141,12 @@ export async function POST(req: Request) {
     if (!gKey) return NextResponse.json({ error: 'Gemini API 키가 없습니다.' }, { status: 400 });
     if (!oKey) return NextResponse.json({ error: 'OpenAI API 키가 없습니다.' }, { status: 400 });
 
-    // ── 1. 기본 모델 디렉토리 로드 ─────────────────────────────────────
-    const modelsDir = path.join(process.cwd(), 'public', 'models');
+    // ── 1. 기본 모델 사진 목록 로드 (로컬 우선, 없으면 Supabase Storage — 배포 환경 대응) ──────
     let modelFiles: string[] = [];
-    if (fs.existsSync(modelsDir)) {
-      modelFiles = fs.readdirSync(modelsDir)
-        .filter(f => !f.startsWith('.') && /\.(png|jpe?g|webp)$/i.test(f))
-        .map(f => path.join(modelsDir, f));
+    try {
+      modelFiles = await listModelPhotoNames();
+    } catch (mfErr) {
+      console.error('[Fitting] 모델 사진 목록 조회 실패:', mfErr);
     }
 
     if (modelFiles.length === 0) {
@@ -333,8 +333,8 @@ export async function POST(req: Request) {
 
     const results = await Promise.allSettled(
       tasksToGenerate.map(async (task, idx) => {
-        // (a) 베이스 모델 버퍼 로드 및 기본 메타데이터 설정
-        const { buffer: personBuf, mimeType: personMime } = getLocalFileAsBuffer(task.modelPath);
+        // (a) 베이스 모델 버퍼 로드 및 기본 메타데이터 설정 (로컬 우선, 없으면 Supabase)
+        const { buffer: personBuf, mimeType: personMime } = await getModelPhotoBuffer(task.modelPath);
 
         // (b) 사전 분석된 포즈 설명 가져오기
         let poseInstruction = task.defaultPose.poseInstruction;
@@ -358,7 +358,7 @@ export async function POST(req: Request) {
             const replicate = new Replicate({ auth: rKey });
             
             // 베이스 모델 및 소싱 옷 이미지 base64 로드
-            const humanImgB64 = getLocalFileAsBase64(task.modelPath);
+            const humanImgB64 = await getModelPhotoBase64(task.modelPath);
             const garmentImgB64 = garmentImages[0];
             
             // 카테고리 매핑: top/outer -> upper_body, bottom -> lower_body
