@@ -141,6 +141,7 @@ export async function POST(req: Request) {
       stylingSuggestion,
       userAdditions || '',
       !!backgroundReferenceImage,
+      !!savedReferenceImage,
     );
 
     const referenceImages = [savedReferenceImage, backgroundReferenceImage].filter(

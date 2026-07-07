@@ -11,9 +11,9 @@
 export const PERSONAL_BODY_SPEC = `
 - Height 177cm, Weight 74kg, Shoe/foot size 270mm (Korean 270 size).
 - Well-proportioned upper body — balanced shoulder-to-waist ratio, not top-heavy.
-- Skin tone: light tan with warm undertone — a common, natural Korean skin tone (NOT pale white, NOT deeply dark).
+- Skin tone: noticeably tanned, medium-deep warm brown Korean skin tone — like someone who spends time outdoors. This must read as clearly tanned/sun-kissed, NOT pale, NOT light beige, NOT porcelain white. Do not lighten the skin tone under any circumstance.
 - Build: athletic and visibly toned, lean muscular definition — NOT a bulky bodybuilder, NOT skinny.
-- Arms: defined, toned forearms and biceps with natural muscle definition visible under the skin. At most one or two very faint forearm veins may show when the arm is flexed or holding an object — this must read as ordinary healthy skin, like a fit regular person, NOT a bodybuilder. Avoid thick, dark, prominent, or excessive vein lines.
+- Arms: defined, toned forearms and biceps with natural muscle definition visible under the skin, but the skin surface itself must look smooth and healthy — NO visible veins anywhere on the arms or hands. Do not render vein lines at all, even faint ones.
 - Chest: firm and toned with well-defined pecs. Absolutely NOT soft, puffy, or sagging — no gynecomastia-like chest under any circumstance.
 - Legs: moderately toned and firm, athletic proportion — NOT the thin/skinny-lean leg type.
 - This exact physique (toned build, subtle natural arm definition, defined chest) is a FIXED personal standard and must be reproduced identically in every single generation — not a random variation per photo.
@@ -102,7 +102,7 @@ export interface StylingSuggestion {
 
 const RESTYLE_QUALITY_CONSTRAINTS = `
 CRITICAL NEGATIVE CONSTRAINTS (DO NOT GENERATE):
-cartoon, illustration, CGI, 3D render, digital art, video game graphics, airbrushed skin, plastic skin, mannequin texture, artificial doll look, low resolution, blurry, deformed body, incorrect anatomy, extra limbs, bad hands, overlapping fingers, unnatural pose, oversaturated colors, fake lighting, warped background, artifacts, logos, text, watermark, composite look, collage, split screen, multi-panel, grid of photos, side-by-side comparison, diptych, triptych, photo montage, layout of multiple images, soft puffy chest, sagging chest, gynecomastia-like chest, love handles, flabby untoned body, out-of-shape physique, hunched posture, awkward stiff pose, invented fabric pattern, fake jacquard or paisley print, embossed decorative texture not present on the real garment, moire pattern on fabric, unintended textile print.
+cartoon, illustration, CGI, 3D render, digital art, video game graphics, airbrushed skin, plastic skin, mannequin texture, artificial doll look, low resolution, blurry, deformed body, incorrect anatomy, extra limbs, bad hands, overlapping fingers, unnatural pose, oversaturated colors, fake lighting, warped background, artifacts, logos, text, watermark, composite look, collage, split screen, multi-panel, grid of photos, side-by-side comparison, diptych, triptych, photo montage, layout of multiple images, soft puffy chest, sagging chest, gynecomastia-like chest, love handles, flabby untoned body, out-of-shape physique, hunched posture, awkward stiff pose, invented fabric pattern, fake jacquard or paisley print, embossed decorative texture not present on the real garment, moire pattern on fabric, unintended textile print, visible veins, vein lines on arms or hands, pale skin, white skin, porcelain skin tone.
 `.trim();
 
 const RESTYLE_BODY_SPEC = `
@@ -142,6 +142,7 @@ export function buildRestylePrompt(
   stylingSuggestion: StylingSuggestion,
   userAdditions: string = '',
   hasBackgroundReferenceImage: boolean = false,
+  hasIdentityReferenceImage: boolean = false,
 ): string {
   const stylingLines: string[] = [];
   if (stylingSuggestion.bottom) stylingLines.push(`- 하의: ${stylingSuggestion.bottom}`);
@@ -159,9 +160,16 @@ export function buildRestylePrompt(
     ? `- Background: one of the additional input images shows the EXACT target studio backdrop and lighting setup (soft frontal light, gentle top-down falloff, seamless cyclorama floor curve). Reproduce this exact background, light direction, and shadow softness on the subject — do NOT invent a different location or lighting mood. (${stylingSuggestion.background})`
     : `- Background: ${stylingSuggestion.background}`;
 
+  // 승격된 기준 참고 이미지가 있으면 이미지가 같이 들어가는데, 이 이미지가 "무엇을 위한 것인지"
+  // 설명하는 문구가 전혀 없으면 gpt-image-2가 그 사진의 신발/코디까지 통째로 따라 그려서
+  // NEW STYLING 지시(이번에 새로 지정한 하의/신발)를 무시하는 문제가 있었다 — 용도를 명확히 한정한다.
+  const identityReferenceLine = hasIdentityReferenceImage
+    ? '\n- One of the additional input images is a FACE / BODY SHAPE / SKIN TONE reference ONLY. Match the same face, body proportions, and skin tone shown there. Do NOT copy the clothing, shoes, bag, or any accessory worn in that reference photo — completely ignore its outfit. The outfit for THIS generation is defined entirely by the SOURCED PRODUCT FIDELITY and NEW STYLING sections below, which take full priority over anything worn in that reference photo.'
+    : '';
+
   return [
     '=== MODEL BODY RESHAPE (IMPORTANT — DO NOT KEEP THE ORIGINAL BODY AS-IS) ===',
-    RESTYLE_BODY_SPEC,
+    RESTYLE_BODY_SPEC + identityReferenceLine,
     '',
     '=== SOURCED PRODUCT FIDELITY ===',
     buildGarmentFidelityBlock(category, garmentAnalysis),
