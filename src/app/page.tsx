@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Sidebar } from '@/components/studio/Sidebar';
 import { RestyleSection } from '@/components/studio/RestyleSection';
 import { VariationSection } from '@/components/studio/VariationSection';
+import { HistorySection } from '@/components/studio/HistorySection';
 import { ApiKeyModal } from '@/components/studio/ApiKeyModal';
 
 export default function StudioPage() {
@@ -13,7 +14,7 @@ export default function StudioPage() {
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
 
   // Navigation — 'restyle' = AI 피팅, 'fitting' = AI 바리에이션 (내부 상태값 이름은 유지, 화면 라벨만 바뀜)
-  const [activePage, setActivePage] = useState<'fitting' | 'restyle'>('restyle');
+  const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'history'>('restyle');
 
   // AI 피팅 → AI 바리에이션으로 넘기는 이미지
   const [variationSourceImage, setVariationSourceImage] = useState<string | null>(null);
@@ -70,12 +71,20 @@ export default function StudioPage() {
                   <p className="text-[10px] text-gray-400">대충 찍은 실사 사진 한 장 → 전신 1장으로 확정된 룩</p>
                 </div>
               </>
-            ) : (
+            ) : activePage === 'fitting' ? (
               <>
                 <span className="text-xl">🧍</span>
                 <div>
                   <h1 className="text-sm font-black text-gray-900">AI 바리에이션</h1>
                   <p className="text-[10px] text-gray-400">확정된 룩을 그대로 유지한 채 포즈만 다양하게</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <span className="text-xl">📚</span>
+                <div>
+                  <h1 className="text-sm font-black text-gray-900">히스토리</h1>
+                  <p className="text-[10px] text-gray-400">전체 생성 기록 보기</p>
                 </div>
               </>
             )}
@@ -102,6 +111,8 @@ export default function StudioPage() {
             incomingImage={variationSourceImage}
             onConsumeIncomingImage={() => setVariationSourceImage(null)}
           />
+        ) : activePage === 'history' ? (
+          <HistorySection />
         ) : null}
       </main>
 

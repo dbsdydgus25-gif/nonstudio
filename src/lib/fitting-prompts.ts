@@ -68,6 +68,21 @@ export const FULLBODY_POSES: PoseVariation[] = [
     label: '전신 쿼터뷰 측면 포즈',
     poseInstruction: 'Pose: Standing in a three-quarter turn, showing side silhouette and layering balance.',
   },
+  {
+    id: 'full_side_profile_right',
+    label: '전신 완전 측면(우측) 포즈',
+    poseInstruction: 'Pose: Standing in a full right-side profile, body turned a full 90 degrees so only the side silhouette faces the camera, chin turned slightly back toward the lens, one arm relaxed at the side.',
+  },
+  {
+    id: 'full_back_three_quarter',
+    label: '전신 백뷰 쿼터턴 포즈',
+    poseInstruction: 'Pose: Standing with the back turned three-quarters away from the camera, head turned back over the shoulder toward the lens, showing the back of the outfit with a hint of the side profile.',
+  },
+  {
+    id: 'full_side_lean_pocket',
+    label: '전신 측면 체중이동 포켓 포즈',
+    poseInstruction: 'Pose: Standing in a side-turned stance with weight shifted onto one leg, hand tucked casually into the pocket, shoulders angled away from the camera for a candid lookbook feel.',
+  },
 ];
 
 // ─────────────────────────────────────────────────────────────────
@@ -87,7 +102,7 @@ export interface StylingSuggestion {
 
 const RESTYLE_QUALITY_CONSTRAINTS = `
 CRITICAL NEGATIVE CONSTRAINTS (DO NOT GENERATE):
-cartoon, illustration, CGI, 3D render, digital art, video game graphics, airbrushed skin, plastic skin, mannequin texture, artificial doll look, low resolution, blurry, deformed body, incorrect anatomy, extra limbs, bad hands, overlapping fingers, unnatural pose, oversaturated colors, fake lighting, warped background, artifacts, logos, text, watermark, composite look, collage, split screen, multi-panel, grid of photos, side-by-side comparison, diptych, triptych, photo montage, layout of multiple images, soft puffy chest, sagging chest, gynecomastia-like chest, love handles, flabby untoned body, out-of-shape physique, hunched posture, awkward stiff pose.
+cartoon, illustration, CGI, 3D render, digital art, video game graphics, airbrushed skin, plastic skin, mannequin texture, artificial doll look, low resolution, blurry, deformed body, incorrect anatomy, extra limbs, bad hands, overlapping fingers, unnatural pose, oversaturated colors, fake lighting, warped background, artifacts, logos, text, watermark, composite look, collage, split screen, multi-panel, grid of photos, side-by-side comparison, diptych, triptych, photo montage, layout of multiple images, soft puffy chest, sagging chest, gynecomastia-like chest, love handles, flabby untoned body, out-of-shape physique, hunched posture, awkward stiff pose, invented fabric pattern, fake jacquard or paisley print, embossed decorative texture not present on the real garment, moire pattern on fabric, unintended textile print.
 `.trim();
 
 const RESTYLE_BODY_SPEC = `
@@ -106,7 +121,8 @@ const CATEGORY_PRESERVE_LABEL: Record<SourcedCategory, string> = {
 function buildGarmentFidelityBlock(category: SourcedCategory, garmentAnalysis: GarmentAnalysis): string {
   return `
 - The ${CATEGORY_PRESERVE_LABEL[category]} visible in the input photo IS the real sourced product. Faithfully reproduce its color, fabric texture, fit, and silhouette — this is the hero item and must be recognizable as the same product — but you have freedom to adjust how it drapes on the reshaped body.
-- Reference spec of the sourced item — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Details: ${garmentAnalysis.details}.
+- Reference spec of the sourced item — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.
+- CRITICAL FABRIC RULE: reproduce ONLY the surface texture described above — do NOT invent, add, or embellish any decorative pattern, print, jacquard motif, embossed design, paisley, damask, moire, or graphic texture that is not explicitly listed. If the fabric is a plain solid-color knit/weave, render it perfectly plain and uniform with only natural fabric grain or knit-loop texture — absolutely no added print or pattern of any kind.
 `.trim();
 }
 

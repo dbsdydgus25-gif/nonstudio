@@ -29,6 +29,21 @@ async function toOpenAIFile(buffer: Buffer, mimeType: string, name: string) {
   return await toFile(buffer, name, { type: mimeType });
 }
 
+/** 포즈 풀에서 매번 무작위로 count개를 뽑는다 (기존엔 배열 앞 N개를 고정 순서로만 써서 항상 같은 포즈만 나오던 버그가 있었음). */
+function pickRandomPoses(count: number) {
+  const pool = [...FULLBODY_POSES];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  if (count <= pool.length) return pool.slice(0, count);
+  const result = [...pool];
+  while (result.length < count) {
+    result.push(pool[Math.floor(Math.random() * pool.length)]);
+  }
+  return result;
+}
+
 /** OpenAI 응답 이미지(URL 또는 base64 data URL)를 Buffer로 통일 — Supabase 업로드용 */
 async function resultImageToBuffer(imageUrl: string): Promise<{ buffer: Buffer; mimeType: string }> {
   if (imageUrl.startsWith('data:')) {
@@ -109,7 +124,7 @@ export async function POST(req: Request) {
     // 배경은 예외 없이 고정 흰색 스튜디오 참고 사진을 사용한다 (AI 피팅과 동일 기준)
     const backgroundReferenceImage = getDefaultBackgroundReferenceImage();
 
-    const poses = Array.from({ length: count }).map((_, i) => FULLBODY_POSES[i % FULLBODY_POSES.length]);
+    const poses = pickRandomPoses(count);
 
     const settled = await Promise.allSettled(
       poses.map(async (pose) => {

@@ -3,8 +3,8 @@
 import React from 'react';
 
 interface SidebarProps {
-  activePage: 'fitting' | 'restyle';
-  onPageChange: (page: 'fitting' | 'restyle') => void;
+  activePage: 'fitting' | 'restyle' | 'history';
+  onPageChange: (page: 'fitting' | 'restyle' | 'history') => void;
   onOpenApiKeys: () => void;
   geminiKey: string;
   openaiKey: string;
@@ -73,6 +73,30 @@ export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, op
               <div className="text-[10px] text-gray-400 truncate">확정된 룩 유지, 포즈만 다양하게</div>
             </div>
             {activePage === 'fitting' && (
+              <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+            )}
+          </button>
+        </div>
+
+        {/* 구분선 */}
+        <div className="border-t border-gray-200 my-2" />
+
+        {/* 히스토리 */}
+        <div className="mb-2">
+          <button
+            onClick={() => { onPageChange('history'); }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all group ${
+              activePage === 'history'
+                ? 'bg-amber-50 border border-amber-300 text-amber-700'
+                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 border border-transparent'
+            }`}
+          >
+            <span className="text-lg">📚</span>
+            <div className="overflow-hidden">
+              <div className="text-sm font-bold truncate">히스토리</div>
+              <div className="text-[10px] text-gray-400 truncate">전체 생성 기록 보기</div>
+            </div>
+            {activePage === 'history' && (
               <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
             )}
           </button>
