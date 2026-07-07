@@ -151,7 +151,7 @@ export default function StudioPage() {
         }),
       });
 
-      const totalShots = (topCount + bottomCount + fullbodyCount) || 4;
+      const totalShots = (topCount + bottomCount + fullbodyCount) || 2;
       setStage('fitting');
       setStageMsg(`2단계: 총 ${totalShots}장의 포즈로 GPT-Image-2 병렬 렌더링 중... (최대 90초 소요)`);
 
@@ -553,7 +553,7 @@ export default function StudioPage() {
 
               <div className="grid grid-cols-4 gap-4">
                 {isRunning && batchImages.length === 0
-                  ? Array.from({ length: (topCount + bottomCount + fullbodyCount) || 4 }).map((_, i) => (
+                  ? Array.from({ length: (topCount + bottomCount + fullbodyCount) || 2 }).map((_, i) => (
                       <div key={i} className="aspect-[2/3] bg-gray-50 rounded-2xl border border-gray-200 flex flex-col items-center justify-center gap-3">
                         <div className="w-8 h-8 border-2 border-amber-200 border-t-amber-500 rounded-full animate-spin" />
                         <div className="text-[10px] text-gray-400 font-bold">렌더링 중...</div>

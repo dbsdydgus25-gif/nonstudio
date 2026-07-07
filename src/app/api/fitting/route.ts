@@ -275,13 +275,12 @@ export async function POST(req: Request) {
       });
     }
 
-    // 아무 옵션도 없으면 상의 2, 전신 2
+    // 아무 옵션도 없으면 상의 1, 전신 1 (4장이면 로컬 테스트로도 93초 걸려 Vercel 서버리스
+    // 시간 제한(특히 Hobby 플랜 60초 하드캡)을 넘기기 쉬움 — 기본값을 줄여 타임아웃 위험을 낮춤)
     if (tasksToGenerate.length === 0) {
       const defaultPlans = [
         { mode: 'top' as const, model: '1.png', pose: TOP_POSES[0], ref: topRefFiles[0], label: '상의 포즈 #1' },
-        { mode: 'top' as const, model: '2.png', pose: TOP_POSES[1], ref: topRefFiles[1 % topRefFiles.length], label: '상의 포즈 #2' },
         { mode: 'fullbody' as const, model: '7.png', pose: FULLBODY_POSES[0], ref: fullbodyRefFiles[0], label: '전신 포즈 #1' },
-        { mode: 'fullbody' as const, model: '8.jpg', pose: FULLBODY_POSES[1], ref: fullbodyRefFiles[1 % fullbodyRefFiles.length], label: '전신 포즈 #2' },
       ];
       for (const plan of defaultPlans) {
         const matchingModel = modelFiles.find(f => f.endsWith(plan.model)) || modelFiles[0];
