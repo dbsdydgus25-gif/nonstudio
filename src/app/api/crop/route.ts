@@ -1,0 +1,76 @@
+/**
+ * /api/crop/route.ts
+ * 생성된 결과 이미지를 정해진 비율(정사각형/세로 등)로 가운데 기준 크롭해서 다운로드용으로 반환.
+ * OpenAI 호스팅 URL은 브라우저 canvas에서 CORS 문제가 날 수 있어 서버에서 직접 크롭한다.
+ */
+
+import { NextResponse } from 'next/server';
+import sharp from 'sharp';
+
+export const runtime = 'nodejs';
+
+const RATIOS: Record<string, number> = {
+  '1:1': 1 / 1,
+  '4:5': 4 / 5,
+  '3:4': 3 / 4,
+  '9:16': 9 / 16,
+};
+
+async function loadImageBuffer(imageUrl: string): Promise<Buffer> {
+  if (imageUrl.startsWith('data:')) {
+    const base64 = imageUrl.split(',')[1] || '';
+    return Buffer.from(base64, 'base64');
+  }
+  const res = await fetch(imageUrl);
+  if (!res.ok) throw new Error(`이미지 다운로드 실패 (status ${res.status})`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+export async function POST(req: Request) {
+  try {
+    const { imageUrl, ratio } = await req.json();
+
+    if (!imageUrl) {
+      return NextResponse.json({ error: 'imageUrl이 필요합니다.' }, { status: 400 });
+    }
+    const targetRatio = RATIOS[ratio];
+    if (!targetRatio) {
+      return NextResponse.json({ error: `지원하지 않는 비율입니다: ${ratio}` }, { status: 400 });
+    }
+
+    const inputBuffer = await loadImageBuffer(imageUrl);
+    const image = sharp(inputBuffer);
+    const meta = await image.metadata();
+    const width = meta.width || 0;
+    const height = meta.height || 0;
+    if (!width || !height) {
+      return NextResponse.json({ error: '이미지 크기를 읽을 수 없습니다.' }, { status: 500 });
+    }
+
+    // 원본 안에서 목표 비율에 맞는 가장 큰 영역을 가운데 기준으로 잘라낸다 (해상도 손실 최소화)
+    let cropWidth = width;
+    let cropHeight = Math.round(width / targetRatio);
+    if (cropHeight > height) {
+      cropHeight = height;
+      cropWidth = Math.round(height * targetRatio);
+    }
+    const left = Math.round((width - cropWidth) / 2);
+    const top = Math.round((height - cropHeight) / 2);
+
+    const outputBuffer = await image
+      .extract({ left, top, width: cropWidth, height: cropHeight })
+      .png()
+      .toBuffer();
+
+    return new NextResponse(outputBuffer, {
+      status: 200,
+      headers: {
+        'Content-Type': 'image/png',
+        'Content-Disposition': `attachment; filename="crop_${ratio.replace(':', 'x')}.png"`,
+      },
+    });
+  } catch (err: any) {
+    console.error('[api/crop] 처리 실패:', err);
+    return NextResponse.json({ error: err.message || '크롭 처리 중 오류가 발생했습니다.' }, { status: 500 });
+  }
+}

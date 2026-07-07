@@ -45,26 +45,8 @@ export function Sidebar({ activeMode, onModeChange, activePage, onPageChange, ge
           </div>
 
           <button
-            onClick={() => { onPageChange('fitting'); }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all group ${
-              activePage === 'fitting'
-                ? 'bg-amber-50 border border-amber-300 text-amber-700'
-                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 border border-transparent'
-            }`}
-          >
-            <span className="text-lg">🧍</span>
-            <div className="overflow-hidden">
-              <div className="text-sm font-bold truncate">모델 피팅</div>
-              <div className="text-[10px] text-gray-400 truncate">다중 포즈 가상 피팅 스튜디오</div>
-            </div>
-            {activePage === 'fitting' && (
-              <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
-            )}
-          </button>
-
-          <button
             onClick={() => { onPageChange('restyle'); }}
-            className={`mt-1 w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all group ${
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all group ${
               activePage === 'restyle'
                 ? 'bg-amber-50 border border-amber-300 text-amber-700'
                 : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 border border-transparent'
@@ -76,6 +58,24 @@ export function Sidebar({ activeMode, onModeChange, activePage, onPageChange, ge
               <div className="text-[10px] text-gray-400 truncate">대충 찍은 실사 → 매력적인 피팅컷</div>
             </div>
             {activePage === 'restyle' && (
+              <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+            )}
+          </button>
+
+          <button
+            onClick={() => { onPageChange('fitting'); }}
+            className={`mt-1 w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all group ${
+              activePage === 'fitting'
+                ? 'bg-amber-50 border border-amber-300 text-amber-700'
+                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 border border-transparent'
+            }`}
+          >
+            <span className="text-lg">🧍</span>
+            <div className="overflow-hidden">
+              <div className="text-sm font-bold truncate">모델 피팅</div>
+              <div className="text-[10px] text-gray-400 truncate">다중 포즈 가상 피팅 스튜디오</div>
+            </div>
+            {activePage === 'fitting' && (
               <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
             )}
           </button>

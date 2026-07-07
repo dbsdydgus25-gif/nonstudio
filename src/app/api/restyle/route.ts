@@ -10,12 +10,18 @@
 
 import { NextResponse } from 'next/server';
 import OpenAI, { toFile } from 'openai';
+import fs from 'fs';
+import path from 'path';
 import { analyzeGarment, analyzePose, generateStylingSuggestion } from '@/lib/garment-agent';
 import { buildRestylePrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCategory } from '@/lib/fitting-prompts';
 import { getActiveReferenceImage, saveGeneration } from '@/lib/generation-store';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
+
+// 배경 지시가 없을 때 항상 이 실제 사진(스튜디오 배경/조명 기준)을 참고 이미지로 같이 넣는다.
+// 텍스트 설명만으로는 매번 배경/조명이 살짝씩 달라져서, 실제 사진 한 장을 고정 기준으로 삼는다.
+const DEFAULT_BACKGROUND_IMAGE_PATH = path.join(process.cwd(), 'public', 'backgrounds', 'default_white_studio.png');
 
 function parseBase64Image(dataUrl: string): { buffer: Buffer; mimeType: string } {
   if (dataUrl.startsWith('data:')) {
@@ -46,15 +52,18 @@ async function runSingleRestyle(
   photoBuf: Buffer,
   photoMime: string,
   prompt: string,
-  referenceImage?: { buffer: Buffer; mimeType: string } | null,
+  referenceImages: Array<{ buffer: Buffer; mimeType: string }> = [],
 ): Promise<{ imageUrl: string; engineUsed: string }> {
   const photoFile = await toOpenAIFile(photoBuf, photoMime, `photo.${photoMime.split('/')[1] || 'jpg'}`);
 
-  // 승격된 기준 참고 이미지가 있으면 두 번째 입력 이미지로 같이 넣어 체형 일관성을 강화한다
-  // (텍스트 설명만으로 몸을 재형성하는 것보다 실제 참고 사진 한 장이 훨씬 강하게 먹힘 — 모델 피팅 파이프라인과 동일한 방식)
-  const imageInput = referenceImage
-    ? [photoFile, await toOpenAIFile(referenceImage.buffer, referenceImage.mimeType, `reference.${referenceImage.mimeType.split('/')[1] || 'jpg'}`)]
-    : photoFile;
+  // 승격된 체형 기준 이미지 / 고정 배경 기준 이미지가 있으면 추가 입력 이미지로 같이 넣어 일관성을 강화한다
+  // (텍스트 설명만으로 몸/배경을 재형성하는 것보다 실제 참고 사진이 훨씬 강하게 먹힘 — 모델 피팅 파이프라인과 동일한 방식)
+  const refFiles = await Promise.all(
+    referenceImages.map((ref, i) =>
+      toOpenAIFile(ref.buffer, ref.mimeType, `reference-${i}.${ref.mimeType.split('/')[1] || 'jpg'}`),
+    ),
+  );
+  const imageInput = refFiles.length > 0 ? [photoFile, ...refFiles] : photoFile;
 
   const res = await (openai.images as any).edit({
     model: 'gpt-image-2',
@@ -69,7 +78,7 @@ async function runSingleRestyle(
   const item = res?.data?.[0];
   const imageUrl = item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : '');
   if (!imageUrl) throw new Error('빈 이미지 응답 (gpt-image-2 restyle edit)');
-  return { imageUrl, engineUsed: referenceImage ? 'gpt-image-2 (restyle + reference)' : 'gpt-image-2 (restyle)' };
+  return { imageUrl, engineUsed: refFiles.length > 0 ? 'gpt-image-2 (restyle + reference)' : 'gpt-image-2 (restyle)' };
 }
 
 export async function POST(req: Request) {
@@ -127,15 +136,21 @@ export async function POST(req: Request) {
 
     // 배경은 사용자가 명시적으로 지시했을 때만 그 내용을 쓰고, 없으면 모델 피팅과 동일한
     // 고정 흰색 스튜디오 배경으로 강제 통일한다 — AI가 매번 다른 장소를 지어내지 않도록.
-    stylingSuggestion.background = backgroundHint?.trim()
-      ? backgroundHint.trim()
-      : DEFAULT_STUDIO_BACKGROUND;
+    const hasCustomBackground = !!backgroundHint?.trim();
+    stylingSuggestion.background = hasCustomBackground ? backgroundHint.trim() : DEFAULT_STUDIO_BACKGROUND;
+
+    // 배경 지시가 없으면 실제 흰색 스튜디오 사진을 참고 이미지로 같이 넣는다 — 텍스트보다
+    // 실제 사진 한 장이 배경/조명 방향을 훨씬 정확하게 고정시켜준다.
+    let backgroundReferenceImage: { buffer: Buffer; mimeType: string } | null = null;
+    if (!hasCustomBackground && fs.existsSync(DEFAULT_BACKGROUND_IMAGE_PATH)) {
+      backgroundReferenceImage = { buffer: fs.readFileSync(DEFAULT_BACKGROUND_IMAGE_PATH), mimeType: 'image/png' };
+    }
 
     type VariationResult = { imageUrl: string; engineUsed: string; prompt: string; variationLabel: string; generationId: string | null };
 
     async function generateVariation(
       i: number,
-      referenceImage: { buffer: Buffer; mimeType: string } | null,
+      bodyReferenceImage: { buffer: Buffer; mimeType: string } | null,
     ): Promise<VariationResult> {
       const prompt = buildRestylePrompt(
         sourcedCategory,
@@ -143,10 +158,14 @@ export async function POST(req: Request) {
         poseDescription,
         stylingSuggestion,
         userAdditions || '',
+        !!backgroundReferenceImage,
       );
       const variationLabel = `스타일 변형 #${i + 1}`;
       try {
-        const { imageUrl, engineUsed } = await runSingleRestyle(openai, photoBuf, photoMime, prompt, referenceImage);
+        const referenceImages = [bodyReferenceImage, backgroundReferenceImage].filter(
+          (r): r is { buffer: Buffer; mimeType: string } => !!r,
+        );
+        const { imageUrl, engineUsed } = await runSingleRestyle(openai, photoBuf, photoMime, prompt, referenceImages);
 
         // 생성 기록 저장 (실패해도 결과 반환에는 영향 없음 — saveGeneration 내부에서 흡수)
         let generationId: string | null = null;

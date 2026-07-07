@@ -30,6 +30,8 @@ export function FittingResultViewer({
 }: FittingResultViewerProps) {
   const [isZoomed, setIsZoomed] = useState(false);
   const [ratedAs, setRatedAs] = useState<'good' | 'bad' | null>(null);
+  const [isCropMenuOpen, setIsCropMenuOpen] = useState(false);
+  const [isCropping, setIsCropping] = useState<string | null>(null);
 
   useEffect(() => {
     setRatedAs(null);
@@ -40,6 +42,36 @@ export function FittingResultViewer({
     setRatedAs(rating);
     onRate(currentResult.generationId, rating, promote);
   };
+
+  const handleCropSave = async (ratio: string) => {
+    if (!currentResult) return;
+    setIsCropping(ratio);
+    try {
+      const res = await fetch('/api/crop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: currentResult.imageUrl, ratio }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || '크롭 저장에 실패했습니다.');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `fitting_${ratio.replace(':', 'x')}_${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(err.message || '크롭 저장 중 오류가 발생했습니다.');
+    } finally {
+      setIsCropping(null);
+      setIsCropMenuOpen(false);
+    }
+  };
+
+  const CROP_RATIOS = ['1:1', '4:5', '3:4', '9:16'];
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -86,6 +118,28 @@ export function FittingResultViewer({
                   </button>
                 </div>
               )}
+              <div className="relative">
+                <button
+                  onClick={() => setIsCropMenuOpen((v) => !v)}
+                  className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-900 font-bold text-xs flex items-center gap-2 transition border border-gray-200"
+                >
+                  <span>✂️ 비율 저장</span>
+                </button>
+                {isCropMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1.5 z-20 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden min-w-[140px]">
+                    {CROP_RATIOS.map((ratio) => (
+                      <button
+                        key={ratio}
+                        onClick={() => handleCropSave(ratio)}
+                        disabled={!!isCropping}
+                        className="w-full px-4 py-2.5 text-left text-xs font-bold text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition disabled:opacity-50"
+                      >
+                        {isCropping === ratio ? '저장 중...' : `${ratio} 로 저장`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <a
                 href={currentResult.imageUrl}
                 target="_blank"

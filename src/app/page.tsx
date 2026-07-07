@@ -37,7 +37,7 @@ export default function StudioPage() {
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
 
   // Navigation
-  const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'models' | 'settings'>('fitting');
+  const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'models' | 'settings'>('restyle');
   const [activeMode, setActiveMode] = useState<FittingMode>('top');
 
   // Images & Garments

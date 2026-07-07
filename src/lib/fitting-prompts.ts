@@ -446,6 +446,7 @@ export function buildRestylePrompt(
   poseDescription: string,
   stylingSuggestion: StylingSuggestion,
   userAdditions: string = '',
+  hasBackgroundReferenceImage: boolean = false,
 ): string {
   const stylingLines: string[] = [];
   if (stylingSuggestion.bottom) stylingLines.push(`- 하의: ${stylingSuggestion.bottom}`);
@@ -455,6 +456,10 @@ export function buildRestylePrompt(
   const userBlock = userAdditions.trim()
     ? `\n\nAdditional user styling instructions (combine with the auto-generated styling above):\n${userAdditions.trim()}`
     : '';
+
+  const backgroundLine = hasBackgroundReferenceImage
+    ? `- Background: one of the additional input images shows the EXACT target studio backdrop and lighting setup (soft frontal light, gentle top-down falloff, seamless cyclorama floor curve). Reproduce this exact background, light direction, and shadow softness on the subject — do NOT invent a different location or lighting mood. (${stylingSuggestion.background})`
+    : `- Background: ${stylingSuggestion.background}`;
 
   return [
     '=== MODEL BODY RESHAPE (IMPORTANT — DO NOT KEEP THE ORIGINAL BODY AS-IS) ===',
@@ -468,7 +473,7 @@ export function buildRestylePrompt(
     '',
     '=== NEW STYLING TO GENERATE ===',
     stylingLines.length > 0 ? stylingLines.join('\n') : '- Complete the outfit naturally with cohesive, stylish items.',
-    `- Background: ${stylingSuggestion.background}`,
+    backgroundLine,
     userBlock,
     '',
     '=== NEGATIVE CONSTRAINTS (ABSOLUTE) ===',
