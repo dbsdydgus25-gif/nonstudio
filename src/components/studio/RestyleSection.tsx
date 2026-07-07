@@ -82,12 +82,11 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
     setStageMsg('1단계: 사진 분석 중 (옷 분석 · 포즈 분석)...');
     setCurrentResult(null);
 
-    const userAdditions = [
-      poseHint.trim() && `자세 지시: ${poseHint.trim()}`,
-      outfitHint.trim() && `상하의 스타일 지시: ${outfitHint.trim()}`,
-    ]
-      .filter(Boolean)
-      .join('\n');
+    // 자세 지시는 최종 프롬프트 끝에 보강 문구로만 덧붙고, 상하의 스타일 지시는
+    // userPreferenceHint로 코디 자동 제안(generateStylingSuggestion) 단계부터 반영되어야
+    // 실제로 하의/신발 슬롯에 그대로 나온다 — 예전엔 outfitHint가 끝에만 덧붙어서
+    // AI가 이미 자체적으로 짜둔 코디(예: 정장바지+로퍼)와 충돌해 거의 무시됐었음.
+    const userAdditions = poseHint.trim() ? `자세 지시: ${poseHint.trim()}` : '';
 
     try {
       // 배경은 항상 고정 흰색 스튜디오(백엔드에서 실제 참고 사진으로 강제) — 배경 지시 입력은 없앰
@@ -100,6 +99,7 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
           userAdditions,
+          userPreferenceHint: outfitHint.trim() || undefined,
         }),
       });
 

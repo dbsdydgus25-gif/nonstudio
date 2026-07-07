@@ -405,9 +405,9 @@ export async function generateStylingSuggestion(
 You are a professional fashion stylist for a Korean menswear lookbook shoot.
 A model is already wearing the confirmed sourced product: a ${garmentAnalysis.category} described as "${garmentAnalysis.color}, ${garmentAnalysis.material}, ${garmentAnalysis.fitType} fit". This item is masked/protected and must NOT be changed or mentioned as something to generate.
 Current pose in the photo: ${poseDescription}
-${userPreferenceHint ? `User style preference: ${userPreferenceHint}` : ''}
+${userPreferenceHint ? `MANDATORY USER REQUIREMENT (this is NOT a soft preference — you MUST follow it exactly, do not substitute, tone down, or ignore any part of it, even if it seems less "cohesive" to you): ${userPreferenceHint}\nIf this requirement specifies a particular slot (bottom/shoes/accessory), that slot's description in your JSON output MUST directly reflect it in detail.` : ''}
 
-Suggest a cohesive, stylish outfit for ONLY these remaining slots: ${slotsToFill.map((s) => CATEGORY_SLOT_LABELS[s]).join(', ')}, plus a studio/location background that matches the mood.
+Suggest a cohesive, stylish outfit for ONLY these remaining slots: ${slotsToFill.map((s) => CATEGORY_SLOT_LABELS[s]).join(', ')}, plus a studio/location background that matches the mood. Any slot not covered by the mandatory requirement above should be styled freely to match it.
 Return ONLY valid JSON with these exact keys (use an empty string "" for any slot NOT in the list above):
 {
   "bottom": "detailed description of pants/skirt, or empty string",
@@ -424,6 +424,9 @@ Return ONLY valid JSON with these exact keys (use an empty string "" for any slo
     background: parsed.background || 'Clean minimalist white studio background with soft professional lighting.',
   });
 
+  // 사용자가 명시적으로 스타일을 지시했을 때는 창의성보다 지시 순응이 훨씬 중요하므로 온도를 낮춘다.
+  const temperature = userPreferenceHint ? 0.3 : 0.8;
+
   try {
     const ai = new GoogleGenAI({ apiKey: geminiApiKey });
     const response = await retryOn429(() =>
@@ -431,7 +434,7 @@ Return ONLY valid JSON with these exact keys (use an empty string "" for any slo
         model: 'gemini-2.5-flash',
         contents: [{ role: 'user', parts: [{ text: promptText }] }],
         config: {
-          temperature: 0.8,
+          temperature,
           responseMimeType: 'application/json',
         },
       })
@@ -446,7 +449,7 @@ Return ONLY valid JSON with these exact keys (use an empty string "" for any slo
         const chatCompletion = await openai.chat.completions.create({
           model: 'gpt-4o-mini',
           messages: [{ role: 'user', content: promptText }],
-          temperature: 0.8,
+          temperature,
           response_format: { type: 'json_object' },
         });
         const parsed = JSON.parse(chatCompletion.choices[0].message.content?.trim() || '{}');
