@@ -21,11 +21,21 @@ const CATEGORY_OPTIONS: { id: SourcedCategory; label: string; desc: string }[] =
   { id: 'accessory', label: '💍 액세서리', desc: '착용 중인 가방/시계/주얼리 등' },
 ];
 
+// 슬롯별로 입력 필드를 분리해서 보낸다 — 예전엔 "상하의 스타일" 한 칸에 여러 슬롯 지시(하의+신발 등)를
+// 섞어서 적었더니 AI가 어느 문장이 어느 슬롯 얘기인지 잘못 해석해서 신발 같은 슬롯을 놓치는 경우가 많았음.
+const STYLE_SLOT_META: Record<SourcedCategory, { icon: string; label: string; placeholder: string }> = {
+  top: { icon: '👕', label: '상의 스타일', placeholder: '예:\n미니멀한 톤의 니트' },
+  bottom: { icon: '👖', label: '하의 스타일', placeholder: '예:\n생지 와이드 데님, 기장감 긴 걸로\n(배바지 아님)' },
+  shoes: { icon: '👟', label: '신발 스타일', placeholder: '예:\n베이지 계열 샌들' },
+  accessory: { icon: '💍', label: '액세서리 스타일', placeholder: '예:\n토트백 하나' },
+};
+
 export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVariation }: RestyleSectionProps) {
   const [photo, setPhoto] = useState<string | null>(null);
   const [category, setCategory] = useState<SourcedCategory>('top');
   const [poseHint, setPoseHint] = useState('');
-  const [outfitHint, setOutfitHint] = useState('');
+  const [styleHints, setStyleHints] = useState<Partial<Record<SourcedCategory, string>>>({});
+  const otherSlots = CATEGORY_OPTIONS.map((c) => c.id).filter((id) => id !== category);
 
   const [isRunning, setIsRunning] = useState(false);
   const [stageMsg, setStageMsg] = useState('');
@@ -99,7 +109,11 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
           userAdditions,
-          userPreferenceHint: outfitHint.trim() || undefined,
+          userPreferenceHints: otherSlots.reduce<Record<string, string>>((acc, slot) => {
+            const v = styleHints[slot]?.trim();
+            if (v) acc[slot] = v;
+            return acc;
+          }, {}),
         }),
       });
 
@@ -207,19 +221,24 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
             />
           </div>
 
-          <div className="bg-white border border-amber-200 rounded-2xl p-4 space-y-2">
-            <div className="text-[10px] font-black text-amber-600">👕👖 상하의 스타일</div>
-            <textarea
-              value={outfitHint}
-              onChange={(e) => setOutfitHint(e.target.value)}
-              placeholder={`예:\n미니멀 캐주얼 톤으로\n토트백 하나 들려줘`}
-              rows={3}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-amber-500 resize-none font-mono leading-relaxed transition"
-            />
-          </div>
+          {otherSlots.map((slot) => {
+            const meta = STYLE_SLOT_META[slot];
+            return (
+              <div key={slot} className="bg-white border border-amber-200 rounded-2xl p-4 space-y-2">
+                <div className="text-[10px] font-black text-amber-600">{meta.icon} {meta.label}</div>
+                <textarea
+                  value={styleHints[slot] || ''}
+                  onChange={(e) => setStyleHints((prev) => ({ ...prev, [slot]: e.target.value }))}
+                  placeholder={meta.placeholder}
+                  rows={3}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-amber-500 resize-none font-mono leading-relaxed transition"
+                />
+              </div>
+            );
+          })}
         </div>
         <p className="text-[10px] text-gray-400">
-          AI가 자동으로 만든 코디 프롬프트에 위 지시가 그대로 합쳐져서 최종 프롬프트가 완성됩니다. (선택한 소싱 카테고리 부위는 이미 색상·질감이 고정되어 있으니 그 부위에 대한 지시는 효과가 제한적일 수 있습니다)
+          슬롯별로 나눠서 입력하면 그 슬롯에 정확히 반영됩니다. 제외하고 싶은 스타일은 괄호로 명시하세요 (예: "와이드 데님 (배바지 아님)"). 선택한 소싱 카테고리 부위는 이미 색상·질감이 고정되어 있어 그 부위에 대한 지시는 효과가 제한적일 수 있습니다.
         </p>
       </section>
 

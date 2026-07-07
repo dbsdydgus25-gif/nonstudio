@@ -385,31 +385,48 @@ const CATEGORY_SLOT_LABELS: Record<SourcedCategory, string> = {
 };
 
 const STYLING_FALLBACK_DEFAULTS: Record<Exclude<keyof StylingSuggestion, 'background'>, string> = {
+  top: 'A simple neutral-tone t-shirt or knit top that complements the outfit.',
   bottom: 'Neutral straight-fit trousers in a complementary tone.',
   shoes: 'Minimal white leather sneakers.',
   accessory: 'A simple canvas tote bag.',
 };
 
-// 보존되지 않는 나머지 슬롯(하의/신발/액세서리/배경)에 대한 코디 스타일링 제안 생성 (텍스트 전용)
+export type StyleHintsBySlot = Partial<Record<'top' | 'bottom' | 'shoes' | 'accessory', string>>;
+
+// 보존되지 않는 나머지 슬롯(상의/하의/신발/액세서리/배경)에 대한 코디 스타일링 제안 생성 (텍스트 전용)
 export async function generateStylingSuggestion(
   protectedCategory: SourcedCategory,
   garmentAnalysis: GarmentAnalysis,
   poseDescription: string,
   geminiApiKey: string,
   openaiApiKey?: string,
-  userPreferenceHint?: string,
+  userPreferenceHints?: StyleHintsBySlot,
 ): Promise<StylingSuggestion> {
   const slotsToFill = (['top', 'bottom', 'shoes', 'accessory'] as SourcedCategory[]).filter((s) => s !== protectedCategory);
+
+  // 슬롯마다 별도 입력 필드로 받은 사용자 지시를 슬롯 이름을 명시해서 각각 "필수 준수" 문구로 만든다.
+  // 예전엔 하의/신발/액세서리 지시를 하나의 자유 텍스트로 합쳐서 보냈더니, AI가 어느 문장이
+  // 어느 슬롯 얘기인지 잘못 해석해서(특히 신발) 지시를 놓치는 경우가 반복됐음 — 슬롯을 코드로
+  // 확정해서 모호함을 아예 없앤다.
+  const mandatoryLines = slotsToFill
+    .map((slot) => {
+      const hint = userPreferenceHints?.[slot as keyof StyleHintsBySlot];
+      if (!hint?.trim()) return null;
+      return `- MANDATORY requirement for ${CATEGORY_SLOT_LABELS[slot]}(${slot}): ${hint.trim()} — the "${slot}" field in your JSON output MUST directly and specifically reflect this, do not substitute, soften, or ignore any part of it.`;
+    })
+    .filter((line): line is string => !!line)
+    .join('\n');
 
   const promptText = `
 You are a professional fashion stylist for a Korean menswear lookbook shoot.
 A model is already wearing the confirmed sourced product: a ${garmentAnalysis.category} described as "${garmentAnalysis.color}, ${garmentAnalysis.material}, ${garmentAnalysis.fitType} fit". This item is masked/protected and must NOT be changed or mentioned as something to generate.
 Current pose in the photo: ${poseDescription}
-${userPreferenceHint ? `MANDATORY USER REQUIREMENT (this is NOT a soft preference — you MUST follow it exactly, do not substitute, tone down, or ignore any part of it, even if it seems less "cohesive" to you): ${userPreferenceHint}\nIf this requirement specifies a particular slot (bottom/shoes/accessory), that slot's description in your JSON output MUST directly reflect it in detail.` : ''}
+${mandatoryLines ? `MANDATORY USER REQUIREMENTS (NOT soft preferences — follow each exactly):\n${mandatoryLines}\nIMPORTANT: if a requirement contains a negation or exclusion (e.g., "not X", "no X", "X 아님", "(X 제외)", "(X 하지마)", "(X X)" meaning "avoid X"), that exclusion is just as mandatory as the positive part — you must actively avoid producing X in your description, not merely fail to mention it.` : ''}
 
-Suggest a cohesive, stylish outfit for ONLY these remaining slots: ${slotsToFill.map((s) => CATEGORY_SLOT_LABELS[s]).join(', ')}, plus a studio/location background that matches the mood. Any slot not covered by the mandatory requirement above should be styled freely to match it.
+Suggest a cohesive, stylish outfit for ONLY these remaining slots: ${slotsToFill.map((s) => CATEGORY_SLOT_LABELS[s]).join(', ')}, plus a studio/location background that matches the mood. Any slot not covered by a mandatory requirement above should be styled freely to match it.
 Return ONLY valid JSON with these exact keys (use an empty string "" for any slot NOT in the list above):
 {
+  "top": "detailed description of top/knitwear, or empty string",
   "bottom": "detailed description of pants/skirt, or empty string",
   "shoes": "detailed description of footwear, or empty string",
   "accessory": "detailed description of bag/watch/jewelry/sunglasses, or empty string",
@@ -418,6 +435,7 @@ Return ONLY valid JSON with these exact keys (use an empty string "" for any slo
   `.trim();
 
   const pickSlots = (parsed: any): StylingSuggestion => ({
+    top: slotsToFill.includes('top') ? (parsed.top || undefined) : undefined,
     bottom: slotsToFill.includes('bottom') ? (parsed.bottom || undefined) : undefined,
     shoes: slotsToFill.includes('shoes') ? (parsed.shoes || undefined) : undefined,
     accessory: slotsToFill.includes('accessory') ? (parsed.accessory || undefined) : undefined,
@@ -425,7 +443,7 @@ Return ONLY valid JSON with these exact keys (use an empty string "" for any slo
   });
 
   // 사용자가 명시적으로 스타일을 지시했을 때는 창의성보다 지시 순응이 훨씬 중요하므로 온도를 낮춘다.
-  const temperature = userPreferenceHint ? 0.3 : 0.8;
+  const temperature = mandatoryLines ? 0.3 : 0.8;
 
   try {
     const ai = new GoogleGenAI({ apiKey: geminiApiKey });

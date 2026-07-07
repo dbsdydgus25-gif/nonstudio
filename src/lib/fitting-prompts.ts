@@ -94,6 +94,7 @@ export type SourcedCategory = 'top' | 'bottom' | 'shoes' | 'accessory';
 
 /** 보존되지 않는 나머지 슬롯에 대해 AI가 자동 제안하는 코디 설명 */
 export interface StylingSuggestion {
+  top?: string;
   bottom?: string;
   shoes?: string;
   accessory?: string;
@@ -124,6 +125,7 @@ function buildGarmentFidelityBlock(category: SourcedCategory, garmentAnalysis: G
 - Reference spec of the sourced item — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.
 - CRITICAL FABRIC RULE: reproduce ONLY the surface texture described above — do NOT invent, add, or embellish any decorative pattern, print, jacquard motif, embossed design, paisley, damask, moire, or graphic texture that is not explicitly listed. If the fabric is a plain solid-color knit/weave, render it perfectly plain and uniform with only natural fabric grain or knit-loop texture — absolutely no added print or pattern of any kind.
 - The fabric surface must look like an actual photograph of a real garment — flat, clean, with only natural soft folds/wrinkles from body movement and gravity. Do NOT render any algorithmic or "AI-texture-filter" look: no fine repeating micro-pattern, no engraved/embossed swirl texture, no synthetic noise grain, no digital fabric-simulation artifacts. A plain knit or weave should look boringly plain, like a studio product photo, not like a rendered material map.
+- HIGHEST PRIORITY RULE: this sourced item is the single most important element of the entire image — more important than pose, background, or aesthetic composition. The actual input photo you were given is the ground-truth visual reference for this item's exact color, print, and texture — copy it as literally as if tracing directly from that photo, not from a generic mental image of "a ${garmentAnalysis.category}". If anything must be sacrificed for the sake of a nicer-looking composition, sacrifice it — never the fidelity of this item.
 `.trim();
 }
 
@@ -145,6 +147,7 @@ export function buildRestylePrompt(
   hasIdentityReferenceImage: boolean = false,
 ): string {
   const stylingLines: string[] = [];
+  if (stylingSuggestion.top) stylingLines.push(`- 상의: ${stylingSuggestion.top}`);
   if (stylingSuggestion.bottom) stylingLines.push(`- 하의: ${stylingSuggestion.bottom}`);
   if (stylingSuggestion.shoes) stylingLines.push(`- 신발: ${stylingSuggestion.shoes}`);
   if (stylingSuggestion.accessory) stylingLines.push(`- 액세서리: ${stylingSuggestion.accessory}`);

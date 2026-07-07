@@ -18,7 +18,7 @@
 import { NextResponse } from 'next/server';
 import { after } from 'next/server';
 import OpenAI, { toFile } from 'openai';
-import { analyzeGarment, analyzePose, generateStylingSuggestion } from '@/lib/garment-agent';
+import { analyzeGarment, analyzePose, generateStylingSuggestion, type StyleHintsBySlot } from '@/lib/garment-agent';
 import { buildRestylePrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCategory } from '@/lib/fitting-prompts';
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
@@ -94,13 +94,21 @@ export async function POST(req: Request) {
       openaiApiKey,
       userAdditions,
       backgroundHint,
-      userPreferenceHint,
+      userPreferenceHints,
+    }: {
+      photoBase64: string;
+      category: string;
+      geminiApiKey: string;
+      openaiApiKey: string;
+      userAdditions?: string;
+      backgroundHint?: string;
+      userPreferenceHints?: StyleHintsBySlot;
     } = await req.json();
 
     if (!photoBase64) {
       return NextResponse.json({ success: false, error: '실사 사진을 등록해주세요.' }, { status: 400 });
     }
-    const validCategories: SourcedCategory[] = ['top', 'bottom', 'shoes', 'accessory'];
+    const validCategories: string[] = ['top', 'bottom', 'shoes', 'accessory'];
     if (!validCategories.includes(category)) {
       return NextResponse.json({ success: false, error: '소싱 제품 카테고리를 선택해주세요.' }, { status: 400 });
     }
@@ -134,13 +142,13 @@ export async function POST(req: Request) {
           poseDescription,
           geminiApiKey,
           openaiApiKey,
-          userPreferenceHint,
+          userPreferenceHints,
         );
 
         // 배경은 사용자가 명시적으로 지시했을 때만 그 내용을 쓰고, 없으면 AI 바리에이션과 동일한
         // 고정 흰색 스튜디오 배경으로 강제 통일한다 — AI가 매번 다른 장소를 지어내지 않도록.
         const hasCustomBackground = !!backgroundHint?.trim();
-        stylingSuggestion.background = hasCustomBackground ? backgroundHint.trim() : DEFAULT_STUDIO_BACKGROUND;
+        stylingSuggestion.background = hasCustomBackground ? backgroundHint!.trim() : DEFAULT_STUDIO_BACKGROUND;
 
         // 배경 지시가 없으면 실제 흰색 스튜디오 사진을 참고 이미지로 같이 넣는다 — 텍스트보다
         // 실제 사진 한 장이 배경/조명 방향을 훨씬 정확하게 고정시켜준다.
