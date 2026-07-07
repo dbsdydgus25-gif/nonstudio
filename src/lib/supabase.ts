@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-// 마이그레이션(supabase/migrations/0001_generation_consistency.sql) 스키마와 대응하는 최소 타입 정의.
+// 마이그레이션(supabase/migrations/0001_generation_consistency.sql, 0002_async_generation_status.sql)
+// 스키마와 대응하는 최소 타입 정의.
 // 자동 생성 타입(generate_typescript_types)을 아직 못 붙여서(새 계정 프로젝트라 MCP 접근 불가) 수기로 유지.
 export interface Database {
   public: {
@@ -14,6 +15,8 @@ export interface Database {
           pose_label: string | null;
           reference_image_ids: string[];
           output_storage_path: string;
+          status: 'pending' | 'completed' | 'failed';
+          error_message: string | null;
           rating: 'good' | 'bad' | null;
           rating_note: string | null;
           created_at: string;
@@ -26,6 +29,8 @@ export interface Database {
           pose_label?: string | null;
           reference_image_ids?: string[];
           output_storage_path: string;
+          status?: 'pending' | 'completed' | 'failed';
+          error_message?: string | null;
           rating?: 'good' | 'bad' | null;
           rating_note?: string | null;
           created_at?: string;
@@ -38,6 +43,8 @@ export interface Database {
           pose_label?: string | null;
           reference_image_ids?: string[];
           output_storage_path?: string;
+          status?: 'pending' | 'completed' | 'failed';
+          error_message?: string | null;
           rating?: 'good' | 'bad' | null;
           rating_note?: string | null;
           created_at?: string;

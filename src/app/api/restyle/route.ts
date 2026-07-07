@@ -7,18 +7,26 @@
  * 입력으로 이어진다 (구 이름: AI 리스타일링).
  * (실사 원본을 픽셀 단위로 고정하지 않음 — 원본 체형을 그대로 두면 자유도가 떨어지고
  * 실제 몸매가 그대로 드러나 상품성이 떨어지는 문제가 있어 마스크 방식에서 전환함)
- * ① 사진 분석(의류 분석 + 포즈 분석) → ② 프롬프트 작성 → ③ OpenAI 이미지 생성(전용)
+ *
+ * (2026-07-08) 비동기 아키텍처로 전환 — gpt-image-2 호출이 90~100초 걸리는데 클라이언트가
+ * 그 응답을 한 요청으로 계속 기다리면 네트워크/프록시 문제로 죽어서 원인 불명의 JSON 파싱
+ * 에러만 남는 경우가 있었다. 이제 요청을 받자마자 "처리 중" 행을 만들어 id를 즉시 반환하고,
+ * 실제 분석+생성은 `after()`로 응답 이후 백그라운드에서 진행한다. 프론트는 이 id로
+ * /api/generations/status를 폴링해서 완료 여부를 확인한다.
  */
 
 import { NextResponse } from 'next/server';
+import { after } from 'next/server';
 import OpenAI, { toFile } from 'openai';
 import { analyzeGarment, analyzePose, generateStylingSuggestion } from '@/lib/garment-agent';
 import { buildRestylePrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCategory } from '@/lib/fitting-prompts';
-import { saveGeneration } from '@/lib/generation-store';
+import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+// Vercel Hobby+Fluid Compute는 함수당 최대 300초까지 허용한다 — 분석(Gemini 2회) + 코디 제안
+// + gpt-image-2 생성(90~100초) + 업로드를 전부 합치면 120초를 넘길 수 있어 여유있게 잡는다.
+export const maxDuration = 280;
 
 function parseBase64Image(dataUrl: string): { buffer: Buffer; mimeType: string } {
   if (dataUrl.startsWith('data:')) {
@@ -53,8 +61,7 @@ async function runSingleRestyle(
 ): Promise<{ imageUrl: string; engineUsed: string }> {
   const photoFile = await toOpenAIFile(photoBuf, photoMime, `photo.${photoMime.split('/')[1] || 'jpg'}`);
 
-  // 승격된 체형 기준 이미지 / 고정 배경 기준 이미지가 있으면 추가 입력 이미지로 같이 넣어 일관성을 강화한다
-  // (텍스트 설명만으로 몸/배경을 재형성하는 것보다 실제 참고 사진이 훨씬 강하게 먹힘 — 모델 피팅 파이프라인과 동일한 방식)
+  // 고정 배경 기준 이미지가 있으면 추가 입력 이미지로 같이 넣어 일관성을 강화한다
   const refFiles = await Promise.all(
     referenceImages.map((ref, i) =>
       toOpenAIFile(ref.buffer, ref.mimeType, `reference-${i}.${ref.mimeType.split('/')[1] || 'jpg'}`),
@@ -103,78 +110,68 @@ export async function POST(req: Request) {
 
     const sourcedCategory = category as SourcedCategory;
 
-    // ① 사진 분석 (의류 분석 · 포즈 분석, 병렬)
-    const [garmentAnalysis, poseDescription] = await Promise.all([
-      analyzeGarment([photoBase64], geminiApiKey, undefined, undefined, sourcedCategory, openaiApiKey),
-      analyzePose(photoBase64, geminiApiKey, openaiApiKey),
-    ]);
-
-    const { buffer: photoBuf, mimeType: photoMime } = parseBase64Image(photoBase64);
-
-    const openai = new OpenAI({ apiKey: openaiApiKey });
-
-    // (2026-07-07) 승격된 "기준 참고 이미지"를 매번 자동으로 같이 넣던 기능을 제거함 —
-    // 실제 사진 한 장이 텍스트 지시(신발/소품/피부톤 등)보다 훨씬 강하게 결과를 끌어당겨서,
-    // 사용자가 이번 생성에 지정한 신발/코디 지시를 계속 무시하게 만드는 원인이었음. 체형/피부톤은
-    // PERSONAL_BODY_SPEC 텍스트만으로도 충분히 고정되므로, 참고 이미지 없이 진행한다.
-
-    const stylingSuggestion = await generateStylingSuggestion(
-      sourcedCategory,
-      garmentAnalysis,
-      poseDescription,
-      geminiApiKey,
-      openaiApiKey,
-      userPreferenceHint,
-    );
-
-    // 배경은 사용자가 명시적으로 지시했을 때만 그 내용을 쓰고, 없으면 AI 바리에이션과 동일한
-    // 고정 흰색 스튜디오 배경으로 강제 통일한다 — AI가 매번 다른 장소를 지어내지 않도록.
-    const hasCustomBackground = !!backgroundHint?.trim();
-    stylingSuggestion.background = hasCustomBackground ? backgroundHint.trim() : DEFAULT_STUDIO_BACKGROUND;
-
-    // 배경 지시가 없으면 실제 흰색 스튜디오 사진을 참고 이미지로 같이 넣는다 — 텍스트보다
-    // 실제 사진 한 장이 배경/조명 방향을 훨씬 정확하게 고정시켜준다.
-    const backgroundReferenceImage = hasCustomBackground ? null : getDefaultBackgroundReferenceImage();
-
-    const prompt = buildRestylePrompt(
-      sourcedCategory,
-      garmentAnalysis,
-      poseDescription,
-      stylingSuggestion,
-      userAdditions || '',
-      !!backgroundReferenceImage,
-    );
-
-    const referenceImages = [backgroundReferenceImage].filter(
-      (r): r is { buffer: Buffer; mimeType: string } => !!r,
-    );
-
-    // AI 피팅은 항상 전신 샷 1장만 생성한다 — 이 1장이 "확정된 룩"이 되고, AI 바리에이션(포즈 다양화)의
-    // 입력으로 이어진다. 예전엔 여러 변형을 한 번에 뽑았지만, 그러면 배치 안에서도 서로 다르게 나오는
-    // 문제가 있었고, 애초에 "여러 컨셉 중 고르기"가 아니라 "코디 1개를 확정하기"가 목적이라 1장이 맞다.
-    const { imageUrl, engineUsed } = await runSingleRestyle(openai, photoBuf, photoMime, prompt, referenceImages);
-
-    let generationId: string | null = null;
-    try {
-      const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
-      generationId = await saveGeneration({
-        pipeline: 'restyle',
-        modeOrCategory: sourcedCategory,
-        prompt,
-        poseLabel: 'AI 피팅 결과',
-        outputBuffer: outBuf,
-        outputMimeType: outMime,
-      });
-    } catch (logErr) {
-      console.warn('[api/restyle] 생성 기록 저장 실패 (결과 반환은 정상 진행):', logErr);
-    }
-
-    return NextResponse.json({
-      success: true,
-      images: [{ imageUrl, engineUsed, prompt, variationLabel: 'AI 피팅 결과', generationId }],
-      garmentAnalysis,
-      totalGenerated: 1,
+    // "처리 중" 행을 즉시 만들어 id를 반환 — 실제 분석/생성은 아래 after()에서 진행된다.
+    const generationId = await createPendingGeneration({
+      pipeline: 'restyle',
+      modeOrCategory: sourcedCategory,
+      poseLabel: 'AI 피팅 결과',
+      prompt: '',
     });
+
+    after(async () => {
+      try {
+        const [garmentAnalysis, poseDescription] = await Promise.all([
+          analyzeGarment([photoBase64], geminiApiKey, undefined, undefined, sourcedCategory, openaiApiKey),
+          analyzePose(photoBase64, geminiApiKey, openaiApiKey),
+        ]);
+
+        const { buffer: photoBuf, mimeType: photoMime } = parseBase64Image(photoBase64);
+        const openai = new OpenAI({ apiKey: openaiApiKey });
+
+        const stylingSuggestion = await generateStylingSuggestion(
+          sourcedCategory,
+          garmentAnalysis,
+          poseDescription,
+          geminiApiKey,
+          openaiApiKey,
+          userPreferenceHint,
+        );
+
+        // 배경은 사용자가 명시적으로 지시했을 때만 그 내용을 쓰고, 없으면 AI 바리에이션과 동일한
+        // 고정 흰색 스튜디오 배경으로 강제 통일한다 — AI가 매번 다른 장소를 지어내지 않도록.
+        const hasCustomBackground = !!backgroundHint?.trim();
+        stylingSuggestion.background = hasCustomBackground ? backgroundHint.trim() : DEFAULT_STUDIO_BACKGROUND;
+
+        // 배경 지시가 없으면 실제 흰색 스튜디오 사진을 참고 이미지로 같이 넣는다 — 텍스트보다
+        // 실제 사진 한 장이 배경/조명 방향을 훨씬 정확하게 고정시켜준다.
+        const backgroundReferenceImage = hasCustomBackground ? null : getDefaultBackgroundReferenceImage();
+
+        const prompt = buildRestylePrompt(
+          sourcedCategory,
+          garmentAnalysis,
+          poseDescription,
+          stylingSuggestion,
+          userAdditions || '',
+          !!backgroundReferenceImage,
+        );
+
+        const referenceImages = [backgroundReferenceImage].filter(
+          (r): r is { buffer: Buffer; mimeType: string } => !!r,
+        );
+
+        // AI 피팅은 항상 전신 샷 1장만 생성한다 — 이 1장이 "확정된 룩"이 되고, AI 바리에이션(포즈 다양화)의
+        // 입력으로 이어진다.
+        const { imageUrl } = await runSingleRestyle(openai, photoBuf, photoMime, prompt, referenceImages);
+        const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
+
+        await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt });
+      } catch (err: any) {
+        console.error('[api/restyle][after] 처리 실패:', err);
+        await markGenerationFailed(generationId, err?.message || 'AI 피팅 처리 중 오류가 발생했습니다.');
+      }
+    });
+
+    return NextResponse.json({ success: true, generationId });
   } catch (err: any) {
     console.error('[api/restyle] 처리 실패:', err);
     return NextResponse.json(

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { ImageUploader } from './ImageUploader';
 import { FittingResultViewer, type HistoryItem } from './FittingResultViewer';
 import type { SourcedCategory } from '@/lib/fitting-prompts';
+import { pollGenerationStatuses } from '@/lib/poll-generations';
 
 interface RestyleSectionProps {
   geminiKey: string;
@@ -87,6 +88,8 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
 
     try {
       // 배경은 항상 고정 흰색 스튜디오(백엔드에서 실제 참고 사진으로 강제) — 배경 지시 입력은 없앰
+      // 비동기 아키텍처: 이 요청은 "처리 중" 행의 id만 즉시 반환한다 — 실제 분석/생성은
+      // 서버 응답 이후 백그라운드(after())에서 진행되고, 아래에서 상태를 폴링한다.
       const res = await fetch('/api/restyle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -100,34 +103,33 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
         }),
       });
 
+      let startData: any;
+      try {
+        startData = await res.json();
+      } catch {
+        throw new Error('서버 응답을 읽을 수 없습니다. 잠시 후 다시 시도해주세요.');
+      }
+      if (!res.ok || !startData.success) {
+        throw new Error(startData.error || 'AI 피팅 시작에 실패했습니다.');
+      }
+
       setStageMsg('2단계: 몸 리셰이프 · 전신 코디 · 배경 OpenAI 렌더링 중... (최대 90초 소요)');
 
-      let data: any;
-      try {
-        data = await res.json();
-      } catch {
-        // 서버가 JSON이 아닌 응답(예: Vercel 함수 타임아웃 에러 페이지)을 보냈을 때 —
-        // gpt-image-2 호출이 90~100초 걸리는데 Vercel Hobby 플랜은 함수 실행을 훨씬 짧게 끊어버려서
-        // 타임아웃으로 요청 자체가 죽는 경우가 있음. 사용자에게는 원인을 알 수 있게 안내한다.
-        throw new Error('서버 응답 시간이 초과됐을 가능성이 높습니다 (Vercel 함수 실행 제한). 다시 시도해보시고, 계속되면 배포 플랜(Vercel Pro) 업그레이드가 필요할 수 있습니다.');
-      }
-      if (!res.ok || !data.success) {
-        const detail = Array.isArray(data.errors) && data.errors.length > 0 ? `\n\n상세: ${data.errors.join(' / ')}` : '';
-        throw new Error((data.error || 'AI 피팅 처리에 실패했습니다.') + detail);
-      }
+      const [finalItem] = await pollGenerationStatuses([startData.generationId], () => {});
 
-      const img = data.images?.[0];
-      if (img) {
+      if (finalItem.status === 'failed') {
+        throw new Error(finalItem.errorMessage || 'AI 피팅 처리에 실패했습니다.');
+      }
+      if (finalItem.imageUrl) {
         setCurrentResult({
-          imageUrl: img.imageUrl,
-          prompt: img.prompt || '',
-          revisedPrompt: img.engineUsed || '',
-          generationId: img.generationId ?? null,
+          imageUrl: finalItem.imageUrl,
+          prompt: finalItem.prompt || '',
+          generationId: finalItem.id,
         });
 
         const timestamp = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
         setHistory((prev) => [
-          { id: `${Date.now()}`, imageUrl: img.imageUrl, prompt: img.prompt || '', revisedPrompt: img.engineUsed, timestamp },
+          { id: finalItem.id, imageUrl: finalItem.imageUrl!, prompt: finalItem.prompt || '', timestamp },
           ...prev,
         ]);
       }

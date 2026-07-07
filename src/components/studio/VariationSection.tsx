@@ -3,6 +3,14 @@
 import React, { useState, useEffect } from 'react';
 import { ImageUploader } from './ImageUploader';
 import { FittingResultViewer, type HistoryItem } from './FittingResultViewer';
+import { pollGenerationStatuses } from '@/lib/poll-generations';
+
+interface BatchItem {
+  generationId: string;
+  poseLabel: string;
+  status: 'pending' | 'completed' | 'failed';
+  imageUrl?: string;
+}
 
 interface VariationSectionProps {
   openaiKey: string;
@@ -19,7 +27,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
   const [isRunning, setIsRunning] = useState(false);
   const [stageMsg, setStageMsg] = useState('');
 
-  const [batchImages, setBatchImages] = useState<Array<{ imageUrl: string; variationLabel: string; generationId?: string | null }>>([]);
+  const [batchImages, setBatchImages] = useState<BatchItem[]>([]);
   const [currentResult, setCurrentResult] = useState<{ imageUrl: string; prompt: string; revisedPrompt?: string; generationId?: string | null } | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
@@ -78,11 +86,13 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
     }
 
     setIsRunning(true);
-    setStageMsg(`${variationCount}장의 포즈로 렌더링 중... (최대 90초 소요)`);
+    setStageMsg(`${variationCount}장의 포즈 준비 중...`);
     setBatchImages([]);
     setCurrentResult(null);
 
     try {
+      // 비동기 아키텍처: 이 요청은 포즈별 "처리 중" 행의 id 목록만 즉시 반환한다 — 실제 생성은
+      // 서버 응답 이후 백그라운드(after())에서 병렬 진행되고, 아래에서 상태를 폴링한다.
       const res = await fetch('/api/variation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -93,42 +103,52 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
         }),
       });
 
-      let data: any;
+      let startData: any;
       try {
-        data = await res.json();
+        startData = await res.json();
       } catch {
-        // gpt-image-2 호출이 90~100초 걸리는데 Vercel Hobby 플랜의 함수 실행 제한 때문에
-        // 타임아웃으로 요청이 죽어서 JSON이 아닌 에러 페이지가 오는 경우가 있음.
-        throw new Error('서버 응답 시간이 초과됐을 가능성이 높습니다 (Vercel 함수 실행 제한). 다시 시도해보시고, 계속되면 배포 플랜(Vercel Pro) 업그레이드가 필요할 수 있습니다.');
+        throw new Error('서버 응답을 읽을 수 없습니다. 잠시 후 다시 시도해주세요.');
       }
-      if (!res.ok || !data.success) {
-        const detail = Array.isArray(data.errors) && data.errors.length > 0 ? `\n\n상세: ${data.errors.join(' / ')}` : '';
-        throw new Error((data.error || 'AI 바리에이션 처리에 실패했습니다.') + detail);
+      if (!res.ok || !startData.success) {
+        throw new Error(startData.error || 'AI 바리에이션 시작에 실패했습니다.');
       }
 
-      const imgs: Array<{ imageUrl: string; variationLabel: string; generationId?: string | null }> = (data.images || []).map((img: any) => ({
-        imageUrl: img.imageUrl,
-        variationLabel: img.variationLabel || '',
-        generationId: img.generationId ?? null,
-      }));
-      setBatchImages(imgs);
+      const jobs: Array<{ generationId: string; poseLabel: string; prompt: string }> = startData.jobs || [];
+      setBatchImages(jobs.map((j) => ({ generationId: j.generationId, poseLabel: j.poseLabel, status: 'pending' as const })));
+      setStageMsg(`${jobs.length}장의 포즈로 렌더링 중... (최대 90초 소요)`);
 
-      if (imgs.length > 0) {
-        setCurrentResult({
-          imageUrl: imgs[0].imageUrl,
-          prompt: data.images?.[0]?.prompt || '',
-          revisedPrompt: data.images?.[0]?.engineUsed || '',
-          generationId: imgs[0].generationId,
-        });
+      const finalItems = await pollGenerationStatuses(
+        jobs.map((j) => j.generationId),
+        (items) => {
+          setBatchImages((prev) =>
+            prev.map((b) => {
+              const match = items.find((i) => i.id === b.generationId);
+              if (!match) return b;
+              return { ...b, status: match.status, imageUrl: match.imageUrl ?? undefined };
+            }),
+          );
+          // 가장 먼저 완료된 포즈를 바로 메인 뷰어에 띄운다
+          const firstCompleted = items.find((i) => i.status === 'completed' && i.imageUrl);
+          if (firstCompleted) {
+            setCurrentResult((prev) =>
+              prev ?? { imageUrl: firstCompleted.imageUrl!, prompt: firstCompleted.prompt, generationId: firstCompleted.id },
+            );
+          }
+        },
+      );
+
+      const succeeded = finalItems.filter((i) => i.status === 'completed' && i.imageUrl);
+      if (succeeded.length === 0) {
+        throw new Error('모든 포즈 생성에 실패했습니다.');
       }
 
       const timestamp = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
       setHistory((prev) => [
-        ...imgs.map((img, i) => ({
-          id: `${Date.now()}_${i}`,
-          imageUrl: img.imageUrl,
-          prompt: data.images?.[i]?.prompt || '',
-          revisedPrompt: img.variationLabel,
+        ...succeeded.map((item) => ({
+          id: item.id,
+          imageUrl: item.imageUrl!,
+          prompt: item.prompt,
+          revisedPrompt: item.poseLabel ?? undefined,
           timestamp,
         })),
         ...prev,
@@ -218,7 +238,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
             currentResult={currentResult}
             history={history}
             onSelectHistory={(item) => setCurrentResult({ imageUrl: item.imageUrl, prompt: item.prompt, revisedPrompt: item.revisedPrompt })}
-            isGenerating={isRunning && batchImages.length === 0}
+            isGenerating={isRunning && !currentResult}
             loadingStage={stageMsg}
             onRate={handleRate}
           />
@@ -229,12 +249,14 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
                 <h4 className="text-xs font-black text-gray-900">이번 배치 ({batchImages.length}장)</h4>
                 <button
                   onClick={() => {
-                    batchImages.forEach((img, i) => {
-                      const a = document.createElement('a');
-                      a.href = img.imageUrl;
-                      a.download = `variation_${i + 1}_${Date.now()}.png`;
-                      a.click();
-                    });
+                    batchImages
+                      .filter((img) => img.status === 'completed' && img.imageUrl)
+                      .forEach((img, i) => {
+                        const a = document.createElement('a');
+                        a.href = img.imageUrl!;
+                        a.download = `variation_${i + 1}_${Date.now()}.png`;
+                        a.click();
+                      });
                   }}
                   className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 border border-gray-200 text-xs text-gray-600 font-bold transition flex items-center gap-1.5"
                 >
@@ -242,16 +264,34 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
                 </button>
               </div>
               <div className="grid grid-cols-4 gap-4">
-                {batchImages.map((img, i) => (
+                {batchImages.map((img) => (
                   <div
-                    key={i}
-                    className="group relative rounded-2xl overflow-hidden border border-gray-200 hover:border-amber-400 transition cursor-pointer shadow-sm"
-                    onClick={() => setCurrentResult({ imageUrl: img.imageUrl, prompt: '', revisedPrompt: img.variationLabel, generationId: img.generationId })}
+                    key={img.generationId}
+                    className={`group relative rounded-2xl overflow-hidden border border-gray-200 shadow-sm ${
+                      img.status === 'completed' ? 'hover:border-amber-400 transition cursor-pointer' : ''
+                    }`}
+                    onClick={() => {
+                      if (img.status === 'completed' && img.imageUrl) {
+                        setCurrentResult({ imageUrl: img.imageUrl, prompt: '', revisedPrompt: img.poseLabel, generationId: img.generationId });
+                      }
+                    }}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={img.imageUrl} alt={img.variationLabel} className="w-full aspect-[2/3] object-cover" />
+                    {img.status === 'completed' && img.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={img.imageUrl} alt={img.poseLabel} className="w-full aspect-[2/3] object-cover" />
+                    ) : (
+                      <div className="w-full aspect-[2/3] bg-gray-50 flex items-center justify-center">
+                        {img.status === 'failed' ? (
+                          <span className="text-2xl">⚠️</span>
+                        ) : (
+                          <span className="w-6 h-6 border-2 border-gray-300 border-t-amber-500 rounded-full animate-spin" />
+                        )}
+                      </div>
+                    )}
                     <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-3">
-                      <div className="text-[10px] font-bold text-white">{img.variationLabel}</div>
+                      <div className="text-[10px] font-bold text-white">
+                        {img.status === 'failed' ? `${img.poseLabel} (실패)` : img.poseLabel}
+                      </div>
                     </div>
                   </div>
                 ))}

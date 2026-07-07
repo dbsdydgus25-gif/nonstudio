@@ -5,16 +5,23 @@
  * 룩북 촬영처럼 여러 장을 만든다. 새로운 옷을 입히거나 몸을 재형성하지 않는다 —
  * 이미 확정된 사진 자체가 가장 강한 참고 기준이라, 매번 몸을 새로 만드는 AI 피팅/구 리스타일링보다
  * 훨씬 일관성 있게 나올 것으로 기대됨.
+ *
+ * (2026-07-08) 비동기 아키텍처로 전환 — 포즈마다 "처리 중" 행을 먼저 만들어 id 배열을 즉시
+ * 반환하고, 실제 gpt-image-2 생성은 `after()`로 응답 이후 백그라운드에서 병렬 진행한다.
+ * 프론트는 /api/generations/status?ids=... 폴링으로 각 포즈의 완료 여부를 확인한다.
  */
 
 import { NextResponse } from 'next/server';
+import { after } from 'next/server';
 import OpenAI, { toFile } from 'openai';
 import { FULLBODY_POSES, PERSONAL_BODY_SPEC } from '@/lib/fitting-prompts';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
-import { saveGeneration } from '@/lib/generation-store';
+import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+// Vercel Hobby+Fluid Compute는 함수당 최대 300초까지 허용한다 — 포즈 4개를 병렬로 생성해도
+// 개별 gpt-image-2 호출이 90~100초라 여유있게 잡는다.
+export const maxDuration = 280;
 
 function parseBase64Image(dataUrl: string): { buffer: Buffer; mimeType: string } {
   if (dataUrl.startsWith('data:')) {
@@ -122,57 +129,44 @@ export async function POST(req: Request) {
     }
 
     const count = Math.min(4, Math.max(1, Number(variationCount) || 4));
-    const { buffer: sourceBuf, mimeType: sourceMime } = parseBase64Image(sourceImageBase64);
-    const openai = new OpenAI({ apiKey: oKey });
-
-    // 배경은 예외 없이 고정 흰색 스튜디오 참고 사진을 사용한다 (AI 피팅과 동일 기준)
-    const backgroundReferenceImage = getDefaultBackgroundReferenceImage();
-
     const poses = pickRandomPoses(count);
 
-    const settled = await Promise.allSettled(
-      poses.map(async (pose) => {
-        const { imageUrl, engineUsed } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage);
-
-        let generationId: string | null = null;
-        try {
-          const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
-          generationId = await saveGeneration({
-            pipeline: 'restyle',
-            modeOrCategory: 'variation',
-            prompt: pose.poseInstruction,
-            poseLabel: pose.label,
-            outputBuffer: outBuf,
-            outputMimeType: outMime,
-          });
-        } catch (logErr) {
-          console.warn('[api/variation] 생성 기록 저장 실패 (결과 반환은 정상 진행):', logErr);
-        }
-
-        return { imageUrl, engineUsed, prompt: pose.poseInstruction, variationLabel: pose.label, generationId };
-      }),
+    // 포즈마다 "처리 중" 행을 먼저 만들어 id를 즉시 반환한다 — 실제 생성은 아래 after()에서 진행.
+    const jobs = await Promise.all(
+      poses.map(async (pose) => ({
+        generationId: await createPendingGeneration({
+          pipeline: 'restyle',
+          modeOrCategory: 'variation',
+          poseLabel: pose.label,
+          prompt: pose.poseInstruction,
+        }),
+        pose,
+      })),
     );
 
-    const images = settled
-      .filter((r): r is PromiseFulfilledResult<{ imageUrl: string; engineUsed: string; prompt: string; variationLabel: string; generationId: string | null }> => r.status === 'fulfilled')
-      .map((r) => r.value);
-    const errors = settled
-      .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-      .map((r) => {
-        const reason = r.reason;
-        const status = reason?.status ? ` (status ${reason.status})` : '';
-        return `${reason?.message || String(reason)}${status}`;
-      });
+    after(async () => {
+      const { buffer: sourceBuf, mimeType: sourceMime } = parseBase64Image(sourceImageBase64);
+      const openai = new OpenAI({ apiKey: oKey });
+      // 배경은 예외 없이 고정 흰색 스튜디오 참고 사진을 사용한다 (AI 피팅과 동일 기준)
+      const backgroundReferenceImage = getDefaultBackgroundReferenceImage();
 
-    if (images.length === 0) {
-      return NextResponse.json({ success: false, error: '모든 포즈 생성에 실패했습니다.', errors }, { status: 500 });
-    }
+      await Promise.allSettled(
+        jobs.map(async ({ generationId, pose }) => {
+          try {
+            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage);
+            const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
+            await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt: pose.poseInstruction });
+          } catch (err: any) {
+            console.error('[api/variation][after] 포즈 생성 실패:', pose.label, err);
+            await markGenerationFailed(generationId, err?.message || '포즈 생성 중 오류가 발생했습니다.');
+          }
+        }),
+      );
+    });
 
     return NextResponse.json({
       success: true,
-      images,
-      totalGenerated: images.length,
-      errors: errors.length > 0 ? errors : undefined,
+      jobs: jobs.map(({ generationId, pose }) => ({ generationId, poseLabel: pose.label, prompt: pose.poseInstruction })),
     });
   } catch (err: any) {
     console.error('[api/variation] 처리 실패:', err);
