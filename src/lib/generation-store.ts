@@ -97,6 +97,53 @@ export async function promoteToReference(generationId: string, pipeline: Pipelin
   if (insertError) throw insertError;
 }
 
+export interface GenerationHistoryItem {
+  id: string;
+  imageUrl: string;
+  prompt: string;
+  poseLabel: string | null;
+  createdAt: string;
+}
+
+/**
+ * 최근 생성 기록 조회 (히스토리 화면용) — 페이지를 나갔다 들어와도 이전 결과를 볼 수 있도록
+ * React state 대신 Supabase에서 직접 불러온다. 이미지는 비공개 버킷이라 서명된 URL로 반환.
+ */
+export async function listRecentGenerations(source: 'fitting' | 'variation', limit = 24): Promise<GenerationHistoryItem[]> {
+  try {
+    const supabase = getSupabaseAdmin();
+    let query = supabase
+      .from('generations')
+      .select('id, output_storage_path, prompt, pose_label, mode_or_category, created_at')
+      .eq('pipeline', 'restyle')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    query = source === 'variation' ? query.eq('mode_or_category', 'variation') : query.neq('mode_or_category', 'variation');
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const results: GenerationHistoryItem[] = [];
+    for (const row of data || []) {
+      const { data: signed, error: signErr } = await supabase.storage
+        .from(GENERATIONS_BUCKET)
+        .createSignedUrl((row as any).output_storage_path, 3600);
+      if (signErr || !signed) continue;
+      results.push({
+        id: (row as any).id,
+        imageUrl: signed.signedUrl,
+        prompt: (row as any).prompt,
+        poseLabel: (row as any).pose_label,
+        createdAt: (row as any).created_at,
+      });
+    }
+    return results;
+  } catch (err) {
+    console.warn('[generation-store] listRecentGenerations 실패 (히스토리 없이 진행):', err);
+    return [];
+  }
+}
+
 /** 현재 활성화된 기준 참고 이미지 1장을 buffer로 다운로드 (없으면 null). */
 export async function getActiveReferenceImage(
   pipeline: Pipeline,

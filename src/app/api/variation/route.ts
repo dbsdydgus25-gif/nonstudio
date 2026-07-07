@@ -42,9 +42,11 @@ async function resultImageToBuffer(imageUrl: string): Promise<{ buffer: Buffer; 
 
 function buildVariationPrompt(poseInstruction: string, hasBackgroundReferenceImage: boolean): string {
   return [
-    '=== TASK: POSE-ONLY VARIATION (ABSOLUTE) ===',
-    'The input image is a fully confirmed, final commercial fitting photo. Reproduce the EXACT same person — body shape, skin tone, proportions — and the COMPLETE outfit (every garment: color, fabric texture, pattern, fit, footwear) with 100% fidelity. Do NOT change the clothing in any way. Do NOT reshape the body. Do NOT change garment colors, textures, or details.',
-    `ONLY change the body pose to: ${poseInstruction}`,
+    '=== TASK: POSE-ONLY VARIATION — THIS IS A REAL PRODUCT PHOTO, NOT A CREATIVE REINTERPRETATION ===',
+    'The input image shows a real commercial product that will be sold online. The garment fabric, weave, knit pattern, print, and color in the input image are the ACTUAL PRODUCT TEXTURE — they must be pixel-faithful, not an artistic approximation. Treat the garment surface as a fixed texture map, not something to redraw or reimagine.',
+    'Reproduce the EXACT same person (body shape, skin tone, face, proportions) and the EXACT same garments (same fabric weave/knit pattern, same color, same fit, same footwear, same accessories) with 100% fidelity to the input image.',
+    'FORBIDDEN CHANGES: do NOT alter the fabric texture or knit/weave pattern, do NOT smooth out or simplify fabric grain, do NOT change garment color or shade, do NOT add or remove any pattern, do NOT change footwear style, do NOT reshape the body.',
+    `THE ONLY PERMITTED CHANGE is the body pose: ${poseInstruction}`,
     '',
     '=== BACKGROUND ===',
     hasBackgroundReferenceImage
@@ -52,10 +54,10 @@ function buildVariationPrompt(poseInstruction: string, hasBackgroundReferenceIma
       : 'Keep the same clean white studio background and lighting as the input image.',
     '',
     '=== NEGATIVE CONSTRAINTS (ABSOLUTE) ===',
-    'cartoon, illustration, CGI, 3D render, different person, different face, different clothing, different colors, extra limbs, bad hands, distorted anatomy, collage, split screen, multi-panel, grid of photos, side-by-side comparison, watermark, text, logo, low resolution, blurry.',
+    'cartoon, illustration, CGI, 3D render, different person, different face, different clothing, different fabric texture, different weave pattern, invented pattern, different colors, different footwear, extra limbs, bad hands, distorted anatomy, collage, split screen, multi-panel, grid of photos, side-by-side comparison, watermark, text, logo, low resolution, blurry.',
     '',
     '=== OUTPUT QUALITY MANDATE ===',
-    'Single authentic commercial lookbook photograph, full body shot head to toe, photorealistic, natural skin texture and fabric folds, professional studio lighting. No CGI, no collage, single subject only.',
+    'Single authentic commercial lookbook photograph, full body shot head to toe, photorealistic, exact same fabric texture as the reference, professional studio lighting. No CGI, no collage, single subject only.',
   ].join('\n');
 }
 

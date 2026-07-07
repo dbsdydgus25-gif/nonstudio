@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import ReactCrop, { type Crop, type PercentCrop } from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
 
 export interface HistoryItem {
   id: string;
@@ -35,6 +37,10 @@ export function FittingResultViewer({
   const [ratedAs, setRatedAs] = useState<'good' | 'bad' | null>(null);
   const [isCropMenuOpen, setIsCropMenuOpen] = useState(false);
   const [isCropping, setIsCropping] = useState<string | null>(null);
+  const [isFreeCropOpen, setIsFreeCropOpen] = useState(false);
+  const [freeCrop, setFreeCrop] = useState<Crop>({ unit: '%', x: 10, y: 10, width: 80, height: 80 });
+  const [freeCropPercent, setFreeCropPercent] = useState<PercentCrop | null>(null);
+  const imgCropRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
     setRatedAs(null);
@@ -46,14 +52,17 @@ export function FittingResultViewer({
     onRate(currentResult.generationId, rating, promote);
   };
 
-  const handleCropSave = async (ratio: string) => {
-    if (!currentResult) return;
-    setIsCropping(ratio);
+  const downloadCrop = async (
+    body: { imageUrl: string; ratio?: string; region?: { x: number; y: number; width: number; height: number } },
+    filenameTag: string,
+    busyKey: string
+  ) => {
+    setIsCropping(busyKey);
     try {
       const res = await fetch('/api/crop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl: currentResult.imageUrl, ratio }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -63,15 +72,32 @@ export function FittingResultViewer({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `fitting_${ratio.replace(':', 'x')}_${Date.now()}.png`;
+      a.download = `fitting_${filenameTag}_${Date.now()}.png`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err: any) {
       alert(err.message || '크롭 저장 중 오류가 발생했습니다.');
     } finally {
       setIsCropping(null);
-      setIsCropMenuOpen(false);
     }
+  };
+
+  const handleCropSave = async (ratio: string) => {
+    if (!currentResult) return;
+    await downloadCrop({ imageUrl: currentResult.imageUrl, ratio }, ratio.replace(':', 'x'), ratio);
+    setIsCropMenuOpen(false);
+  };
+
+  const handleFreeCropSave = async () => {
+    if (!currentResult || !freeCropPercent) return;
+    const region = {
+      x: freeCropPercent.x / 100,
+      y: freeCropPercent.y / 100,
+      width: freeCropPercent.width / 100,
+      height: freeCropPercent.height / 100,
+    };
+    await downloadCrop({ imageUrl: currentResult.imageUrl, region }, 'custom', 'custom');
+    setIsFreeCropOpen(false);
   };
 
   const CROP_RATIOS = ['1:1', '4:5', '3:4', '9:16'];
@@ -140,6 +166,19 @@ export function FittingResultViewer({
                         {isCropping === ratio ? '저장 중...' : `${ratio} 로 저장`}
                       </button>
                     ))}
+                    <div className="border-t border-gray-100" />
+                    <button
+                      onClick={() => {
+                        setIsCropMenuOpen(false);
+                        setFreeCrop({ unit: '%', x: 10, y: 10, width: 80, height: 80 });
+                        setFreeCropPercent(null);
+                        setIsFreeCropOpen(true);
+                      }}
+                      disabled={!!isCropping}
+                      className="w-full px-4 py-2.5 text-left text-xs font-bold text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition disabled:opacity-50"
+                    >
+                      ✂️ 자유 비율 직접 지정
+                    </button>
                   </div>
                 )}
               </div>
@@ -241,6 +280,62 @@ export function FittingResultViewer({
             alt="Zoomed Result"
             className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl"
           />
+        </div>
+      )}
+
+      {/* 자유 비율 크롭 모달 */}
+      {isFreeCropOpen && currentResult && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setIsFreeCropOpen(false)}
+        >
+          <div
+            className="bg-white rounded-3xl p-6 max-w-3xl w-full max-h-[90vh] overflow-auto space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h4 className="text-base font-black text-gray-900">✂️ 자유 비율로 영역 지정</h4>
+              <button
+                onClick={() => setIsFreeCropOpen(false)}
+                className="text-gray-400 hover:text-gray-700 text-sm font-bold"
+              >
+                ✕ 닫기
+              </button>
+            </div>
+            <p className="text-xs text-gray-400">
+              모서리를 드래그해서 원하는 영역을 지정한 뒤 저장하세요.
+            </p>
+            <div className="flex justify-center bg-gray-50 rounded-2xl p-2">
+              <ReactCrop
+                crop={freeCrop}
+                onChange={(_, percentCrop) => setFreeCrop(percentCrop)}
+                onComplete={(_, percentCrop) => setFreeCropPercent(percentCrop)}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  ref={imgCropRef}
+                  src={currentResult.imageUrl}
+                  alt="크롭할 이미지"
+                  className="max-h-[65vh]"
+                />
+              </ReactCrop>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setIsFreeCropOpen(false)}
+                className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs transition"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleFreeCropSave}
+                disabled={!freeCropPercent || isCropping === 'custom'}
+                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-xs transition disabled:opacity-50"
+              >
+                {isCropping === 'custom' ? '저장 중...' : '이 영역으로 저장'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

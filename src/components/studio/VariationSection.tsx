@@ -34,6 +34,25 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomingImage]);
 
+  // 페이지를 나갔다 들어와도 이전 결과를 볼 수 있도록 Supabase에서 히스토리를 불러온다
+  useEffect(() => {
+    fetch('/api/generations/history?source=variation')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data.success) return;
+        setHistory(
+          data.items.map((item: any) => ({
+            id: item.id,
+            imageUrl: item.imageUrl,
+            prompt: item.prompt,
+            revisedPrompt: item.poseLabel,
+            timestamp: new Date(item.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+          })),
+        );
+      })
+      .catch(() => {});
+  }, []);
+
   const handleRate = async (generationId: string, rating: 'good' | 'bad', promote: boolean) => {
     try {
       const res = await fetch('/api/generations/rate', {
@@ -189,7 +208,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
       </section>
 
       {/* 결과 */}
-      {(batchImages.length > 0 || isRunning) && (
+      {(batchImages.length > 0 || isRunning || history.length > 0) && (
         <section className="space-y-4">
           <FittingResultViewer
             currentResult={currentResult}
@@ -201,20 +220,38 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
           />
 
           {batchImages.length > 1 && (
-            <div className="grid grid-cols-4 gap-4">
-              {batchImages.map((img, i) => (
-                <div
-                  key={i}
-                  className="group relative rounded-2xl overflow-hidden border border-gray-200 hover:border-amber-400 transition cursor-pointer shadow-sm"
-                  onClick={() => setCurrentResult({ imageUrl: img.imageUrl, prompt: '', revisedPrompt: img.variationLabel, generationId: img.generationId })}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-black text-gray-900">이번 배치 ({batchImages.length}장)</h4>
+                <button
+                  onClick={() => {
+                    batchImages.forEach((img, i) => {
+                      const a = document.createElement('a');
+                      a.href = img.imageUrl;
+                      a.download = `variation_${i + 1}_${Date.now()}.png`;
+                      a.click();
+                    });
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 border border-gray-200 text-xs text-gray-600 font-bold transition flex items-center gap-1.5"
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img.imageUrl} alt={img.variationLabel} className="w-full aspect-[2/3] object-cover" />
-                  <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-3">
-                    <div className="text-[10px] font-bold text-white">{img.variationLabel}</div>
+                  ⬇ 전체 다운로드
+                </button>
+              </div>
+              <div className="grid grid-cols-4 gap-4">
+                {batchImages.map((img, i) => (
+                  <div
+                    key={i}
+                    className="group relative rounded-2xl overflow-hidden border border-gray-200 hover:border-amber-400 transition cursor-pointer shadow-sm"
+                    onClick={() => setCurrentResult({ imageUrl: img.imageUrl, prompt: '', revisedPrompt: img.variationLabel, generationId: img.generationId })}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img.imageUrl} alt={img.variationLabel} className="w-full aspect-[2/3] object-cover" />
+                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-3">
+                      <div className="text-[10px] font-bold text-white">{img.variationLabel}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
         </section>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ImageUploader } from './ImageUploader';
 import { FittingResultViewer, type HistoryItem } from './FittingResultViewer';
 import type { SourcedCategory } from '@/lib/fitting-prompts';
@@ -23,7 +23,6 @@ const CATEGORY_OPTIONS: { id: SourcedCategory; label: string; desc: string }[] =
 export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVariation }: RestyleSectionProps) {
   const [photo, setPhoto] = useState<string | null>(null);
   const [category, setCategory] = useState<SourcedCategory>('top');
-  const [backgroundHint, setBackgroundHint] = useState('');
   const [poseHint, setPoseHint] = useState('');
   const [outfitHint, setOutfitHint] = useState('');
 
@@ -32,6 +31,25 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
 
   const [currentResult, setCurrentResult] = useState<{ imageUrl: string; prompt: string; revisedPrompt?: string; generationId?: string | null } | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+
+  // 페이지를 나갔다 들어와도 이전 결과를 볼 수 있도록 Supabase에서 히스토리를 불러온다
+  useEffect(() => {
+    fetch('/api/generations/history?source=fitting')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data.success) return;
+        setHistory(
+          data.items.map((item: any) => ({
+            id: item.id,
+            imageUrl: item.imageUrl,
+            prompt: item.prompt,
+            revisedPrompt: item.poseLabel,
+            timestamp: new Date(item.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+          })),
+        );
+      })
+      .catch(() => {});
+  }, []);
 
   const handleRate = async (generationId: string, rating: 'good' | 'bad', promote: boolean) => {
     try {
@@ -64,7 +82,6 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
     setStageMsg('1단계: 사진 분석 중 (옷 분석 · 포즈 분석)...');
     setCurrentResult(null);
 
-    // 배경은 서버에서 별도 처리(지시 없으면 고정 흰색 스튜디오 유지)하므로 여기서는 빼고 전달한다
     const userAdditions = [
       poseHint.trim() && `자세 지시: ${poseHint.trim()}`,
       outfitHint.trim() && `상하의 스타일 지시: ${outfitHint.trim()}`,
@@ -73,6 +90,7 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
       .join('\n');
 
     try {
+      // 배경은 항상 고정 흰색 스튜디오(백엔드에서 실제 참고 사진으로 강제) — 배경 지시 입력은 없앰
       const res = await fetch('/api/restyle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -82,7 +100,6 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
           userAdditions,
-          backgroundHint,
         }),
       });
 
@@ -171,18 +188,7 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
           <h2 className="text-sm font-black text-gray-900">추가 스타일링 지시 (선택)</h2>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="bg-white border border-amber-200 rounded-2xl p-4 space-y-2">
-            <div className="text-[10px] font-black text-amber-600">🏞️ 뒤에 배경</div>
-            <textarea
-              value={backgroundHint}
-              onChange={(e) => setBackgroundHint(e.target.value)}
-              placeholder={`예:\n여름 휴양지 느낌\n콘크리트 스튜디오`}
-              rows={3}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-amber-500 resize-none font-mono leading-relaxed transition"
-            />
-          </div>
-
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="bg-white border border-amber-200 rounded-2xl p-4 space-y-2">
             <div className="text-[10px] font-black text-amber-600">🧍 자세</div>
             <textarea
