@@ -9,7 +9,7 @@
 
 import { NextResponse } from 'next/server';
 import OpenAI, { toFile } from 'openai';
-import { FULLBODY_POSES } from '@/lib/fitting-prompts';
+import { FULLBODY_POSES, PERSONAL_BODY_SPEC } from '@/lib/fitting-prompts';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { saveGeneration } from '@/lib/generation-store';
 
@@ -60,7 +60,11 @@ function buildVariationPrompt(poseInstruction: string, hasBackgroundReferenceIma
     '=== TASK: POSE-ONLY VARIATION — THIS IS A REAL PRODUCT PHOTO, NOT A CREATIVE REINTERPRETATION ===',
     'The input image shows a real commercial product that will be sold online. The garment fabric, weave, knit pattern, print, and color in the input image are the ACTUAL PRODUCT TEXTURE — they must be pixel-faithful, not an artistic approximation. Treat the garment surface as a fixed texture map, not something to redraw or reimagine.',
     'Reproduce the EXACT same person (body shape, skin tone, face, proportions) and the EXACT same garments (same fabric weave/knit pattern, same color, same fit, same footwear, same accessories) with 100% fidelity to the input image.',
-    'FORBIDDEN CHANGES: do NOT alter the fabric texture or knit/weave pattern, do NOT smooth out or simplify fabric grain, do NOT change garment color or shade, do NOT add or remove any pattern, do NOT change footwear style, do NOT reshape the body.',
+    // AI 피팅(restyle)이 매 생성마다 이 동일한 스펙 텍스트로 몸을 리셰이프하는데, 바리에이션은
+    // 이미지 기준 "그대로 유지" 지시만 있고 이 텍스트가 없어서 체형이 은근히 달라지는 드리프트가
+    // 있었음 — 같은 스펙 텍스트를 여기도 명시해서 이미지 기준 + 텍스트 기준을 이중으로 고정한다.
+    `This exact body must match this physique spec (same standard used to build the source photo — do not drift toward a different build): ${PERSONAL_BODY_SPEC}`,
+    'FORBIDDEN CHANGES: do NOT alter the fabric texture or knit/weave pattern, do NOT smooth out or simplify fabric grain, do NOT change garment color or shade, do NOT add or remove any pattern, do NOT change footwear style, do NOT reshape the body away from the spec above.',
     `THE ONLY PERMITTED CHANGE is the body pose: ${poseInstruction}`,
     '',
     '=== BACKGROUND ===',

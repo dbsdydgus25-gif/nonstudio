@@ -123,6 +123,7 @@ function buildGarmentFidelityBlock(category: SourcedCategory, garmentAnalysis: G
 - The ${CATEGORY_PRESERVE_LABEL[category]} visible in the input photo IS the real sourced product. Faithfully reproduce its color, fabric texture, fit, and silhouette — this is the hero item and must be recognizable as the same product — but you have freedom to adjust how it drapes on the reshaped body.
 - Reference spec of the sourced item — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.
 - CRITICAL FABRIC RULE: reproduce ONLY the surface texture described above — do NOT invent, add, or embellish any decorative pattern, print, jacquard motif, embossed design, paisley, damask, moire, or graphic texture that is not explicitly listed. If the fabric is a plain solid-color knit/weave, render it perfectly plain and uniform with only natural fabric grain or knit-loop texture — absolutely no added print or pattern of any kind.
+- The fabric surface must look like an actual photograph of a real garment — flat, clean, with only natural soft folds/wrinkles from body movement and gravity. Do NOT render any algorithmic or "AI-texture-filter" look: no fine repeating micro-pattern, no engraved/embossed swirl texture, no synthetic noise grain, no digital fabric-simulation artifacts. A plain knit or weave should look boringly plain, like a studio product photo, not like a rendered material map.
 `.trim();
 }
 
@@ -130,7 +131,9 @@ function buildGarmentFidelityBlock(category: SourcedCategory, garmentAnalysis: G
  * AI 피팅 프롬프트 빌더 — 항상 전신 1장을 생성한다.
  * 소싱 제품의 질감/색상은 충실히 재현하되, 몸은 177/74 마른 근육형으로 리셰이프하고
  * 포즈도 정갈한 커머셜 포즈로 자유롭게 다듬는다 (원본 사진을 픽셀 단위로 고정하지 않음).
- * AI가 자동 생성한 코디 제안(stylingSuggestion) + 사용자가 직접 쓴 추가 프롬프트(userAdditions)를 하나로 합친다.
+ * AI가 자동 생성한 코디 제안(stylingSuggestion)은 STYLING 섹션에, 사용자가 직접 쓴 자세/소품 지시(userAdditions)는
+ * POSE & FRAMING 섹션 안에 "필수 준수" 문구로 배치한다 — 상하의 스타일은 generateStylingSuggestion의
+ * userPreferenceHint로 이미 반영되어 여기 들어오는 userAdditions는 순수 자세/소품 지시만 남는다.
  */
 export function buildRestylePrompt(
   category: SourcedCategory,
@@ -145,8 +148,11 @@ export function buildRestylePrompt(
   if (stylingSuggestion.shoes) stylingLines.push(`- 신발: ${stylingSuggestion.shoes}`);
   if (stylingSuggestion.accessory) stylingLines.push(`- 액세서리: ${stylingSuggestion.accessory}`);
 
-  const userBlock = userAdditions.trim()
-    ? `\n\nAdditional user styling instructions (combine with the auto-generated styling above):\n${userAdditions.trim()}`
+  // 사용자가 입력한 자세/소품 지시 — POSE & FRAMING 섹션 안에 두고 "필수 준수"로 명시해야 반영됨.
+  // 예전엔 STYLING 섹션 맨 끝에 "추가 스타일링 지시"로 잘못 라벨링되어 있어서 포즈/소품 지시가
+  // 거의 무시됐었음 (예: "한손엔 토트백"을 지시해도 가방이 안 나옴).
+  const poseHintBlock = userAdditions.trim()
+    ? ` MANDATORY POSE/PROP REQUIREMENT (overrides the generic pose direction above — must be included exactly as described, e.g. if it mentions holding an item, that item must be visibly held in the model's hand): ${userAdditions.trim()}`
     : '';
 
   const backgroundLine = hasBackgroundReferenceImage
@@ -162,12 +168,11 @@ export function buildRestylePrompt(
     '',
     '=== POSE & FRAMING (ABSOLUTE) ===',
     `Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped. This is a single confirmed lookbook shot, not a close-up or partial crop.`,
-    `Original photo pose reference: ${poseDescription}. Regenerate into a clean, confident, polished commercial standing pose — neat posture, natural hand placement. You do NOT need to literally replicate the original casual pose or framing; prioritize making it look like a professional AI-styled fitting shot.`,
+    `Original photo pose reference: ${poseDescription}. Regenerate into a clean, confident, polished commercial standing pose — neat posture, natural hand placement. You do NOT need to literally replicate the original casual pose or framing; prioritize making it look like a professional AI-styled fitting shot.${poseHintBlock}`,
     '',
     '=== NEW STYLING TO GENERATE ===',
     stylingLines.length > 0 ? stylingLines.join('\n') : '- Complete the outfit naturally with cohesive, stylish items.',
     backgroundLine,
-    userBlock,
     '',
     '=== NEGATIVE CONSTRAINTS (ABSOLUTE) ===',
     RESTYLE_QUALITY_CONSTRAINTS,
