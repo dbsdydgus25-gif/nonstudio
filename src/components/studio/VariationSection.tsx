@@ -93,7 +93,14 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
         }),
       });
 
-      const data = await res.json();
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        // gpt-image-2 호출이 90~100초 걸리는데 Vercel Hobby 플랜의 함수 실행 제한 때문에
+        // 타임아웃으로 요청이 죽어서 JSON이 아닌 에러 페이지가 오는 경우가 있음.
+        throw new Error('서버 응답 시간이 초과됐을 가능성이 높습니다 (Vercel 함수 실행 제한). 다시 시도해보시고, 계속되면 배포 플랜(Vercel Pro) 업그레이드가 필요할 수 있습니다.');
+      }
       if (!res.ok || !data.success) {
         const detail = Array.isArray(data.errors) && data.errors.length > 0 ? `\n\n상세: ${data.errors.join(' / ')}` : '';
         throw new Error((data.error || 'AI 바리에이션 처리에 실패했습니다.') + detail);

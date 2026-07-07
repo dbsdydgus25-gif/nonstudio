@@ -102,7 +102,15 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
 
       setStageMsg('2단계: 몸 리셰이프 · 전신 코디 · 배경 OpenAI 렌더링 중... (최대 90초 소요)');
 
-      const data = await res.json();
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        // 서버가 JSON이 아닌 응답(예: Vercel 함수 타임아웃 에러 페이지)을 보냈을 때 —
+        // gpt-image-2 호출이 90~100초 걸리는데 Vercel Hobby 플랜은 함수 실행을 훨씬 짧게 끊어버려서
+        // 타임아웃으로 요청 자체가 죽는 경우가 있음. 사용자에게는 원인을 알 수 있게 안내한다.
+        throw new Error('서버 응답 시간이 초과됐을 가능성이 높습니다 (Vercel 함수 실행 제한). 다시 시도해보시고, 계속되면 배포 플랜(Vercel Pro) 업그레이드가 필요할 수 있습니다.');
+      }
       if (!res.ok || !data.success) {
         const detail = Array.isArray(data.errors) && data.errors.length > 0 ? `\n\n상세: ${data.errors.join(' / ')}` : '';
         throw new Error((data.error || 'AI 피팅 처리에 실패했습니다.') + detail);
