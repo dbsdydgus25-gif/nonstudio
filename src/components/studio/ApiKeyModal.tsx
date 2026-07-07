@@ -7,8 +7,7 @@ interface ApiKeyModalProps {
   onClose: () => void;
   geminiKey: string;
   openaiKey: string;
-  replicateKey: string;
-  onSave: (gemini: string, openai: string, replicate: string) => void;
+  onSave: (gemini: string, openai: string) => void;
 }
 
 export function ApiKeyModal({
@@ -16,27 +15,23 @@ export function ApiKeyModal({
   onClose,
   geminiKey,
   openaiKey,
-  replicateKey,
   onSave,
 }: ApiKeyModalProps) {
   const [localGemini, setLocalGemini] = useState(geminiKey);
   const [localOpenai, setLocalOpenai] = useState(openaiKey);
-  const [localReplicate, setLocalReplicate] = useState(replicateKey);
   const [showGemini, setShowGemini] = useState(false);
   const [showOpenai, setShowOpenai] = useState(false);
-  const [showReplicate, setShowReplicate] = useState(false);
 
   useEffect(() => {
     setLocalGemini(geminiKey);
     setLocalOpenai(openaiKey);
-    setLocalReplicate(replicateKey);
-  }, [geminiKey, openaiKey, replicateKey]);
+  }, [geminiKey, openaiKey]);
 
   if (!isOpen) return null;
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(localGemini.trim(), localOpenai.trim(), localReplicate.trim());
+    onSave(localGemini.trim(), localOpenai.trim());
     onClose();
   };
 
@@ -134,43 +129,8 @@ export function ApiKeyModal({
             </div>
           </div>
 
-          {/* Replicate API Key */}
-          <div className="space-y-2">
-            <label className="flex items-center justify-between text-xs font-bold text-gray-700">
-              <span className="flex items-center gap-1.5 text-indigo-700">
-                <span>🔥 Replicate API 키 (선택)</span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-100 text-indigo-700">고해상도 실물 VTON 피팅용</span>
-              </span>
-              <a
-                href="https://replicate.com/tokens"
-                target="_blank"
-                rel="noreferrer"
-                className="text-violet-600 hover:text-violet-700 underline"
-              >
-                발급받기 ↗
-              </a>
-            </label>
-            <div className="relative">
-              <input
-                type={showReplicate ? 'text' : 'password'}
-                value={localReplicate}
-                onChange={(e) => setLocalReplicate(e.target.value)}
-                placeholder="r8_... (IDM-VTON 가상피팅 모델 사용용)"
-                className="w-full bg-gray-50 border border-gray-300 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-indigo-500 transition pr-10 font-mono"
-              />
-              <button
-                type="button"
-                onClick={() => setShowReplicate(!showReplicate)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs"
-              >
-                {showReplicate ? '숨김' : '보기'}
-              </button>
-            </div>
-          </div>
-
           <div className="pt-2 rounded-xl bg-gray-50 border border-gray-200 p-3 text-[11px] text-gray-500 leading-relaxed space-y-1">
             <p>💡 입력하신 API 키는 브라우저 내부(<code className="text-violet-600">localStorage</code>)에만 안전하게 보관됩니다.</p>
-            <p>🌟 **Replicate API 키 입력 시**: 옷 질감/디테일을 100% 보존하는 초고해상도 실물 가상 피팅 모델(IDM-VTON)이 활성화됩니다 (상의/하의만 지원).</p>
           </div>
 
           <div className="flex gap-3 pt-3">

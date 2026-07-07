@@ -9,6 +9,8 @@ interface RestyleSectionProps {
   geminiKey: string;
   openaiKey: string;
   onNeedKeys: () => void;
+  /** 확정된 AI 피팅 결과를 AI 바리에이션 쪽으로 넘길 때 호출 */
+  onSendToVariation?: (imageUrl: string) => void;
 }
 
 const CATEGORY_OPTIONS: { id: SourcedCategory; label: string; desc: string }[] = [
@@ -18,18 +20,16 @@ const CATEGORY_OPTIONS: { id: SourcedCategory; label: string; desc: string }[] =
   { id: 'accessory', label: '💍 액세서리', desc: '착용 중인 가방/시계/주얼리 등' },
 ];
 
-export function RestyleSection({ geminiKey, openaiKey, onNeedKeys }: RestyleSectionProps) {
+export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVariation }: RestyleSectionProps) {
   const [photo, setPhoto] = useState<string | null>(null);
   const [category, setCategory] = useState<SourcedCategory>('top');
   const [backgroundHint, setBackgroundHint] = useState('');
   const [poseHint, setPoseHint] = useState('');
   const [outfitHint, setOutfitHint] = useState('');
-  const [variationCount, setVariationCount] = useState(2);
 
   const [isRunning, setIsRunning] = useState(false);
   const [stageMsg, setStageMsg] = useState('');
 
-  const [batchImages, setBatchImages] = useState<Array<{ imageUrl: string; variationLabel: string; generationId?: string | null }>>([]);
   const [currentResult, setCurrentResult] = useState<{ imageUrl: string; prompt: string; revisedPrompt?: string; generationId?: string | null } | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
@@ -63,7 +63,6 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys }: RestyleSect
     setIsRunning(true);
     setStageMsg('1단계: 사진 분석 중 (옷 분석 · 포즈 분석)...');
     setCurrentResult(null);
-    setBatchImages([]);
 
     // 배경은 서버에서 별도 처리(지시 없으면 고정 흰색 스튜디오 유지)하므로 여기서는 빼고 전달한다
     const userAdditions = [
@@ -84,45 +83,32 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys }: RestyleSect
           openaiApiKey: openaiKey,
           userAdditions,
           backgroundHint,
-          variationCount,
         }),
       });
 
-      setStageMsg('2단계: 몸 리셰이프 · 포즈 · 배경 · 나머지 착장 OpenAI 렌더링 중... (최대 90초 소요)');
+      setStageMsg('2단계: 몸 리셰이프 · 전신 코디 · 배경 OpenAI 렌더링 중... (최대 90초 소요)');
 
       const data = await res.json();
       if (!res.ok || !data.success) {
         const detail = Array.isArray(data.errors) && data.errors.length > 0 ? `\n\n상세: ${data.errors.join(' / ')}` : '';
-        throw new Error((data.error || '리스타일링 처리에 실패했습니다.') + detail);
+        throw new Error((data.error || 'AI 피팅 처리에 실패했습니다.') + detail);
       }
 
-      const imgs: Array<{ imageUrl: string; variationLabel: string; generationId?: string | null }> = (data.images || []).map((img: any) => ({
-        imageUrl: img.imageUrl,
-        variationLabel: img.variationLabel || '',
-        generationId: img.generationId ?? null,
-      }));
-      setBatchImages(imgs);
-
-      if (imgs.length > 0) {
+      const img = data.images?.[0];
+      if (img) {
         setCurrentResult({
-          imageUrl: imgs[0].imageUrl,
-          prompt: data.images?.[0]?.prompt || '',
-          revisedPrompt: data.images?.[0]?.engineUsed || '',
-          generationId: imgs[0].generationId,
-        });
-      }
-
-      const timestamp = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-      setHistory((prev) => [
-        ...imgs.map((img, i) => ({
-          id: `${Date.now()}_${i}`,
           imageUrl: img.imageUrl,
-          prompt: data.images?.[i]?.prompt || '',
-          revisedPrompt: img.variationLabel,
-          timestamp,
-        })),
-        ...prev,
-      ]);
+          prompt: img.prompt || '',
+          revisedPrompt: img.engineUsed || '',
+          generationId: img.generationId ?? null,
+        });
+
+        const timestamp = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+        setHistory((prev) => [
+          { id: `${Date.now()}`, imageUrl: img.imageUrl, prompt: img.prompt || '', revisedPrompt: img.engineUsed, timestamp },
+          ...prev,
+        ]);
+      }
     } catch (err: any) {
       alert(err.message || '오류가 발생했습니다.');
     } finally {
@@ -220,30 +206,8 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys }: RestyleSect
           </div>
         </div>
         <p className="text-[10px] text-gray-400">
-          AI가 자동으로 만든 코디 프롬프트에 위 3가지 지시가 그대로 합쳐져서 최종 프롬프트가 완성됩니다. (선택한 소싱 카테고리 부위는 이미 색상·질감이 고정되어 있으니 그 부위에 대한 지시는 효과가 제한적일 수 있습니다)
+          AI가 자동으로 만든 코디 프롬프트에 위 지시가 그대로 합쳐져서 최종 프롬프트가 완성됩니다. (선택한 소싱 카테고리 부위는 이미 색상·질감이 고정되어 있으니 그 부위에 대한 지시는 효과가 제한적일 수 있습니다)
         </p>
-
-        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-center justify-between">
-          <div>
-            <div className="text-xs font-bold text-gray-900">스타일 변형 개수</div>
-            <div className="text-[10px] text-gray-400 mt-1">서로 다른 코디 조합으로 몇 장 만들지 선택</div>
-          </div>
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setVariationCount(Math.max(1, variationCount - 1))}
-              className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 border border-gray-200 text-gray-900 font-bold flex items-center justify-center text-sm transition"
-            >
-              -
-            </button>
-            <span className="text-base font-black text-amber-600 w-6 text-center">{variationCount}장</span>
-            <button
-              onClick={() => setVariationCount(Math.min(4, variationCount + 1))}
-              className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 border border-gray-200 text-gray-900 font-bold flex items-center justify-center text-sm transition"
-            >
-              +
-            </button>
-          </div>
-        </div>
       </section>
 
       {/* 실행 버튼 */}
@@ -265,40 +229,23 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys }: RestyleSect
               {stageMsg}
             </span>
           ) : (
-            <span className="flex items-center justify-center gap-2">✨ AI 리스타일링 생성</span>
+            <span className="flex items-center justify-center gap-2">✨ AI 피팅 생성 (전신 1장)</span>
           )}
         </button>
       </section>
 
       {/* 결과 */}
-      {(batchImages.length > 0 || isRunning) && (
+      {(currentResult || isRunning) && (
         <section className="space-y-4">
           <FittingResultViewer
             currentResult={currentResult}
             history={history}
             onSelectHistory={(item) => setCurrentResult({ imageUrl: item.imageUrl, prompt: item.prompt, revisedPrompt: item.revisedPrompt })}
-            isGenerating={isRunning && batchImages.length === 0}
+            isGenerating={isRunning && !currentResult}
             loadingStage={stageMsg}
             onRate={handleRate}
+            onSendToVariation={onSendToVariation}
           />
-
-          {batchImages.length > 1 && (
-            <div className="grid grid-cols-4 gap-4">
-              {batchImages.map((img, i) => (
-                <div
-                  key={i}
-                  className="group relative rounded-2xl overflow-hidden border border-gray-200 hover:border-amber-400 transition cursor-pointer shadow-sm"
-                  onClick={() => setCurrentResult({ imageUrl: img.imageUrl, prompt: '', revisedPrompt: img.variationLabel, generationId: img.generationId })}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img.imageUrl} alt={img.variationLabel} className="w-full aspect-[2/3] object-cover" />
-                  <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-3">
-                    <div className="text-[10px] font-bold text-white">{img.variationLabel}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </section>
       )}
     </div>

@@ -1,19 +1,16 @@
 'use client';
 
 import React from 'react';
-import type { FittingMode } from '@/lib/fitting-prompts';
-import { FITTING_MODE_INFO } from '@/lib/fitting-prompts';
 
 interface SidebarProps {
-  activeMode: FittingMode;
-  onModeChange: (mode: FittingMode) => void;
-  activePage: 'fitting' | 'restyle' | 'models' | 'settings';
-  onPageChange: (page: 'fitting' | 'restyle' | 'models' | 'settings') => void;
+  activePage: 'fitting' | 'restyle';
+  onPageChange: (page: 'fitting' | 'restyle') => void;
+  onOpenApiKeys: () => void;
   geminiKey: string;
   openaiKey: string;
 }
 
-export function Sidebar({ activeMode, onModeChange, activePage, onPageChange, geminiKey, openaiKey }: SidebarProps) {
+export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, openaiKey }: SidebarProps) {
   const keysSet = geminiKey && openaiKey;
 
   return (
@@ -54,8 +51,8 @@ export function Sidebar({ activeMode, onModeChange, activePage, onPageChange, ge
           >
             <span className="text-lg">✨</span>
             <div className="overflow-hidden">
-              <div className="text-sm font-bold truncate">AI 리스타일링</div>
-              <div className="text-[10px] text-gray-400 truncate">대충 찍은 실사 → 매력적인 피팅컷</div>
+              <div className="text-sm font-bold truncate">AI 피팅</div>
+              <div className="text-[10px] text-gray-400 truncate">실사 사진 → 전신 1장 확정 룩</div>
             </div>
             {activePage === 'restyle' && (
               <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
@@ -72,8 +69,8 @@ export function Sidebar({ activeMode, onModeChange, activePage, onPageChange, ge
           >
             <span className="text-lg">🧍</span>
             <div className="overflow-hidden">
-              <div className="text-sm font-bold truncate">모델 피팅</div>
-              <div className="text-[10px] text-gray-400 truncate">다중 포즈 가상 피팅 스튜디오</div>
+              <div className="text-sm font-bold truncate">AI 바리에이션</div>
+              <div className="text-[10px] text-gray-400 truncate">확정된 룩 유지, 포즈만 다양하게</div>
             </div>
             {activePage === 'fitting' && (
               <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
@@ -90,33 +87,23 @@ export function Sidebar({ activeMode, onModeChange, activePage, onPageChange, ge
             관리
           </div>
 
-          {[
-            { id: 'models' as const, icon: '📸', label: '모델 관리', desc: '피팅 모델 사진 관리' },
-            { id: 'settings' as const, icon: '⚙️', label: 'API 설정', desc: 'Gemini · OpenAI 키' },
-          ].map((item) => (
-            <button
-              key={item.id}
-              onClick={() => onPageChange(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all ${
-                activePage === item.id
-                  ? 'bg-gray-100 border border-gray-300 text-gray-900'
-                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 border border-transparent'
-              }`}
-            >
-              <span className="text-base">{item.icon}</span>
-              <div>
-                <div className="text-sm font-bold">{item.label}</div>
-                <div className="text-[10px] text-gray-400">{item.desc}</div>
-              </div>
-            </button>
-          ))}
+          <button
+            onClick={onOpenApiKeys}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all text-gray-500 hover:bg-gray-50 hover:text-gray-900 border border-transparent"
+          >
+            <span className="text-base">⚙️</span>
+            <div>
+              <div className="text-sm font-bold">API 설정</div>
+              <div className="text-[10px] text-gray-400">Gemini · OpenAI 키</div>
+            </div>
+          </button>
         </div>
       </nav>
 
       {/* 하단 버전 */}
       <div className="px-5 py-4 border-t border-gray-200">
         <div className="text-[10px] text-gray-400 font-medium">
-          NON STUDIO Fitting v2.0
+          NON STUDIO v2.0
         </div>
         <div className="text-[10px] text-gray-300">
           Gemini Vision + GPT-Image-2

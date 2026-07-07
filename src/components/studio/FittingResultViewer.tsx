@@ -18,6 +18,8 @@ interface FittingResultViewerProps {
   loadingStage: string;
   /** 일관성 학습 피드백 — 지정하면 결과 이미지 위에 👍/👎 버튼이 표시됨 */
   onRate?: (generationId: string, rating: 'good' | 'bad', promote: boolean) => void;
+  /** 지정하면 "AI 바리에이션으로 보내기" 버튼이 표시됨 (AI 피팅 결과 화면 전용) */
+  onSendToVariation?: (imageUrl: string) => void;
 }
 
 export function FittingResultViewer({
@@ -27,6 +29,7 @@ export function FittingResultViewer({
   isGenerating,
   loadingStage,
   onRate,
+  onSendToVariation,
 }: FittingResultViewerProps) {
   const [isZoomed, setIsZoomed] = useState(false);
   const [ratedAs, setRatedAs] = useState<'good' | 'bad' | null>(null);
@@ -149,6 +152,14 @@ export function FittingResultViewer({
               >
                 <span>⬇️ HD 원본 다운로드</span>
               </a>
+              {onSendToVariation && (
+                <button
+                  onClick={() => onSendToVariation(currentResult.imageUrl)}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs flex items-center gap-2 transition"
+                >
+                  <span>🧍 AI 바리에이션으로 보내기</span>
+                </button>
+              )}
             </div>
           )}
         </div>
