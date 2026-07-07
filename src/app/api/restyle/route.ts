@@ -14,7 +14,7 @@ import { NextResponse } from 'next/server';
 import OpenAI, { toFile } from 'openai';
 import { analyzeGarment, analyzePose, generateStylingSuggestion } from '@/lib/garment-agent';
 import { buildRestylePrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCategory } from '@/lib/fitting-prompts';
-import { getActiveReferenceImage, saveGeneration } from '@/lib/generation-store';
+import { saveGeneration } from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 
 export const runtime = 'nodejs';
@@ -113,8 +113,10 @@ export async function POST(req: Request) {
 
     const openai = new OpenAI({ apiKey: openaiApiKey });
 
-    // 승격된 기준 참고 이미지 조회 (없으면 null — Supabase 미설정/미승격 상태에서도 정상 동작)
-    const savedReferenceImage = await getActiveReferenceImage('restyle');
+    // (2026-07-07) 승격된 "기준 참고 이미지"를 매번 자동으로 같이 넣던 기능을 제거함 —
+    // 실제 사진 한 장이 텍스트 지시(신발/소품/피부톤 등)보다 훨씬 강하게 결과를 끌어당겨서,
+    // 사용자가 이번 생성에 지정한 신발/코디 지시를 계속 무시하게 만드는 원인이었음. 체형/피부톤은
+    // PERSONAL_BODY_SPEC 텍스트만으로도 충분히 고정되므로, 참고 이미지 없이 진행한다.
 
     const stylingSuggestion = await generateStylingSuggestion(
       sourcedCategory,
@@ -141,10 +143,9 @@ export async function POST(req: Request) {
       stylingSuggestion,
       userAdditions || '',
       !!backgroundReferenceImage,
-      !!savedReferenceImage,
     );
 
-    const referenceImages = [savedReferenceImage, backgroundReferenceImage].filter(
+    const referenceImages = [backgroundReferenceImage].filter(
       (r): r is { buffer: Buffer; mimeType: string } => !!r,
     );
 

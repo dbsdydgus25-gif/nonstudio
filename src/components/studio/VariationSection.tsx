@@ -53,18 +53,15 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
       .catch(() => {});
   }, []);
 
-  const handleRate = async (generationId: string, rating: 'good' | 'bad', promote: boolean) => {
+  const handleRate = async (generationId: string, rating: 'good' | 'bad') => {
     try {
       const res = await fetch('/api/generations/rate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ generationId, rating, promote, pipeline: 'restyle' }),
+        body: JSON.stringify({ generationId, rating }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || '평가 저장 실패');
-      if (promote) {
-        alert('저장했습니다 — 다음 AI 피팅부터 이 사진을 기준 체형 참고 이미지로 같이 사용합니다.');
-      }
     } catch (err: any) {
       alert(err.message || '평가 저장 중 오류가 발생했습니다.');
     }

@@ -18,8 +18,8 @@ interface FittingResultViewerProps {
   onSelectHistory: (item: HistoryItem) => void;
   isGenerating: boolean;
   loadingStage: string;
-  /** 일관성 학습 피드백 — 지정하면 결과 이미지 위에 👍/👎 버튼이 표시됨 */
-  onRate?: (generationId: string, rating: 'good' | 'bad', promote: boolean) => void;
+  /** 결과 만족도 피드백 — 지정하면 결과 이미지 위에 👍/👎 버튼이 표시됨 */
+  onRate?: (generationId: string, rating: 'good' | 'bad') => void;
   /** 지정하면 "AI 바리에이션으로 보내기" 버튼이 표시됨 (AI 피팅 결과 화면 전용) */
   onSendToVariation?: (imageUrl: string) => void;
 }
@@ -46,10 +46,10 @@ export function FittingResultViewer({
     setRatedAs(null);
   }, [currentResult?.generationId, currentResult?.imageUrl]);
 
-  const handleRate = (rating: 'good' | 'bad', promote: boolean) => {
+  const handleRate = (rating: 'good' | 'bad') => {
     if (!currentResult?.generationId || !onRate) return;
     setRatedAs(rating);
-    onRate(currentResult.generationId, rating, promote);
+    onRate(currentResult.generationId, rating);
   };
 
   const downloadCrop = async (
@@ -124,18 +124,18 @@ export function FittingResultViewer({
               {onRate && currentResult.generationId && (
                 <div className="flex items-center gap-1.5 mr-1">
                   <button
-                    onClick={() => handleRate('good', true)}
-                    title="이 결과가 좋아요 — 다음 생성 때 기준 참고 이미지로 승격"
+                    onClick={() => handleRate('good')}
+                    title="이 결과가 좋아요"
                     className={`px-3 py-2 rounded-xl border text-xs font-bold transition flex items-center gap-1 ${
                       ratedAs === 'good'
                         ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
                         : 'bg-white border-gray-200 text-gray-500 hover:text-emerald-600 hover:border-emerald-300'
                     }`}
                   >
-                    👍 {ratedAs === 'good' ? '기준으로 저장됨' : '이거다'}
+                    👍 {ratedAs === 'good' ? '저장됨' : '이거다'}
                   </button>
                   <button
-                    onClick={() => handleRate('bad', false)}
+                    onClick={() => handleRate('bad')}
                     title="이 결과는 아니에요"
                     className={`px-3 py-2 rounded-xl border text-xs font-bold transition flex items-center gap-1 ${
                       ratedAs === 'bad'
