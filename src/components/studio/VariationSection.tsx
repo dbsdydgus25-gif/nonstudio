@@ -139,7 +139,11 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
 
       const succeeded = finalItems.filter((i) => i.status === 'completed' && i.imageUrl);
       if (succeeded.length === 0) {
-        throw new Error('모든 포즈 생성에 실패했습니다.');
+        // 실제 원인(각 포즈별 에러 메시지)을 같이 보여줘야 다음에 뭐가 문제인지 바로 알 수 있다 —
+        // 예전엔 "모든 포즈 생성에 실패했습니다"만 떠서 원인 파악이 안 됐음.
+        const reasons = Array.from(new Set(finalItems.map((i) => i.errorMessage).filter(Boolean)));
+        const detail = reasons.length > 0 ? `\n\n상세: ${reasons.join(' / ')}` : '';
+        throw new Error(`모든 포즈 생성에 실패했습니다.${detail}`);
       }
 
       const timestamp = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });

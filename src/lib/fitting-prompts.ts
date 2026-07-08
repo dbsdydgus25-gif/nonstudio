@@ -8,15 +8,16 @@
 // 0. 사용자 고정 체형 스펙 (단일 기준 — AI 피팅 / AI 바리에이션 두 파이프라인 모두 동일하게 적용)
 // 어떤 사진을 넣든 항상 동일한 체형/피부톤/비율로 결과가 나오도록, 파이프라인마다 따로 적지 않고 여기 하나만 수정한다.
 // ─────────────────────────────────────────────────────────────────
+// (2026-07-09) 이전엔 "노골적으로 태닝된 medium-deep warm brown, 절대 밝게 하지 마라"처럼
+// 강하게 밀어붙였더니 실제보다 너무 까맣게 나오고, veins를 반복 언급했더니 오히려 부자연스럽게
+// 도드라진 핏줄이 생기는 부작용이 있었음(negative로 언급해도 그 개념 자체가 강조되는 효과) —
+// 톤을 낮추고 문구도 간결화함.
 export const PERSONAL_BODY_SPEC = `
 - Height 177cm, Weight 74kg, Shoe/foot size 270mm (Korean 270 size).
-- Well-proportioned upper body — balanced shoulder-to-waist ratio, not top-heavy.
-- Skin tone: noticeably tanned, medium-deep warm brown Korean skin tone — like someone who spends time outdoors. This must read as clearly tanned/sun-kissed, NOT pale, NOT light beige, NOT porcelain white. Do not lighten the skin tone under any circumstance.
-- Build: athletic and visibly toned, lean muscular definition — NOT a bulky bodybuilder, NOT skinny.
-- Arms: defined, toned forearms and biceps with natural muscle definition visible under the skin, but the skin surface itself must look smooth and healthy — NO visible veins anywhere on the arms or hands. Do not render vein lines at all, even faint ones.
-- Chest: firm and toned with well-defined pecs. Absolutely NOT soft, puffy, or sagging — no gynecomastia-like chest under any circumstance.
-- Legs: moderately toned and firm, athletic proportion — NOT the thin/skinny-lean leg type.
-- This exact physique (toned build, subtle natural arm definition, defined chest) is a FIXED personal standard and must be reproduced identically in every single generation — not a random variation per photo.
+- Skin tone: a natural warm tan Korean skin tone — like an ordinary person who spends a normal amount of time outdoors. Healthy and realistic, not pale/porcelain white, but also not an exaggerated dark tan. It should look like real human skin in a photo, not a stylized or saturated color.
+- Build: athletic and toned, lean muscular definition — not a bulky bodybuilder, not skinny. A natural everyday fit-person physique.
+- Skin surface should look smooth and photographically realistic — avoid exaggerated muscle striations, and avoid rendering visible vein lines; ordinary healthy skin texture only.
+- This physique and skin tone are a fixed personal standard and should stay consistent across every generation.
 `.trim();
 
 // AI 바리에이션에서 사용자가 배경을 따로 지시하지 않았을 때 AI가 매번 다른 장소를 지어내지
@@ -103,7 +104,7 @@ export interface StylingSuggestion {
 
 const RESTYLE_QUALITY_CONSTRAINTS = `
 CRITICAL NEGATIVE CONSTRAINTS (DO NOT GENERATE):
-cartoon, illustration, CGI, 3D render, digital art, video game graphics, airbrushed skin, plastic skin, mannequin texture, artificial doll look, low resolution, blurry, deformed body, incorrect anatomy, extra limbs, bad hands, overlapping fingers, unnatural pose, oversaturated colors, fake lighting, warped background, artifacts, logos, text, watermark, composite look, collage, split screen, multi-panel, grid of photos, side-by-side comparison, diptych, triptych, photo montage, layout of multiple images, soft puffy chest, sagging chest, gynecomastia-like chest, love handles, flabby untoned body, out-of-shape physique, hunched posture, awkward stiff pose, invented fabric pattern, fake jacquard or paisley print, embossed decorative texture not present on the real garment, moire pattern on fabric, unintended textile print, visible veins, vein lines on arms or hands, pale skin, white skin, porcelain skin tone.
+cartoon, illustration, CGI, 3D render, digital art, video game graphics, airbrushed skin, plastic skin, mannequin texture, artificial doll look, low resolution, blurry, deformed body, incorrect anatomy, extra limbs, bad hands, overlapping fingers, unnatural pose, oversaturated colors, fake lighting, warped background, artifacts, logos, text, watermark, composite look, collage, split screen, multi-panel, grid of photos, side-by-side comparison, diptych, triptych, photo montage, layout of multiple images, soft puffy chest, sagging chest, love handles, flabby untoned body, out-of-shape physique, hunched posture, awkward stiff pose, invented fabric pattern, fake jacquard or paisley print, embossed decorative texture not present on the real garment, moire pattern on fabric, unintended textile print.
 `.trim();
 
 const RESTYLE_BODY_SPEC = `

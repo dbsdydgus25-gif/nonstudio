@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import ReactCrop, { type Crop, type PercentCrop } from 'react-image-crop';
+import ReactCrop, { type Crop, type PercentCrop, centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 
 export interface HistoryItem {
@@ -40,10 +40,14 @@ export function FittingResultViewer({
   const [isFreeCropOpen, setIsFreeCropOpen] = useState(false);
   const [freeCrop, setFreeCrop] = useState<Crop>({ unit: '%', x: 10, y: 10, width: 80, height: 80 });
   const [freeCropPercent, setFreeCropPercent] = useState<PercentCrop | null>(null);
+  const [freeCropAspect, setFreeCropAspect] = useState<number | undefined>(undefined);
+  const [isDownloadingOriginal, setIsDownloadingOriginal] = useState(false);
+  const [isPromptExpanded, setIsPromptExpanded] = useState(false);
   const imgCropRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
     setRatedAs(null);
+    setIsPromptExpanded(false);
   }, [currentResult?.generationId, currentResult?.imageUrl]);
 
   const handleRate = (rating: 'good' | 'bad') => {
@@ -98,6 +102,28 @@ export function FittingResultViewer({
     };
     await downloadCrop({ imageUrl: currentResult.imageUrl, region }, 'custom', 'custom');
     setIsFreeCropOpen(false);
+  };
+
+  // Supabase 서명 URL은 앱과 다른 도메인(cross-origin)이라 <a download> 속성이 브라우저에서
+  // 무시되고 그냥 새 탭으로 열리기만 했음 — blob으로 직접 받아서 다운로드를 강제한다.
+  const handleDownloadOriginal = async (imageUrl: string) => {
+    setIsDownloadingOriginal(true);
+    try {
+      const res = await fetch(imageUrl);
+      if (!res.ok) throw new Error('이미지를 불러오지 못했습니다.');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `AI_Fitting_Result_${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      // fetch가 CORS 등으로 막히면 최소한 새 탭에서라도 열어서 사용자가 직접 저장할 수 있게 한다
+      window.open(imageUrl, '_blank', 'noreferrer');
+    } finally {
+      setIsDownloadingOriginal(false);
+    }
   };
 
   const CROP_RATIOS = ['1:1', '4:5', '3:4', '9:16'];
@@ -172,6 +198,7 @@ export function FittingResultViewer({
                         setIsCropMenuOpen(false);
                         setFreeCrop({ unit: '%', x: 10, y: 10, width: 80, height: 80 });
                         setFreeCropPercent(null);
+                        setFreeCropAspect(undefined);
                         setIsFreeCropOpen(true);
                       }}
                       disabled={!!isCropping}
@@ -182,15 +209,13 @@ export function FittingResultViewer({
                   </div>
                 )}
               </div>
-              <a
-                href={currentResult.imageUrl}
-                target="_blank"
-                rel="noreferrer"
-                download="AI_Fitting_Result.png"
-                className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-900 font-bold text-xs flex items-center gap-2 transition border border-gray-200"
+              <button
+                onClick={() => handleDownloadOriginal(currentResult.imageUrl)}
+                disabled={isDownloadingOriginal}
+                className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-900 font-bold text-xs flex items-center gap-2 transition border border-gray-200 disabled:opacity-50"
               >
-                <span>⬇️ HD 원본 다운로드</span>
-              </a>
+                <span>{isDownloadingOriginal ? '다운로드 중...' : '⬇️ HD 원본 다운로드'}</span>
+              </button>
               {onSendToVariation && (
                 <button
                   onClick={() => onSendToVariation(currentResult.imageUrl)}
@@ -239,10 +264,23 @@ export function FittingResultViewer({
 
               {currentResult.prompt && (
                 <div className="mt-6 w-full max-w-2xl bg-gray-50 border border-gray-200 rounded-2xl p-4 text-xs text-gray-500 space-y-1">
-                  <div className="font-bold text-emerald-600">
-                    ✨ OpenAI에 실제로 전달된 프롬프트 전문 {currentResult.revisedPrompt ? `(${currentResult.revisedPrompt})` : ''}:
-                  </div>
-                  <p className="font-mono leading-relaxed text-[11px] text-gray-600 whitespace-pre-wrap line-clamp-6 hover:line-clamp-none transition">
+                  <button
+                    type="button"
+                    onClick={() => setIsPromptExpanded((v) => !v)}
+                    className="w-full flex items-center justify-between font-bold text-emerald-600 text-left"
+                  >
+                    <span>
+                      ✨ OpenAI에 실제로 전달된 프롬프트 전문 {currentResult.revisedPrompt ? `(${currentResult.revisedPrompt})` : ''}:
+                    </span>
+                    <span className="text-[10px] text-emerald-500 shrink-0 ml-2">
+                      {isPromptExpanded ? '접기 ▲' : '펼쳐보기 ▼'}
+                    </span>
+                  </button>
+                  <p
+                    className={`font-mono leading-relaxed text-[11px] text-gray-600 whitespace-pre-wrap transition ${
+                      isPromptExpanded ? '' : 'line-clamp-6'
+                    }`}
+                  >
                     {currentResult.prompt}
                   </p>
                 </div>
@@ -305,11 +343,46 @@ export function FittingResultViewer({
               </button>
             </div>
             <p className="text-xs text-gray-400">
-              모서리를 드래그해서 원하는 영역을 지정한 뒤 저장하세요.
+              모서리를 드래그해서 원하는 영역을 지정한 뒤 저장하세요. 비율을 고정하면 그 비율 그대로 위치/크기만 조절할 수 있습니다.
             </p>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {([
+                { label: '자유', value: undefined },
+                { label: '1:1', value: 1 },
+                { label: '4:5', value: 4 / 5 },
+                { label: '3:4', value: 3 / 4 },
+                { label: '9:16', value: 9 / 16 },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.label}
+                  type="button"
+                  onClick={() => {
+                    setFreeCropAspect(opt.value);
+                    const img = imgCropRef.current;
+                    if (opt.value && img && img.naturalWidth && img.naturalHeight) {
+                      const nextCrop = centerCrop(
+                        makeAspectCrop({ unit: '%', width: 80 }, opt.value, img.naturalWidth, img.naturalHeight),
+                        img.naturalWidth,
+                        img.naturalHeight,
+                      );
+                      setFreeCrop(nextCrop);
+                      setFreeCropPercent(nextCrop);
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                    freeCropAspect === opt.value
+                      ? 'bg-emerald-500 border-emerald-500 text-white'
+                      : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
             <div className="flex justify-center bg-gray-50 rounded-2xl p-2">
               <ReactCrop
                 crop={freeCrop}
+                aspect={freeCropAspect}
                 onChange={(_, percentCrop) => setFreeCrop(percentCrop)}
                 onComplete={(_, percentCrop) => setFreeCropPercent(percentCrop)}
               >

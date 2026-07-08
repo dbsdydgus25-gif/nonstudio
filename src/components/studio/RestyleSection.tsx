@@ -266,8 +266,8 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
         </button>
       </section>
 
-      {/* 결과 */}
-      {(currentResult || isRunning) && (
+      {/* 결과 — history.length도 조건에 포함해야 새로 생성 안 해도 이전 결과를 바로 볼 수 있음 */}
+      {(currentResult || isRunning || history.length > 0) && (
         <section className="space-y-4">
           <FittingResultViewer
             currentResult={currentResult}
