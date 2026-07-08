@@ -72,7 +72,13 @@ async function runSingleRestyle(
   const res = await (openai.images as any).edit({
     model: 'gpt-image-2',
     image: imageInput,
-    prompt: prompt.slice(0, 4000),
+    // (2026-07-09) 4000자로 잘랐었는데, 이번 세션에 프롬프트를 계속 보강하면서 실제 길이가
+    // 6900자를 넘어섰고, 그 결과 NEW STYLING(하의/신발/액세서리)·자세 소품·네거티브 제약·출력
+    // 품질 지시까지 전부 통째로 잘려서 gpt-image-2가 받아본 적도 없었다 — 이번 세션 내내 반복된
+    // "하의/신발/소품 지시가 안 먹힌다" 문제의 진짜 원인. OpenAI 공식 한도는 32,000자이고 커뮤니티
+    // 보고에 따르면 6000~7000 토큰(약 2만자 이상) 근처에서 결과가 불안정해진다고 하니, 안전 마진을
+    // 두고 12000자로 올린다.
+    prompt: prompt.slice(0, 12000),
     n: 1,
     size: '1024x1536',
     quality: 'medium', // 'auto'(기본값)는 비용/시간이 크게 늘어남 — 커머셜 컷 용도로는 medium이면 충분

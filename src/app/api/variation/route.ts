@@ -104,7 +104,8 @@ async function runSingleVariation(
   const res = await (openai.images as any).edit({
     model: 'gpt-image-2',
     image: imageInput,
-    prompt: prompt.slice(0, 4000),
+    // restyle과 동일한 이유로 4000자 → 12000자로 상향 (OpenAI 공식 한도 32,000자)
+    prompt: prompt.slice(0, 12000),
     n: 1,
     size: '1024x1536',
     quality: 'medium',
