@@ -16,6 +16,7 @@ import { after } from 'next/server';
 import OpenAI, { toFile } from 'openai';
 import { FULLBODY_POSES, PERSONAL_BODY_SPEC } from '@/lib/fitting-prompts';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
+import { getPoseReferenceImage } from '@/lib/pose-reference';
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 
 export const runtime = 'nodejs';
@@ -36,9 +37,13 @@ async function toOpenAIFile(buffer: Buffer, mimeType: string, name: string) {
   return await toFile(buffer, name, { type: mimeType });
 }
 
-/** 포즈 풀에서 매번 무작위로 count개를 뽑는다 (기존엔 배열 앞 N개를 고정 순서로만 써서 항상 같은 포즈만 나오던 버그가 있었음). */
-function pickRandomPoses(count: number) {
-  const pool = [...FULLBODY_POSES];
+/**
+ * 포즈 풀에서 매번 무작위로 count개를 뽑는다 (기존엔 배열 앞 N개를 고정 순서로만 써서 항상 같은
+ * 포즈만 나오던 버그가 있었음). poseNumber는 FULLBODY_POSES 배열상의 1-based 순번으로,
+ * public/poses/pose_{poseNumber}.png 참고 사진과 매칭하기 위해 셔플 이후에도 유지한다.
+ */
+function pickRandomPoses(count: number): Array<{ pose: (typeof FULLBODY_POSES)[number]; poseNumber: number }> {
+  const pool = FULLBODY_POSES.map((pose, i) => ({ pose, poseNumber: i + 1 }));
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -62,28 +67,43 @@ async function resultImageToBuffer(imageUrl: string): Promise<{ buffer: Buffer; 
   return { buffer: Buffer.from(arrayBuffer), mimeType };
 }
 
-function buildVariationPrompt(poseInstruction: string, hasBackgroundReferenceImage: boolean): string {
+// (2026-07-09) 재질/색감이 미묘하게 계속 바뀌는 문제가 있었다 — 원인을 다시 보니, 이전
+// 버전은 "texture/fabric/weave/grain/pattern" 관련 단어를 다섯 군데에서 반복하고 있었다.
+// 이번 세션에서 이미 한 번 확인된 패턴(피부 핏줄을 negative로 반복 언급했더니 오히려 핏줄이
+// 더 두드러지게 나온 것)과 동일한 원리로, "텍스처를 정확히 유지하라"는 말을 너무 여러 번
+// 반복하면 모델이 그 텍스처 자체에 과도하게 주의를 기울여 오히려 원단 결을 새로 그려내거나
+// 과장하는 것으로 보인다. 이번엔 텍스처 언급을 단 한 번으로 줄이고, "이건 같은 사진이다 —
+// 포즈만 바뀐다"는 단순하고 명확한 프레이밍으로 대체한다.
+function buildVariationPrompt(
+  poseInstruction: string,
+  hasBackgroundReferenceImage: boolean,
+  hasPoseReferenceImage: boolean,
+): string {
+  const imageNotes: string[] = [
+    'Image 1 (the base photo): the exact person and exact outfit to reproduce — the single source of truth for face, skin tone, body, and every garment/accessory.',
+  ];
+  if (hasBackgroundReferenceImage) {
+    imageNotes.push(
+      `Image ${imageNotes.length + 1}: background/lighting reference only — reproduce this exact backdrop and lighting, ignore everything else about this image.`,
+    );
+  }
+  if (hasPoseReferenceImage) {
+    imageNotes.push(
+      `Image ${imageNotes.length + 1}: pose reference only — copy the body pose, camera angle, and framing shown here. Completely ignore the person, clothing, and background shown in this image; those must come only from Image 1.`,
+    );
+  }
+
   return [
-    '=== TASK: POSE-ONLY VARIATION — THIS IS A REAL PRODUCT PHOTO, NOT A CREATIVE REINTERPRETATION ===',
-    'The input image shows a real commercial product that will be sold online. The garment fabric, weave, knit pattern, print, and color in the input image are the ACTUAL PRODUCT TEXTURE — they must be pixel-faithful, not an artistic approximation. Treat the garment surface as a fixed texture map, not something to redraw or reimagine.',
-    'Reproduce the EXACT same person (body shape, skin tone, face, proportions) and the EXACT same garments (same fabric weave/knit pattern, same color, same fit, same footwear, same accessories) with 100% fidelity to the input image.',
-    // AI 피팅(restyle)이 매 생성마다 이 동일한 스펙 텍스트로 몸을 리셰이프하는데, 바리에이션은
-    // 이미지 기준 "그대로 유지" 지시만 있고 이 텍스트가 없어서 체형이 은근히 달라지는 드리프트가
-    // 있었음 — 같은 스펙 텍스트를 여기도 명시해서 이미지 기준 + 텍스트 기준을 이중으로 고정한다.
-    `This exact body must match this physique spec (same standard used to build the source photo — do not drift toward a different build): ${PERSONAL_BODY_SPEC}`,
-    'FORBIDDEN CHANGES: do NOT alter the fabric texture or knit/weave pattern, do NOT smooth out or simplify fabric grain, do NOT change garment color or shade, do NOT add or remove any pattern, do NOT change footwear style, do NOT reshape the body away from the spec above.',
-    `THE ONLY PERMITTED CHANGE is the body pose: ${poseInstruction}`,
+    '=== TASK: POSE-ONLY EDIT OF A REAL COMMERCIAL PRODUCT PHOTO ===',
+    'This is the same photo, just with a different body pose. Keep everything else pixel-faithful to Image 1 — same face, same skin tone, same body, and the exact same garments (same color, same fabric, same fit, same shoes, same accessories). Do not redraw, re-texture, sharpen, or reinterpret the clothing in any way.',
+    ...imageNotes,
+    `New pose: ${poseInstruction}`,
+    `Body must still match this fixed physique spec: ${PERSONAL_BODY_SPEC}`,
     '',
-    '=== BACKGROUND ===',
-    hasBackgroundReferenceImage
-      ? 'One of the additional input images shows the EXACT target studio backdrop and lighting (soft frontal light, gentle top-down falloff, seamless cyclorama floor curve). Reproduce this exact background and lighting — do NOT invent a different location or mood.'
-      : 'Keep the same clean white studio background and lighting as the input image.',
+    '=== NEGATIVE CONSTRAINTS ===',
+    'cartoon, illustration, CGI, 3D render, different person, different face, different clothing, different color, different footwear, added or altered fabric pattern/texture, extra limbs, bad hands, distorted anatomy, collage, split screen, multi-panel grid, watermark, text, logo, low resolution, blurry.',
     '',
-    '=== NEGATIVE CONSTRAINTS (ABSOLUTE) ===',
-    'cartoon, illustration, CGI, 3D render, different person, different face, different clothing, different fabric texture, different weave pattern, invented pattern, different colors, different footwear, extra limbs, bad hands, distorted anatomy, collage, split screen, multi-panel, grid of photos, side-by-side comparison, watermark, text, logo, low resolution, blurry.',
-    '',
-    '=== OUTPUT QUALITY MANDATE ===',
-    'Single authentic commercial lookbook photograph, full body shot head to toe, photorealistic, exact same fabric texture as the reference, professional studio lighting. No CGI, no collage, single subject only.',
+    'Single photorealistic full-body commercial lookbook photograph, head to toe visible, professional studio lighting.',
   ].join('\n');
 }
 
@@ -93,13 +113,18 @@ async function runSingleVariation(
   sourceMime: string,
   poseInstruction: string,
   backgroundReferenceImage: { buffer: Buffer; mimeType: string } | null,
+  poseReferenceImage: { buffer: Buffer; mimeType: string } | null,
 ): Promise<{ imageUrl: string; engineUsed: string }> {
   const sourceFile = await toOpenAIFile(sourceBuf, sourceMime, `source.${sourceMime.split('/')[1] || 'jpg'}`);
-  const imageInput = backgroundReferenceImage
-    ? [sourceFile, await toOpenAIFile(backgroundReferenceImage.buffer, backgroundReferenceImage.mimeType, `background.${backgroundReferenceImage.mimeType.split('/')[1] || 'jpg'}`)]
-    : sourceFile;
+  const refs = [backgroundReferenceImage, poseReferenceImage].filter(
+    (r): r is { buffer: Buffer; mimeType: string } => !!r,
+  );
+  const refFiles = await Promise.all(
+    refs.map((r, i) => toOpenAIFile(r.buffer, r.mimeType, `reference-${i}.${r.mimeType.split('/')[1] || 'jpg'}`)),
+  );
+  const imageInput = refFiles.length > 0 ? [sourceFile, ...refFiles] : sourceFile;
 
-  const prompt = buildVariationPrompt(poseInstruction, !!backgroundReferenceImage);
+  const prompt = buildVariationPrompt(poseInstruction, !!backgroundReferenceImage, !!poseReferenceImage);
 
   const res = await (openai.images as any).edit({
     model: 'gpt-image-2',
@@ -134,7 +159,7 @@ export async function POST(req: Request) {
 
     // 포즈마다 "처리 중" 행을 먼저 만들어 id를 즉시 반환한다 — 실제 생성은 아래 after()에서 진행.
     const jobs = await Promise.all(
-      poses.map(async (pose) => ({
+      poses.map(async ({ pose, poseNumber }) => ({
         generationId: await createPendingGeneration({
           pipeline: 'restyle',
           modeOrCategory: 'variation',
@@ -142,6 +167,7 @@ export async function POST(req: Request) {
           prompt: pose.poseInstruction,
         }),
         pose,
+        poseNumber,
       })),
     );
 
@@ -152,9 +178,12 @@ export async function POST(req: Request) {
       const backgroundReferenceImage = getDefaultBackgroundReferenceImage();
 
       await Promise.allSettled(
-        jobs.map(async ({ generationId, pose }) => {
+        jobs.map(async ({ generationId, pose, poseNumber }) => {
           try {
-            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage);
+            // 사용자가 public/poses/pose_{N}.png 에 포즈 참고 사진을 넣어두면 자동으로 같이 참고한다.
+            // 없으면 조용히 건너뛰고 텍스트 포즈 지시만으로 진행(기존 동작 그대로).
+            const poseReferenceImage = getPoseReferenceImage(poseNumber);
+            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage);
             const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
             await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt: pose.poseInstruction });
           } catch (err: any) {

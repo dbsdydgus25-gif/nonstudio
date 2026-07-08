@@ -68,11 +68,13 @@ export function FittingResultViewer({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || '크롭 저장에 실패했습니다.');
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success || !data?.dataUrl) {
+        throw new Error(data?.error || '크롭 저장에 실패했습니다.');
       }
-      const blob = await res.blob();
+      // base64 data URL을 그대로 다운로드하면 브라우저가 파일명을 못 붙이므로 blob으로 변환
+      const blobRes = await fetch(data.dataUrl);
+      const blob = await blobRes.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

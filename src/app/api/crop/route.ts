@@ -84,13 +84,11 @@ export async function POST(req: Request) {
       .png()
       .toBuffer();
 
-    return new NextResponse(outputBuffer, {
-      status: 200,
-      headers: {
-        'Content-Type': 'image/png',
-        'Content-Disposition': `attachment; filename="crop_${filenameTag}.png"`,
-      },
-    });
+    // (2026-07-09) raw binary Response로 반환했더니 프로덕션에서 간헐적으로 "손상된 파일"
+    // 다운로드가 발생했다 — 원인은 정확히 특정 못했지만(로컬 재현 실패), 프록시/스트리밍 경로에서
+    // 바이너리 응답이 깨질 여지가 있는 것으로 보고 base64 JSON 응답으로 바꿔 근본적으로 우회한다.
+    const dataUrl = `data:image/png;base64,${outputBuffer.toString('base64')}`;
+    return NextResponse.json({ success: true, dataUrl, filenameTag });
   } catch (err: any) {
     console.error('[api/crop] 처리 실패:', err);
     return NextResponse.json({ error: err.message || '크롭 처리 중 오류가 발생했습니다.' }, { status: 500 });
