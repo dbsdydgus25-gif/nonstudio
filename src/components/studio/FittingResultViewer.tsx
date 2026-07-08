@@ -237,11 +237,13 @@ export function FittingResultViewer({
                 </div>
               </div>
 
-              {currentResult.revisedPrompt && (
+              {currentResult.prompt && (
                 <div className="mt-6 w-full max-w-2xl bg-gray-50 border border-gray-200 rounded-2xl p-4 text-xs text-gray-500 space-y-1">
-                  <div className="font-bold text-emerald-600">✨ OpenAI DALL-E 3 최종 적용 프롬프트:</div>
-                  <p className="font-mono leading-relaxed text-[11px] text-gray-600 line-clamp-3 hover:line-clamp-none transition">
-                    {currentResult.revisedPrompt}
+                  <div className="font-bold text-emerald-600">
+                    ✨ OpenAI에 실제로 전달된 프롬프트 전문 {currentResult.revisedPrompt ? `(${currentResult.revisedPrompt})` : ''}:
+                  </div>
+                  <p className="font-mono leading-relaxed text-[11px] text-gray-600 whitespace-pre-wrap line-clamp-6 hover:line-clamp-none transition">
+                    {currentResult.prompt}
                   </p>
                 </div>
               )}
