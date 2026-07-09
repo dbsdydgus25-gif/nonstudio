@@ -99,9 +99,13 @@ function buildVariationPrompt(
     // (2026-07-09) 목 위(얼굴)가 안 나오게 크롭된 사진을 넣었는데 결과물에 얼굴이 새로 생성되던
     // 버그 — 이전 버전이 "head to toe visible"을 무조건 강제해서, 입력 사진에 없는 신체 부위까지
     // 억지로 만들어내고 있었다. 입력 사진의 크롭/프레이밍 자체를 그대로 유지하도록 명시.
-    'Match the exact framing and crop of Image 1. If Image 1 is cropped and does not show the head, face, or feet, the output must keep that exact same crop — do not extend the frame or invent any body part (face, head, feet, etc.) that is not already visible in Image 1. Only the pose of what IS visible changes.',
+    // (2026-07-09 2차) 프레이밍 규칙을 넣었는데도 얼굴이 다시 생성됨 — 포즈 지시문 안의
+    // 고개/시선 문구("head turned back...", "gaze looking down...")가 "머리가 존재해야 한다"는
+    // 신호로 작용해 프레이밍 규칙을 이기고 있었다. 머리가 안 보이는 입력이면 포즈 지시의
+    // 고개/시선 부분 자체를 무시하라고 우선순위를 명시적으로 못박는다.
+    'FRAMING RULE (HIGHEST PRIORITY — overrides everything else in this prompt including the pose instruction): the output must have the exact same framing and crop as Image 1. If Image 1 does not show the head/face (cropped at the neck or chest), the output must be cropped identically and contain NO head and NO face — in that case, ignore every part of the pose instruction that mentions the head, face, chin, or gaze, and apply only the body/arm/leg parts of the pose. Never extend the frame or invent any body part (head, face, feet, etc.) that is not visible in Image 1.',
     ...imageNotes,
-    `New pose: ${poseInstruction}`,
+    `New pose (apply only to body parts that are visible in Image 1): ${poseInstruction}`,
     // (2026-07-09) PERSONAL_BODY_SPEC 텍스트를 여기서 제거함 — 사용자 결정: AI 바리에이션은
     // "첨부된 사진을 그대로 가져와서 포즈만 바꾸는" 단계라, 텍스트 체형 스펙이 이미지와
     // 미묘하게 충돌해 재해석을 유발할 여지를 없앤다. 체형/피부톤/털/흉터 등 모델 정보는

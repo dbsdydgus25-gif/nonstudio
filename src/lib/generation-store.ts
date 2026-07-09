@@ -186,7 +186,7 @@ export interface GenerationHistoryItem {
  * 최근 생성 기록 조회 (히스토리 화면용) — 페이지를 나갔다 들어와도 이전 결과를 볼 수 있도록
  * React state 대신 Supabase에서 직접 불러온다. 이미지는 비공개 버킷이라 서명된 URL로 반환.
  */
-export async function listRecentGenerations(source: 'fitting' | 'variation', limit = 24): Promise<GenerationHistoryItem[]> {
+export async function listRecentGenerations(source: 'fitting' | 'variation' | 'product', limit = 24): Promise<GenerationHistoryItem[]> {
   try {
     const supabase = getSupabaseAdmin();
     let query = supabase
@@ -196,7 +196,9 @@ export async function listRecentGenerations(source: 'fitting' | 'variation', lim
       .eq('status', 'completed')
       .order('created_at', { ascending: false })
       .limit(limit);
-    query = source === 'variation' ? query.eq('mode_or_category', 'variation') : query.neq('mode_or_category', 'variation');
+    if (source === 'variation') query = query.eq('mode_or_category', 'variation');
+    else if (source === 'product') query = query.eq('mode_or_category', 'product');
+    else query = query.not('mode_or_category', 'in', '("variation","product")');
 
     const { data, error } = await query;
     if (error) throw error;

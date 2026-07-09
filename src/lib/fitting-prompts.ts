@@ -5,8 +5,10 @@
  */
 
 // ─────────────────────────────────────────────────────────────────
-// 0. 사용자 고정 체형 스펙 (단일 기준 — AI 피팅 / AI 바리에이션 두 파이프라인 모두 동일하게 적용)
+// 0. "윤용현 모델 정보" — 고정 체형/피부 스펙 (AI 피팅 / AI 제품 피팅에서 사용)
 // 어떤 사진을 넣든 항상 동일한 체형/피부톤/비율로 결과가 나오도록, 파이프라인마다 따로 적지 않고 여기 하나만 수정한다.
+// 나중에 서비스화하면 모델별로 이 스펙을 여러 개 저장하는 구조가 될 예정 — 지금은 윤용현 1인 고정.
+// AI 바리에이션에는 넣지 않는다 — 바리에이션은 첨부된 사진 자체가 유일한 기준 (2026-07-09 원칙 확립).
 // ─────────────────────────────────────────────────────────────────
 // (2026-07-09) 이전엔 "노골적으로 태닝된 medium-deep warm brown, 절대 밝게 하지 마라"처럼
 // 강하게 밀어붙였더니 실제보다 너무 까맣게 나오고, veins를 반복 언급했더니 오히려 부자연스럽게
@@ -16,7 +18,7 @@ export const PERSONAL_BODY_SPEC = `
 - Height 177cm, Weight 74kg, Shoe/foot size 270mm (Korean 270 size).
 - Skin tone: a natural warm tan Korean skin tone — like an ordinary person who spends a normal amount of time outdoors. Healthy and realistic, not pale/porcelain white, but also not an exaggerated dark tan. It should look like real human skin in a photo, not a stylized or saturated color.
 - Build: athletic and toned, lean muscular definition — not a bulky bodybuilder, not skinny. A natural everyday fit-person physique.
-- Skin surface should look smooth and photographically realistic — avoid exaggerated muscle striations, and avoid rendering visible vein lines; ordinary healthy skin texture only.
+- Arms and hands: smooth, even, ordinary skin. Veins may be at most faintly suggested near the hands, but forearms should read as smooth — no bulging, ropey, or sharply defined veins anywhere.
 - Body hair: a modest, natural amount of fine short vellus-like hair on the forearms and lower legs — subtle and realistic, the way arm hair looks on an ordinary Korean man in a photo. Not thick or dense, but NOT perfectly hairless either; completely smooth hairless arms look artificial.
 - One small identifying detail: a faint, barely-noticeable scar about 1cm long on the forearm — very subtle, like an old healed scratch. Do not make it dramatic or dark; it should only be visible on close inspection.
 - This physique and skin tone are a fixed personal standard and should stay consistent across every generation.
@@ -192,6 +194,67 @@ export function buildRestylePrompt(
     '=== NEW STYLING TO GENERATE ===',
     `Every item listed below REPLACES whatever the person is wearing in that slot in the input photo — the input photo's own bottom/shoes/accessories (other than the one protected sourced item above) are NOT the reference and must NOT be preserved, copied, or kept similar in silhouette/color/style. Generate exactly what is described below instead, even if it looks completely different from the input photo.`,
     stylingLines.length > 0 ? stylingLines.join('\n') : '- Complete the outfit naturally with cohesive, stylish items.',
+    backgroundLine,
+    '',
+    '=== NEGATIVE CONSTRAINTS (ABSOLUTE) ===',
+    RESTYLE_QUALITY_CONSTRAINTS,
+    '',
+    '=== OUTPUT QUALITY MANDATE ===',
+    'Produce a single authentic commercial lookbook photograph — the kind a person would want to buy the product after seeing. Photorealistic, natural skin texture, natural fabric folds, professional photography lighting. No CGI, no collage, single subject only.',
+  ].join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────────
+// AI 제품 피팅 (신규, 2026-07-09) — 착용 사진 없이 "제품 단독 이미지"만으로
+// 윤용현 모델(PERSONAL_BODY_SPEC + 아이덴티티 참고 사진)이 그 제품을 입은 화보를 생성한다.
+// 소싱 단계에서 샘플을 직접 못 입어보는 문제 해결용 — 색상 옵션 이미지별로 병렬 생성 가능.
+// AI 피팅과의 차이: 입력 이미지가 "사람이 입은 사진"이 아니라 "제품 자체"라서,
+// 몸 리셰이프가 아니라 모델 전체를 참고 사진 기준으로 새로 그려야 한다.
+// ─────────────────────────────────────────────────────────────────
+export function buildProductFittingPrompt(
+  category: SourcedCategory,
+  garmentAnalysis: GarmentAnalysis,
+  stylingSuggestion: StylingSuggestion,
+  userAdditions: string = '',
+  hasBackgroundReferenceImage: boolean = false,
+  hasIdentityReferenceImage: boolean = false,
+): string {
+  const stylingLines: string[] = [];
+  if (stylingSuggestion.top) stylingLines.push(`- 상의: ${stylingSuggestion.top}`);
+  if (stylingSuggestion.bottom) stylingLines.push(`- 하의: ${stylingSuggestion.bottom}`);
+  if (stylingSuggestion.shoes) stylingLines.push(`- 신발: ${stylingSuggestion.shoes}`);
+  if (stylingSuggestion.accessory) stylingLines.push(`- 액세서리: ${stylingSuggestion.accessory}`);
+
+  const poseHintBlock = userAdditions.trim()
+    ? ` MANDATORY POSE/PROP REQUIREMENT (must be included exactly as described): ${userAdditions.trim()}`
+    : '';
+
+  const backgroundLine = hasBackgroundReferenceImage
+    ? `- Background: one of the additional input images shows the EXACT target studio backdrop and lighting setup (soft frontal light, gentle top-down falloff, seamless cyclorama floor curve). Reproduce this exact background, light direction, and shadow softness on the subject. (${stylingSuggestion.background})`
+    : `- Background: ${stylingSuggestion.background}`;
+
+  const identityReferenceLine = hasIdentityReferenceImage
+    ? '\n- One of the additional input images is a FACE / BODY SHAPE / SKIN TONE reference ONLY — generate this exact person as the model. Do NOT copy any clothing or accessory from that reference photo; the outfit is defined entirely by the PRODUCT and NEW STYLING sections.'
+    : '';
+
+  return [
+    '=== TASK: PRODUCT PHOTO → MODEL WEARING IT ===',
+    `Image 1 is a shop listing photo of a ${CATEGORY_PRESERVE_LABEL[category]} — it may be laid flat, on a hanger, a catalog shot, or worn by some shop model. In every case, ONLY the product itself is the reference: completely ignore any person, body, face, pose, other garments, and background shown in Image 1. Generate a photorealistic commercial lookbook photograph of the model described below (and ONLY that model) actually WEARING this exact product, fitted naturally on the body.`,
+    '',
+    '=== MODEL (fixed personal standard) ===',
+    PERSONAL_BODY_SPEC + identityReferenceLine,
+    '',
+    '=== PRODUCT FIDELITY (Image 1 is the source of truth) ===',
+    `- Reproduce the product in Image 1 with complete fidelity: exact same color and shade, same fabric texture, same details (buttons, stitching, pockets, prints, logos as shown), same overall silhouette — a customer must recognize it as the same product they saw in the shop listing.`,
+    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.`,
+    '- CRITICAL COLOR RULE: the color in Image 1 is the actual product color being sold — match it precisely, do not shift the hue, saturation, or brightness. If the spec text and Image 1 seem to disagree, Image 1 wins.',
+    '- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image 1 — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.',
+    '',
+    '=== POSE & FRAMING (ABSOLUTE) ===',
+    `Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped. Clean, confident, polished commercial standing pose with natural hand placement.${poseHintBlock}`,
+    '',
+    '=== NEW STYLING TO GENERATE (everything except the product above) ===',
+    stylingLines.length > 0 ? stylingLines.join('\n') : '- Complete the outfit naturally with cohesive, stylish items that flatter the product.',
     backgroundLine,
     '',
     '=== NEGATIVE CONSTRAINTS (ABSOLUTE) ===',

@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from '@/components/studio/Sidebar';
 import { RestyleSection } from '@/components/studio/RestyleSection';
+import { ProductFittingSection } from '@/components/studio/ProductFittingSection';
 import { VariationSection } from '@/components/studio/VariationSection';
 import { HistorySection } from '@/components/studio/HistorySection';
 import { ApiKeyModal } from '@/components/studio/ApiKeyModal';
@@ -13,8 +14,8 @@ export default function StudioPage() {
   const [openaiKey, setOpenaiKey] = useState('');
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
 
-  // Navigation — 'restyle' = AI 피팅, 'fitting' = AI 바리에이션 (내부 상태값 이름은 유지, 화면 라벨만 바뀜)
-  const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'history'>('restyle');
+  // Navigation — 'restyle' = AI 피팅, 'product' = AI 제품 피팅, 'fitting' = AI 바리에이션 (내부 상태값 이름은 유지, 화면 라벨만 바뀜)
+  const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'product' | 'history'>('restyle');
 
   // AI 피팅 → AI 바리에이션으로 넘기는 이미지
   const [variationSourceImage, setVariationSourceImage] = useState<string | null>(null);
@@ -71,6 +72,14 @@ export default function StudioPage() {
                   <p className="text-[10px] text-gray-400">대충 찍은 실사 사진 한 장 → 전신 1장으로 확정된 룩</p>
                 </div>
               </>
+            ) : activePage === 'product' ? (
+              <>
+                <span className="text-xl">🧥</span>
+                <div>
+                  <h1 className="text-sm font-black text-gray-900">AI 제품 피팅</h1>
+                  <p className="text-[10px] text-gray-400">제품 사진만으로 모델이 입은 화보 생성 (색상 옵션별 지원)</p>
+                </div>
+              </>
             ) : activePage === 'fitting' ? (
               <>
                 <span className="text-xl">🧍</span>
@@ -99,6 +108,13 @@ export default function StudioPage() {
 
         {activePage === 'restyle' ? (
           <RestyleSection
+            geminiKey={geminiKey}
+            openaiKey={openaiKey}
+            onNeedKeys={() => setIsKeyModalOpen(true)}
+            onSendToVariation={handleSendToVariation}
+          />
+        ) : activePage === 'product' ? (
+          <ProductFittingSection
             geminiKey={geminiKey}
             openaiKey={openaiKey}
             onNeedKeys={() => setIsKeyModalOpen(true)}

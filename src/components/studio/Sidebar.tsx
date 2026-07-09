@@ -3,8 +3,8 @@
 import React from 'react';
 
 interface SidebarProps {
-  activePage: 'fitting' | 'restyle' | 'history';
-  onPageChange: (page: 'fitting' | 'restyle' | 'history') => void;
+  activePage: 'fitting' | 'restyle' | 'product' | 'history';
+  onPageChange: (page: 'fitting' | 'restyle' | 'product' | 'history') => void;
   onOpenApiKeys: () => void;
   geminiKey: string;
   openaiKey: string;
@@ -55,6 +55,24 @@ export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, op
               <div className="text-[10px] text-gray-400 truncate">실사 사진 → 전신 1장 확정 룩</div>
             </div>
             {activePage === 'restyle' && (
+              <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+            )}
+          </button>
+
+          <button
+            onClick={() => { onPageChange('product'); }}
+            className={`mt-1 w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all group ${
+              activePage === 'product'
+                ? 'bg-amber-50 border border-amber-300 text-amber-700'
+                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 border border-transparent'
+            }`}
+          >
+            <span className="text-lg">🧥</span>
+            <div className="overflow-hidden">
+              <div className="text-sm font-bold truncate">AI 제품 피팅</div>
+              <div className="text-[10px] text-gray-400 truncate">제품 사진 → 모델 착용 화보 (색상별)</div>
+            </div>
+            {activePage === 'product' && (
               <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
             )}
           </button>
