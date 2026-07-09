@@ -17,7 +17,7 @@
 export const PERSONAL_BODY_SPEC = `
 - Height 177cm, Weight 74kg, Shoe/foot size 270mm (Korean 270 size).
 - Skin tone: a natural warm tan Korean skin tone — like an ordinary person who spends a normal amount of time outdoors. Healthy and realistic, not pale/porcelain white, but also not an exaggerated dark tan. It should look like real human skin in a photo, not a stylized or saturated color.
-- Build: athletic and toned, lean muscular definition — not a bulky bodybuilder, not skinny. A natural everyday fit-person physique.
+- Build: a slim, long-limbed fashion-model physique — lean editorial proportions with a slim waist and a long clean silhouette. Shoulders moderately broad; arms and chest naturally toned and defined just enough to fill a fitted knit cleanly, but clearly on the slim side — NOT a gym-built or bulky body. Think lean Korean fashion model, not fitness model.
 - Arms and hands: smooth, even, ordinary skin. Veins may be at most faintly suggested near the hands, but forearms should read as smooth — no bulging, ropey, or sharply defined veins anywhere.
 - Body hair: a modest, natural amount of fine short vellus-like hair on the forearms and lower legs — subtle and realistic, the way arm hair looks on an ordinary Korean man in a photo. Not thick or dense, but NOT perfectly hairless either; completely smooth hairless arms look artificial.
 - One small identifying detail: a faint, barely-noticeable scar about 1cm long on the forearm — very subtle, like an old healed scratch. Do not make it dramatic or dark; it should only be visible on close inspection.
