@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { ImageUploader } from './ImageUploader';
 import { FittingResultViewer, type HistoryItem } from './FittingResultViewer';
 import { pollGenerationStatuses } from '@/lib/poll-generations';
+import { downloadResultImage } from '@/lib/download-image';
 
 interface BatchItem {
   generationId: string;
@@ -28,6 +29,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
   const [stageMsg, setStageMsg] = useState('');
 
   const [batchImages, setBatchImages] = useState<BatchItem[]>([]);
+  const [isBatchDownloading, setIsBatchDownloading] = useState(false);
   const [currentResult, setCurrentResult] = useState<{ imageUrl: string; prompt: string; revisedPrompt?: string; generationId?: string | null } | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
@@ -252,19 +254,26 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-black text-gray-900">이번 배치 ({batchImages.length}장)</h4>
                 <button
-                  onClick={() => {
-                    batchImages
-                      .filter((img) => img.status === 'completed' && img.imageUrl)
-                      .forEach((img, i) => {
-                        const a = document.createElement('a');
-                        a.href = img.imageUrl!;
-                        a.download = `variation_${i + 1}_${Date.now()}.png`;
-                        a.click();
-                      });
+                  disabled={isBatchDownloading}
+                  onClick={async () => {
+                    // cross-origin URL에 <a download>를 쓰면 브라우저가 조용히 무시함 —
+                    // 서버 프록시로 한 장씩 받아서 저장한다 (동시에 여러 다운로드를 트리거하면
+                    // 브라우저가 일부를 막는 경우가 있어 순차 처리).
+                    setIsBatchDownloading(true);
+                    try {
+                      const completed = batchImages.filter((img) => img.status === 'completed' && img.imageUrl);
+                      for (const [i, img] of completed.entries()) {
+                        await downloadResultImage(img.imageUrl!, `variation_${i + 1}_${Date.now()}.png`);
+                      }
+                    } catch (err: any) {
+                      alert(err?.message || '전체 다운로드 중 오류가 발생했습니다.');
+                    } finally {
+                      setIsBatchDownloading(false);
+                    }
                   }}
-                  className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 border border-gray-200 text-xs text-gray-600 font-bold transition flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 border border-gray-200 text-xs text-gray-600 font-bold transition flex items-center gap-1.5 disabled:opacity-50"
                 >
-                  ⬇ 전체 다운로드
+                  {isBatchDownloading ? '⬇ 저장 중...' : '⬇ 전체 다운로드'}
                 </button>
               </div>
               <div className="grid grid-cols-4 gap-4">

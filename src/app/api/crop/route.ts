@@ -7,6 +7,8 @@
 
 import { NextResponse } from 'next/server';
 import sharp from 'sharp';
+import { getSupabaseAdmin, GENERATIONS_BUCKET } from '@/lib/supabase';
+import { extractStoragePath } from '@/lib/storage-url';
 
 export const runtime = 'nodejs';
 
@@ -21,6 +23,14 @@ async function loadImageBuffer(imageUrl: string): Promise<Buffer> {
   if (imageUrl.startsWith('data:')) {
     const base64 = imageUrl.split(',')[1] || '';
     return Buffer.from(base64, 'base64');
+  }
+  // 우리 버킷의 서명 URL이면 경로로 직접 받는다 — 서명 URL은 1시간이면 만료돼서,
+  // 페이지를 오래 열어둔 뒤 크롭을 누르면 만료된 URL fetch가 400으로 실패했음.
+  const storagePath = extractStoragePath(imageUrl);
+  if (storagePath) {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase.storage.from(GENERATIONS_BUCKET).download(storagePath);
+    if (!error && data) return Buffer.from(await data.arrayBuffer());
   }
   const res = await fetch(imageUrl);
   if (!res.ok) throw new Error(`이미지 다운로드 실패 (status ${res.status})`);

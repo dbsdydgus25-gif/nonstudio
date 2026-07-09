@@ -14,7 +14,7 @@
 import { NextResponse } from 'next/server';
 import { after } from 'next/server';
 import OpenAI, { toFile } from 'openai';
-import { FULLBODY_POSES, PERSONAL_BODY_SPEC } from '@/lib/fitting-prompts';
+import { FULLBODY_POSES } from '@/lib/fitting-prompts';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { getPoseReferenceImage } from '@/lib/pose-reference';
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
@@ -102,7 +102,11 @@ function buildVariationPrompt(
     'Match the exact framing and crop of Image 1. If Image 1 is cropped and does not show the head, face, or feet, the output must keep that exact same crop — do not extend the frame or invent any body part (face, head, feet, etc.) that is not already visible in Image 1. Only the pose of what IS visible changes.',
     ...imageNotes,
     `New pose: ${poseInstruction}`,
-    `Body must still match this fixed physique spec: ${PERSONAL_BODY_SPEC}`,
+    // (2026-07-09) PERSONAL_BODY_SPEC 텍스트를 여기서 제거함 — 사용자 결정: AI 바리에이션은
+    // "첨부된 사진을 그대로 가져와서 포즈만 바꾸는" 단계라, 텍스트 체형 스펙이 이미지와
+    // 미묘하게 충돌해 재해석을 유발할 여지를 없앤다. 체형/피부톤/털/흉터 등 모델 정보는
+    // 전부 AI 피팅(restyle) 단계에서만 주입되고, 바리에이션은 그 결과 사진 자체가 유일한 기준.
+    'The person in Image 1 IS the model spec — do not adjust the body, skin, or face toward any other standard.',
     '',
     '=== NEGATIVE CONSTRAINTS ===',
     'cartoon, illustration, CGI, 3D render, different person, different face, different clothing, different color, different footwear, added or altered fabric pattern/texture, inventing body parts not shown in Image 1, extending the frame beyond Image 1\'s crop, extra limbs, bad hands, distorted anatomy, collage, split screen, multi-panel grid, watermark, text, logo, low resolution, blurry.',

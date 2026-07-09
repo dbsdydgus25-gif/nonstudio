@@ -17,6 +17,8 @@ export const PERSONAL_BODY_SPEC = `
 - Skin tone: a natural warm tan Korean skin tone — like an ordinary person who spends a normal amount of time outdoors. Healthy and realistic, not pale/porcelain white, but also not an exaggerated dark tan. It should look like real human skin in a photo, not a stylized or saturated color.
 - Build: athletic and toned, lean muscular definition — not a bulky bodybuilder, not skinny. A natural everyday fit-person physique.
 - Skin surface should look smooth and photographically realistic — avoid exaggerated muscle striations, and avoid rendering visible vein lines; ordinary healthy skin texture only.
+- Body hair: a modest, natural amount of fine short vellus-like hair on the forearms and lower legs — subtle and realistic, the way arm hair looks on an ordinary Korean man in a photo. Not thick or dense, but NOT perfectly hairless either; completely smooth hairless arms look artificial.
+- One small identifying detail: a faint, barely-noticeable scar about 1cm long on the forearm — very subtle, like an old healed scratch. Do not make it dramatic or dark; it should only be visible on close inspection.
 - This physique and skin tone are a fixed personal standard and should stay consistent across every generation.
 `.trim();
 

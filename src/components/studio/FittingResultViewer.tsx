@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactCrop, { type Crop, type PercentCrop, centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
+import { downloadResultImage } from '@/lib/download-image';
 
 export interface HistoryItem {
   id: string;
@@ -106,23 +107,14 @@ export function FittingResultViewer({
     setIsFreeCropOpen(false);
   };
 
-  // Supabase 서명 URL은 앱과 다른 도메인(cross-origin)이라 <a download> 속성이 브라우저에서
-  // 무시되고 그냥 새 탭으로 열리기만 했음 — blob으로 직접 받아서 다운로드를 강제한다.
+  // Supabase 서명 URL은 cross-origin + 1시간 만료라 클라이언트 직접 fetch가 실패할 수 있음
+  // (페이지를 오래 열어두면 만료된 URL로 400) — 서버 프록시(/api/download)로 항상 신선하게 받는다.
   const handleDownloadOriginal = async (imageUrl: string) => {
     setIsDownloadingOriginal(true);
     try {
-      const res = await fetch(imageUrl);
-      if (!res.ok) throw new Error('이미지를 불러오지 못했습니다.');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `AI_Fitting_Result_${Date.now()}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
+      await downloadResultImage(imageUrl, `AI_Fitting_Result_${Date.now()}.png`);
     } catch (err: any) {
-      // fetch가 CORS 등으로 막히면 최소한 새 탭에서라도 열어서 사용자가 직접 저장할 수 있게 한다
-      window.open(imageUrl, '_blank', 'noreferrer');
+      alert(err?.message || '다운로드에 실패했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
       setIsDownloadingOriginal(false);
     }
