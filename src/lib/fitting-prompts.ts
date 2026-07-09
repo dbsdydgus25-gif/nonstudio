@@ -48,41 +48,46 @@ export interface PoseVariation {
   poseInstruction: string;
 }
 
+// (2026-07-09) 모든 포즈에서 얼굴이 항상 카메라를 정면으로 응시하는 뻣뻣한 느낌이 있었음 —
+// 포즈 지시에 시선 방향을 명시하지 않으면 모델이 기본값으로 "카메라 정면 응시"를 택하는
+// 경향이 있는 것으로 보임(입력 사진의 얼굴이 카메라를 보고 있으면 그 습성을 그대로 따라가는
+// 듯). 매 포즈마다 자연스러운 시선/고개 방향을 구체적으로 명시해서 화보처럼 다양한 표정이
+// 나오게 함 — 무조건 카메라를 피하라는 게 아니라, 포즈마다 그 상황에 자연스러운 시선을 지정.
 export const FULLBODY_POSES: PoseVariation[] = [
   {
     id: 'full_relaxed_front',
     label: '전신 정면 자연스러운 포즈',
-    poseInstruction: 'Pose: Standing naturally, arms resting relaxed at sides, hands loose. Entire silhouette is clean and balanced.',
+    poseInstruction: 'Pose: Standing naturally, arms resting relaxed at sides, hands loose. Entire silhouette is clean and balanced. Gaze relaxed and slightly softened, looking just past the camera into the middle distance — not a stiff, wide-eyed stare directly into the lens.',
   },
   {
     id: 'full_walking_front',
     label: '전신 걷는 포즈',
-    poseInstruction: 'Pose: Walking forward confidently, relaxed arms, showcasing realistic movement folds in both top and bottom garments.',
+    poseInstruction: 'Pose: Walking forward confidently, relaxed arms, showcasing realistic movement folds in both top and bottom garments. Head and gaze looking naturally ahead in the walking direction, as if genuinely mid-stride rather than posing for a photo — not locked onto the camera.',
   },
   {
     id: 'full_relaxed_pocket',
     label: '전신 릴렉스 포켓 포즈',
-    poseInstruction: 'Pose: Hands casually tucked in pants pockets, feet shoulder-width apart, showing natural layering of top over bottom.',
+    poseInstruction: 'Pose: Hands casually tucked in pants pockets, feet shoulder-width apart, showing natural layering of top over bottom. Head tilted slightly downward, gaze looking down and off to one side in a relaxed, candid manner — not staring directly into the lens.',
   },
   {
     id: 'full_quarter_turn',
     label: '전신 쿼터뷰 측면 포즈',
-    poseInstruction: 'Pose: Standing in a three-quarter turn, showing side silhouette and layering balance.',
+    poseInstruction: 'Pose: Standing in a three-quarter turn, showing side silhouette and layering balance. Head naturally follows the body\'s turn, gaze drifting off to the side into the distance — not twisted back to face the camera.',
   },
   {
     id: 'full_side_profile_right',
     label: '전신 완전 측면(우측) 포즈',
-    poseInstruction: 'Pose: Standing in a full right-side profile, body turned a full 90 degrees so only the side silhouette faces the camera, chin turned slightly back toward the lens, one arm relaxed at the side.',
+    poseInstruction: 'Pose: Standing in a full right-side profile, body turned a full 90 degrees so only the side silhouette faces the camera, one arm relaxed at the side. Head and gaze face the same direction as the body (a true side profile of the face too) — do not twist the neck to look back at the camera.',
   },
   {
     id: 'full_back_three_quarter',
     label: '전신 백뷰 쿼터턴 포즈',
-    poseInstruction: 'Pose: Standing with the back turned three-quarters away from the camera, head turned back over the shoulder toward the lens, showing the back of the outfit with a hint of the side profile.',
+    poseInstruction: 'Pose: Standing with the back turned three-quarters away from the camera, showing the back of the outfit with a hint of the side profile. Head turned back gently over the shoulder with a soft, relaxed gaze — a natural candid glance, not a stiff stare directly into the lens.',
   },
   {
     id: 'full_side_lean_pocket',
     label: '전신 측면 체중이동 포켓 포즈',
-    poseInstruction: 'Pose: Standing in a side-turned stance with weight shifted onto one leg, hand tucked casually into the pocket, shoulders angled away from the camera for a candid lookbook feel.',
+    poseInstruction: 'Pose: Standing in a side-turned stance with weight shifted onto one leg, hand tucked casually into the pocket, shoulders angled away from the camera for a candid lookbook feel. Head tilted down slightly, gaze looking downward and away in an unposed, candid manner.',
   },
 ];
 
