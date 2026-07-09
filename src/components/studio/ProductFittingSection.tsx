@@ -15,17 +15,17 @@ interface ProductFittingSectionProps {
 }
 
 const CATEGORY_OPTIONS: { id: SourcedCategory; label: string; desc: string }[] = [
-  { id: 'top', label: '👕 상의', desc: '제품이 상의' },
-  { id: 'bottom', label: '👖 하의', desc: '제품이 하의' },
-  { id: 'shoes', label: '👟 신발', desc: '제품이 신발' },
-  { id: 'accessory', label: '💍 액세서리', desc: '가방/시계/주얼리 등' },
+  { id: 'top', label: '상의', desc: '제품이 상의' },
+  { id: 'bottom', label: '하의', desc: '제품이 하의' },
+  { id: 'shoes', label: '신발', desc: '제품이 신발' },
+  { id: 'accessory', label: '액세서리', desc: '가방 · 시계 · 주얼리 등' },
 ];
 
-const STYLE_SLOT_META: Record<SourcedCategory, { icon: string; label: string; placeholder: string }> = {
-  top: { icon: '👕', label: '상의 스타일', placeholder: '예:\n미니멀한 톤의 니트' },
-  bottom: { icon: '👖', label: '하의 스타일', placeholder: '예:\n생지 와이드 데님, 기장감 긴 걸로\n(배바지 아님)' },
-  shoes: { icon: '👟', label: '신발 스타일', placeholder: '예:\n베이지 계열 샌들' },
-  accessory: { icon: '💍', label: '액세서리 스타일', placeholder: '예:\n토트백 하나' },
+const STYLE_SLOT_META: Record<SourcedCategory, { label: string; placeholder: string }> = {
+  top: { label: '상의 스타일', placeholder: '예: 미니멀한 톤의 니트' },
+  bottom: { label: '하의 스타일', placeholder: '예: 생지 와이드 데님, 기장감 긴 걸로 (배바지 아님)' },
+  shoes: { label: '신발 스타일', placeholder: '예: 베이지 계열 샌들' },
+  accessory: { label: '액세서리 스타일', placeholder: '예: 토트백 하나' },
 };
 
 interface ColorJobItem {
@@ -112,7 +112,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     }
 
     setIsRunning(true);
-    setStageMsg('제품 분석 · 코디 · 렌더링 중... (색상 옵션별 병렬 생성, 최대 2분)');
+    setStageMsg('제품 분석 및 렌더링 중 (색상별 병렬 생성, 최대 2분)');
     setCurrentResult(null);
     setColorJobs([]);
 
@@ -197,30 +197,31 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-8 py-8 space-y-8">
+    <div className="max-w-4xl mx-auto px-8 py-10 space-y-10">
       {/* 제품 이미지 업로드 (색상 옵션 포함 다중) */}
-      <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black text-sky-600 uppercase tracking-widest">Step 01</span>
-          <h2 className="text-sm font-black text-gray-900">제품 이미지 업로드 (색상 옵션별로 여러 장 가능)</h2>
+      <section className="space-y-4">
+        <div className="flex items-baseline gap-3">
+          <span className="text-[11px] font-semibold text-gray-300 tabular-nums">01</span>
+          <h2 className="text-sm font-semibold text-gray-900 tracking-tight">제품 이미지 업로드</h2>
+          <span className="text-[11px] text-gray-400">색상 옵션별 여러 장 가능</span>
         </div>
-        <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 space-y-3">
-          <p className="text-xs text-gray-500">
-            사람이 입지 않은 제품 단독 사진(누끼/행거/상세페이지 컷)을 올려주세요. 색상 옵션이 여러 개면 색상별 이미지를 전부 올리면 <b>색상별로 1장씩</b> 생성됩니다 (최대 6장).
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
+          <p className="text-xs text-gray-400 leading-relaxed">
+            제품 단독 컷(누끼 · 행거 · 상세페이지)이나 타사 착용샷 모두 가능합니다. 색상 옵션 이미지를 전부 올리면 색상별로 1장씩 생성됩니다 (최대 6장).
           </p>
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
             {productImages.map((img, i) => (
-              <div key={i} className="relative aspect-[3/4] rounded-xl overflow-hidden border border-gray-200 group bg-white">
+              <div key={i} className="relative aspect-[3/4] rounded-lg overflow-hidden border border-gray-200 group bg-gray-50">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={img} alt={`제품 ${i + 1}`} className="w-full h-full object-contain" />
                 <button
                   type="button"
                   onClick={() => setProductImages((prev) => prev.filter((_, idx) => idx !== i))}
-                  className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white text-xs opacity-0 group-hover:opacity-100 transition"
+                  className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white text-[11px] opacity-0 group-hover:opacity-100 transition"
                 >
                   ✕
                 </button>
-                <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-bold">
+                <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-medium tracking-wide">
                   {productImages.length > 1 ? `색상 ${i + 1}` : '대표'}
                 </span>
               </div>
@@ -229,10 +230,10 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="aspect-[3/4] rounded-xl border-2 border-dashed border-gray-300 hover:border-sky-400 hover:bg-sky-50 transition flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-sky-600"
+                className="aspect-[3/4] rounded-lg border border-dashed border-gray-300 hover:border-gray-400 transition flex flex-col items-center justify-center gap-1.5 text-gray-400 hover:text-gray-600"
               >
-                <span className="text-2xl">＋</span>
-                <span className="text-[10px] font-bold">이미지 추가</span>
+                <span className="text-xl font-light leading-none">+</span>
+                <span className="text-[10px] font-medium tracking-wide">이미지 추가</span>
               </button>
             )}
           </div>
@@ -251,29 +252,31 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       </section>
 
       {/* 카테고리 */}
-      <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black text-sky-600 uppercase tracking-widest">Step 02</span>
-          <h2 className="text-sm font-black text-gray-900">제품 카테고리</h2>
+      <section className="space-y-4">
+        <div className="flex items-baseline gap-3">
+          <span className="text-[11px] font-semibold text-gray-300 tabular-nums">02</span>
+          <h2 className="text-sm font-semibold text-gray-900 tracking-tight">제품 카테고리</h2>
         </div>
-        <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 space-y-2">
-          <p className="text-xs text-gray-500">
-            저장된 모델 정보(윤용현 — 177/74 마른 근육형, 고정 피부톤)가 이 제품을 실제로 입은 룩북 화보를 생성합니다. 배경은 흰색 스튜디오로 고정됩니다.
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
+          <p className="text-xs text-gray-400 leading-relaxed">
+            저장된 모델 정보가 이 제품을 실제로 착용한 룩북 화보를 생성합니다. 배경은 화이트 스튜디오로 고정됩니다.
           </p>
-          <div className="grid grid-cols-4 gap-2 pt-2">
+          <div className="grid grid-cols-4 gap-2">
             {CATEGORY_OPTIONS.map((cat) => (
               <button
                 key={cat.id}
                 type="button"
                 onClick={() => setCategory(cat.id)}
-                className={`py-3 rounded-xl border text-center transition-all ${
+                className={`py-3.5 px-2 rounded-xl border text-center transition-all ${
                   category === cat.id
-                    ? 'border-sky-400 bg-sky-50 text-sky-700 font-bold shadow-sm'
+                    ? 'border-gray-900 bg-gray-900 text-white'
                     : 'border-gray-200 bg-white text-gray-500 hover:text-gray-900 hover:border-gray-300'
                 }`}
               >
-                <div className="text-xs">{cat.label}</div>
-                <div className="text-[9px] text-gray-400 font-normal mt-0.5">{cat.desc}</div>
+                <div className="text-[13px] font-semibold tracking-tight">{cat.label}</div>
+                <div className={`text-[10px] mt-0.5 ${category === cat.id ? 'text-gray-300' : 'text-gray-400'}`}>
+                  {cat.desc}
+                </div>
               </button>
             ))}
           </div>
@@ -281,35 +284,36 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       </section>
 
       {/* 추가 스타일링 지시 */}
-      <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black text-sky-600 uppercase tracking-widest">Step 03</span>
-          <h2 className="text-sm font-black text-gray-900">추가 스타일링 지시 (선택)</h2>
+      <section className="space-y-4">
+        <div className="flex items-baseline gap-3">
+          <span className="text-[11px] font-semibold text-gray-300 tabular-nums">03</span>
+          <h2 className="text-sm font-semibold text-gray-900 tracking-tight">추가 스타일링 지시</h2>
+          <span className="text-[11px] text-gray-400">선택</span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="bg-white border border-sky-200 rounded-2xl p-4 space-y-2">
-            <div className="text-[10px] font-black text-sky-600">🧍 자세</div>
+          <div className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
+            <div className="text-[11px] font-semibold text-gray-900 tracking-wide">자세</div>
             <textarea
               value={poseHint}
               onChange={(e) => setPoseHint(e.target.value)}
-              placeholder={`예:\n손 주머니에 넣고\n살짝 옆으로 돌아선 포즈`}
+              placeholder="예: 손 주머니에 넣고 살짝 옆으로 돌아선 포즈"
               rows={3}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-sky-500 resize-none font-mono leading-relaxed transition"
+              className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
             />
           </div>
 
           {otherSlots.map((slot) => {
             const meta = STYLE_SLOT_META[slot];
             return (
-              <div key={slot} className="bg-white border border-sky-200 rounded-2xl p-4 space-y-2">
-                <div className="text-[10px] font-black text-sky-600">{meta.icon} {meta.label}</div>
+              <div key={slot} className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
+                <div className="text-[11px] font-semibold text-gray-900 tracking-wide">{meta.label}</div>
                 <textarea
                   value={styleHints[slot] || ''}
                   onChange={(e) => setStyleHints((prev) => ({ ...prev, [slot]: e.target.value }))}
                   placeholder={meta.placeholder}
                   rows={3}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-sky-500 resize-none font-mono leading-relaxed transition"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
                 />
               </div>
             );
@@ -322,12 +326,12 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         <button
           onClick={handleRun}
           disabled={isRunning || productImages.length === 0}
-          className={`w-full py-5 rounded-2xl font-black text-base tracking-tight transition-all ${
+          className={`w-full py-5 rounded-xl font-semibold text-[15px] tracking-tight transition-all ${
             isRunning
               ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
               : productImages.length === 0
               ? 'bg-gray-50 text-gray-300 cursor-not-allowed border border-gray-200'
-              : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white hover:from-sky-400 hover:to-blue-400 shadow-lg shadow-sky-500/20 hover:scale-[1.01] active:scale-[0.99]'
+              : 'bg-gray-900 text-white hover:bg-black'
           }`}
         >
           {isRunning ? (
@@ -336,9 +340,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
               {stageMsg}
             </span>
           ) : (
-            <span className="flex items-center justify-center gap-2">
-              🧥 AI 제품 피팅 생성 {productImages.length > 1 ? `(색상 ${productImages.length}종)` : '(전신 1장)'}
-            </span>
+            `AI 제품 피팅 생성${productImages.length > 1 ? ` — 색상 ${productImages.length}종` : ' — 전신 1장'}`
           )}
         </button>
       </section>
@@ -357,9 +359,12 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           />
 
           {colorJobs.length > 1 && (
-            <div className="space-y-3">
+            <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-black text-gray-900">색상 옵션별 결과 ({colorJobs.length}종)</h4>
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-400 mb-1">Colorways</div>
+                  <h4 className="text-sm font-semibold text-gray-900 tracking-tight">색상 옵션별 결과 {colorJobs.length}종</h4>
+                </div>
                 <button
                   disabled={isBatchDownloading}
                   onClick={async () => {
@@ -375,17 +380,17 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                       setIsBatchDownloading(false);
                     }
                   }}
-                  className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 border border-gray-200 text-xs text-gray-600 font-bold transition flex items-center gap-1.5 disabled:opacity-50"
+                  className="px-3.5 py-2 rounded-lg border border-gray-200 hover:border-gray-400 text-gray-600 hover:text-gray-900 text-xs font-medium tracking-wide transition disabled:opacity-40"
                 >
-                  {isBatchDownloading ? '⬇ 저장 중...' : '⬇ 전체 다운로드'}
+                  {isBatchDownloading ? '저장 중...' : '전체 다운로드'}
                 </button>
               </div>
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-4">
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
                 {colorJobs.map((job) => (
                   <div
                     key={job.generationId}
-                    className={`group relative aspect-[3/4] rounded-2xl overflow-hidden border border-gray-200 shadow-sm bg-gray-50 ${
-                      job.status === 'completed' ? 'hover:border-sky-400 transition cursor-pointer' : ''
+                    className={`group relative aspect-[3/4] rounded-lg overflow-hidden border border-gray-200 bg-gray-50 ${
+                      job.status === 'completed' ? 'hover:border-gray-400 transition cursor-pointer' : ''
                     }`}
                     onClick={() => {
                       if (job.status === 'completed' && job.imageUrl) {
@@ -397,16 +402,15 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={job.imageUrl} alt={job.label} className="w-full h-full object-cover" />
                     ) : job.status === 'failed' ? (
-                      <div className="w-full h-full flex flex-col items-center justify-center gap-1 text-rose-400 p-2">
-                        <span className="text-lg">⚠️</span>
-                        <span className="text-[9px] font-bold text-center">{job.errorMessage || '생성 실패'}</span>
+                      <div className="w-full h-full flex flex-col items-center justify-center gap-1 text-gray-400 p-2">
+                        <span className="text-[10px] font-medium text-center leading-snug">{job.errorMessage || '생성 실패'}</span>
                       </div>
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
-                        <span className="w-5 h-5 border-2 border-gray-300 border-t-sky-500 rounded-full animate-spin" />
+                        <span className="w-5 h-5 border-2 border-gray-200 border-t-gray-900 rounded-full animate-spin" />
                       </div>
                     )}
-                    <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-bold">
+                    <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-medium tracking-wide">
                       {job.label}
                     </span>
                   </div>

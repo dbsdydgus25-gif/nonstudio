@@ -19,9 +19,9 @@ interface FittingResultViewerProps {
   onSelectHistory: (item: HistoryItem) => void;
   isGenerating: boolean;
   loadingStage: string;
-  /** 결과 만족도 피드백 — 지정하면 결과 이미지 위에 👍/👎 버튼이 표시됨 */
+  /** 결과 만족도 피드백 — 지정하면 결과 이미지 위에 평가 버튼이 표시됨 */
   onRate?: (generationId: string, rating: 'good' | 'bad') => void;
-  /** 지정하면 "AI 바리에이션으로 보내기" 버튼이 표시됨 (AI 피팅 결과 화면 전용) */
+  /** 지정하면 "바리에이션으로 보내기" 버튼이 표시됨 */
   onSendToVariation?: (imageUrl: string) => void;
 }
 
@@ -122,68 +122,59 @@ export function FittingResultViewer({
 
   const CROP_RATIOS = ['1:1', '4:5', '3:4', '9:16'];
 
+  const toolButtonClass =
+    'px-3.5 py-2 rounded-lg border border-gray-200 hover:border-gray-400 bg-white text-gray-600 hover:text-gray-900 font-medium text-xs tracking-wide transition disabled:opacity-40';
+
   return (
     <div className="space-y-8 animate-fade-in">
-      <div className="bg-white border border-gray-200 rounded-3xl p-8 relative overflow-hidden shadow-sm">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-xl shadow-lg shadow-emerald-500/20">
-              🖼️
-            </div>
-            <div>
-              <h3 className="text-lg font-black text-gray-900 tracking-tight">
-                최종 고화질 가상 피팅 결과 (HD Studio Result)
-              </h3>
-              <p className="text-xs text-gray-400">
-                OpenAI DALL-E 3 HD로 옷의 텍스처와 특성을 완벽히 재현한 결과
-              </p>
-            </div>
+      <div className="bg-white border border-gray-200 rounded-2xl p-7 relative overflow-hidden">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-400 mb-1">Result</div>
+            <h3 className="text-base font-semibold text-gray-900 tracking-tight">생성 결과</h3>
           </div>
           {currentResult && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
               {onRate && currentResult.generationId && (
-                <div className="flex items-center gap-1.5 mr-1">
+                <div className="flex items-center gap-1.5 mr-2">
                   <button
                     onClick={() => handleRate('good')}
                     title="이 결과가 좋아요"
-                    className={`px-3 py-2 rounded-xl border text-xs font-bold transition flex items-center gap-1 ${
+                    className={`px-3.5 py-2 rounded-lg border text-xs font-medium tracking-wide transition ${
                       ratedAs === 'good'
-                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                        : 'bg-white border-gray-200 text-gray-500 hover:text-emerald-600 hover:border-emerald-300'
+                        ? 'bg-gray-900 border-gray-900 text-white'
+                        : 'bg-white border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-900'
                     }`}
                   >
-                    👍 {ratedAs === 'good' ? '저장됨' : '이거다'}
+                    {ratedAs === 'good' ? '저장됨' : '좋음'}
                   </button>
                   <button
                     onClick={() => handleRate('bad')}
                     title="이 결과는 아니에요"
-                    className={`px-3 py-2 rounded-xl border text-xs font-bold transition flex items-center gap-1 ${
+                    className={`px-3.5 py-2 rounded-lg border text-xs font-medium tracking-wide transition ${
                       ratedAs === 'bad'
-                        ? 'bg-rose-50 border-rose-300 text-rose-700'
-                        : 'bg-white border-gray-200 text-gray-500 hover:text-rose-600 hover:border-rose-300'
+                        ? 'bg-gray-100 border-gray-300 text-gray-500'
+                        : 'bg-white border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-900'
                     }`}
                   >
-                    👎 아니야
+                    아쉬움
                   </button>
                 </div>
               )}
               <div className="relative">
-                <button
-                  onClick={() => setIsCropMenuOpen((v) => !v)}
-                  className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-900 font-bold text-xs flex items-center gap-2 transition border border-gray-200"
-                >
-                  <span>✂️ 비율 저장</span>
+                <button onClick={() => setIsCropMenuOpen((v) => !v)} className={toolButtonClass}>
+                  비율 저장
                 </button>
                 {isCropMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1.5 z-20 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden min-w-[140px]">
+                  <div className="absolute right-0 top-full mt-1.5 z-20 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden min-w-[150px]">
                     {CROP_RATIOS.map((ratio) => (
                       <button
                         key={ratio}
                         onClick={() => handleCropSave(ratio)}
                         disabled={!!isCropping}
-                        className="w-full px-4 py-2.5 text-left text-xs font-bold text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition disabled:opacity-50"
+                        className="w-full px-4 py-2.5 text-left text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition disabled:opacity-50"
                       >
-                        {isCropping === ratio ? '저장 중...' : `${ratio} 로 저장`}
+                        {isCropping === ratio ? '저장 중...' : `${ratio} 비율로 저장`}
                       </button>
                     ))}
                     <div className="border-t border-gray-100" />
@@ -196,9 +187,9 @@ export function FittingResultViewer({
                         setIsFreeCropOpen(true);
                       }}
                       disabled={!!isCropping}
-                      className="w-full px-4 py-2.5 text-left text-xs font-bold text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition disabled:opacity-50"
+                      className="w-full px-4 py-2.5 text-left text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition disabled:opacity-50"
                     >
-                      ✂️ 자유 비율 직접 지정
+                      영역 직접 지정
                     </button>
                   </div>
                 )}
@@ -206,16 +197,16 @@ export function FittingResultViewer({
               <button
                 onClick={() => handleDownloadOriginal(currentResult.imageUrl)}
                 disabled={isDownloadingOriginal}
-                className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-900 font-bold text-xs flex items-center gap-2 transition border border-gray-200 disabled:opacity-50"
+                className={toolButtonClass}
               >
-                <span>{isDownloadingOriginal ? '다운로드 중...' : '⬇️ HD 원본 다운로드'}</span>
+                {isDownloadingOriginal ? '다운로드 중...' : '원본 다운로드'}
               </button>
               {onSendToVariation && (
                 <button
                   onClick={() => onSendToVariation(currentResult.imageUrl)}
-                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs flex items-center gap-2 transition"
+                  className="px-3.5 py-2 rounded-lg bg-gray-900 hover:bg-black text-white font-medium text-xs tracking-wide transition"
                 >
-                  <span>🧍 AI 바리에이션으로 보내기</span>
+                  바리에이션으로 보내기
                 </button>
               )}
             </div>
@@ -223,22 +214,17 @@ export function FittingResultViewer({
         </div>
 
         {/* 렌더링 화면 또는 로딩 영역 */}
-        <div className="relative min-h-[500px] rounded-2xl bg-gray-50 border border-gray-200 overflow-hidden flex items-center justify-center">
+        <div className="relative min-h-[500px] rounded-xl bg-gray-50 border border-gray-100 overflow-hidden flex items-center justify-center">
           {isGenerating ? (
             <div className="text-center p-8 space-y-6 max-w-md mx-auto">
-              <div className="relative w-20 h-20 mx-auto">
-                <div className="absolute inset-0 rounded-full border-4 border-emerald-200" />
-                <div className="absolute inset-0 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin" />
-                <div className="absolute inset-0 flex items-center justify-center text-xl">
-                  ✨
-                </div>
+              <div className="relative w-16 h-16 mx-auto">
+                <div className="absolute inset-0 rounded-full border-2 border-gray-200" />
+                <div className="absolute inset-0 rounded-full border-2 border-gray-900 border-t-transparent animate-spin" />
               </div>
               <div className="space-y-2">
-                <h4 className="text-base font-black text-gray-900 animate-pulse">
-                  {loadingStage || '고화질 렌더링 중...'}
-                </h4>
+                <h4 className="text-sm font-semibold text-gray-900">{loadingStage || '렌더링 중입니다'}</h4>
                 <p className="text-xs text-gray-400 leading-relaxed">
-                  OpenAI의 최첨단 DALL-E 3 모델이 프롬프트를 분석하여 니트의 원사 디테일과 카라 라인, 핏을 실감나게 입혀내고 있습니다. (약 15~25초 소요)
+                  모델 정보와 제품 디테일을 반영해 고해상도 컷을 만드는 중입니다. 약 60~90초 정도 걸립니다.
                 </p>
               </div>
             </div>
@@ -248,30 +234,30 @@ export function FittingResultViewer({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={currentResult.imageUrl}
-                  alt="AI Fitting Result"
-                  className="max-h-[700px] w-auto rounded-xl shadow-2xl object-contain transition duration-500 group-hover:scale-[1.01]"
+                  alt="생성 결과"
+                  className="max-h-[700px] w-auto rounded-lg object-contain transition duration-500 group-hover:opacity-95"
                 />
-                <div className="absolute bottom-4 right-4 px-3 py-1.5 rounded-full bg-black/70 backdrop-blur-md border border-white/20 text-white text-xs font-bold opacity-0 group-hover:opacity-100 transition flex items-center gap-1.5">
-                  <span>🔍 클릭해서 확대</span>
+                <div className="absolute bottom-4 right-4 px-3 py-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white text-[11px] font-medium tracking-wide opacity-0 group-hover:opacity-100 transition">
+                  클릭해서 확대
                 </div>
               </div>
 
               {currentResult.prompt && (
-                <div className="mt-6 w-full max-w-2xl bg-gray-50 border border-gray-200 rounded-2xl p-4 text-xs text-gray-500 space-y-1">
+                <div className="mt-6 w-full max-w-2xl bg-gray-50 border border-gray-200 rounded-xl p-4 text-xs text-gray-500 space-y-1">
                   <button
                     type="button"
                     onClick={() => setIsPromptExpanded((v) => !v)}
-                    className="w-full flex items-center justify-between font-bold text-emerald-600 text-left"
+                    className="w-full flex items-center justify-between font-medium text-gray-700 text-left"
                   >
                     <span>
-                      ✨ OpenAI에 실제로 전달된 프롬프트 전문 {currentResult.revisedPrompt ? `(${currentResult.revisedPrompt})` : ''}:
+                      전달된 프롬프트 전문 {currentResult.revisedPrompt ? `(${currentResult.revisedPrompt})` : ''}
                     </span>
-                    <span className="text-[10px] text-emerald-500 shrink-0 ml-2">
-                      {isPromptExpanded ? '접기 ▲' : '펼쳐보기 ▼'}
+                    <span className="text-[10px] text-gray-400 shrink-0 ml-2">
+                      {isPromptExpanded ? '접기' : '펼치기'}
                     </span>
                   </button>
                   <p
-                    className={`font-mono leading-relaxed text-[11px] text-gray-600 whitespace-pre-wrap transition ${
+                    className={`font-mono leading-relaxed text-[11px] text-gray-500 whitespace-pre-wrap transition ${
                       isPromptExpanded ? '' : 'line-clamp-6'
                     }`}
                   >
@@ -282,15 +268,19 @@ export function FittingResultViewer({
             </div>
           ) : (
             <div className="text-center p-12 space-y-3">
-              <div className="w-16 h-16 rounded-3xl bg-white border border-gray-200 flex items-center justify-center mx-auto text-3xl">
-                🎨
-              </div>
-              <p className="text-sm font-bold text-gray-400">
-                아직 생성된 피팅 이미지가 없습니다.
-              </p>
-              <p className="text-xs text-gray-300">
-                위 단계에서 프롬프트를 확인한 뒤 &apos;생성하기&apos; 버튼을 클릭해주세요.
-              </p>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                className="w-10 h-10 mx-auto text-gray-300"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="9" cy="9" r="2" />
+                <path d="m21 15-3.5-3.5L6 23" />
+              </svg>
+              <p className="text-[13px] font-medium text-gray-400">아직 생성된 결과가 없습니다</p>
+              <p className="text-[11px] text-gray-300">위 단계를 채운 뒤 생성 버튼을 눌러주세요</p>
             </div>
           )}
         </div>
@@ -304,15 +294,15 @@ export function FittingResultViewer({
         >
           <button
             onClick={() => setIsZoomed(false)}
-            className="absolute top-6 right-6 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-sm transition"
+            className="absolute top-6 right-6 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white font-medium text-sm transition"
           >
-            ✕ 닫기
+            닫기
           </button>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={currentResult.imageUrl}
-            alt="Zoomed Result"
-            className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl"
+            alt="확대 보기"
+            className="max-w-full max-h-[90vh] object-contain rounded-lg"
           />
         </div>
       )}
@@ -324,20 +314,20 @@ export function FittingResultViewer({
           onClick={() => setIsFreeCropOpen(false)}
         >
           <div
-            className="bg-white rounded-3xl p-6 max-w-3xl w-full max-h-[90vh] overflow-auto space-y-4"
+            className="bg-white rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-auto space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
-              <h4 className="text-base font-black text-gray-900">✂️ 자유 비율로 영역 지정</h4>
+              <h4 className="text-[15px] font-semibold text-gray-900 tracking-tight">영역 직접 지정</h4>
               <button
                 onClick={() => setIsFreeCropOpen(false)}
-                className="text-gray-400 hover:text-gray-700 text-sm font-bold"
+                className="text-gray-400 hover:text-gray-900 text-sm font-medium"
               >
-                ✕ 닫기
+                닫기
               </button>
             </div>
             <p className="text-xs text-gray-400">
-              모서리를 드래그해서 원하는 영역을 지정한 뒤 저장하세요. 비율을 고정하면 그 비율 그대로 위치/크기만 조절할 수 있습니다.
+              모서리를 드래그해 원하는 영역을 지정하세요. 비율을 고정하면 그 비율을 유지한 채 위치와 크기만 조절됩니다.
             </p>
             <div className="flex items-center gap-1.5 flex-wrap">
               {([
@@ -363,17 +353,17 @@ export function FittingResultViewer({
                       setFreeCropPercent(nextCrop);
                     }
                   }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
                     freeCropAspect === opt.value
-                      ? 'bg-emerald-500 border-emerald-500 text-white'
-                      : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
+                      ? 'bg-gray-900 border-gray-900 text-white'
+                      : 'bg-white border-gray-200 text-gray-500 hover:border-gray-400'
                   }`}
                 >
                   {opt.label}
                 </button>
               ))}
             </div>
-            <div className="flex justify-center bg-gray-50 rounded-2xl p-2">
+            <div className="flex justify-center bg-gray-50 rounded-xl p-2">
               <ReactCrop
                 crop={freeCrop}
                 aspect={freeCropAspect}
@@ -392,14 +382,14 @@ export function FittingResultViewer({
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setIsFreeCropOpen(false)}
-                className="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs transition"
+                className="px-4 py-2 rounded-lg border border-gray-200 hover:border-gray-400 text-gray-600 font-medium text-xs transition"
               >
                 취소
               </button>
               <button
                 onClick={handleFreeCropSave}
                 disabled={!freeCropPercent || isCropping === 'custom'}
-                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-xs transition disabled:opacity-50"
+                className="px-4 py-2 rounded-lg bg-gray-900 hover:bg-black text-white font-medium text-xs transition disabled:opacity-40"
               >
                 {isCropping === 'custom' ? '저장 중...' : '이 영역으로 저장'}
               </button>
@@ -410,22 +400,23 @@ export function FittingResultViewer({
 
       {/* 생성 갤러리 히스토리 */}
       {history.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-3xl p-6 space-y-4 shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-black text-gray-900 flex items-center gap-2">
-              <span>📚 이번 세션 피팅 히스토리 ({history.length})</span>
-            </h4>
-            <span className="text-xs text-gray-400">클릭하면 상단에서 다시 확인 가능</span>
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-400 mb-1">Archive</div>
+              <h4 className="text-sm font-semibold text-gray-900 tracking-tight">최근 결과 {history.length}건</h4>
+            </div>
+            <span className="text-[11px] text-gray-400">클릭하면 상단에서 다시 확인할 수 있습니다</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
             {history.map((item) => (
               <div
                 key={item.id}
                 onClick={() => onSelectHistory(item)}
-                className={`aspect-[3/4] rounded-xl overflow-hidden border-2 cursor-pointer transition group relative ${
+                className={`aspect-[3/4] rounded-lg overflow-hidden border cursor-pointer transition group relative ${
                   currentResult?.imageUrl === item.imageUrl
-                    ? 'border-emerald-500 scale-105 shadow-lg shadow-emerald-500/20'
-                    : 'border-gray-200 hover:border-gray-300'
+                    ? 'border-gray-900'
+                    : 'border-gray-200 hover:border-gray-400'
                 }`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -434,10 +425,8 @@ export function FittingResultViewer({
                   alt={item.timestamp}
                   className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition flex items-end p-2">
-                  <span className="text-[10px] font-bold text-white truncate">
-                    {item.timestamp}
-                  </span>
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition flex items-end p-2">
+                  <span className="text-[10px] font-medium text-white truncate">{item.timestamp}</span>
                 </div>
               </div>
             ))}

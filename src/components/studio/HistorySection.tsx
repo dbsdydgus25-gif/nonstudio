@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { downloadResultImage } from '@/lib/download-image';
 
 interface HistoryEntry {
   id: string;
@@ -8,12 +9,18 @@ interface HistoryEntry {
   prompt: string;
   poseLabel: string | null;
   createdAt: string;
-  pipeline: 'fitting' | 'variation';
+  pipeline: 'fitting' | 'product' | 'variation';
 }
 
-type FilterTab = 'all' | 'fitting' | 'variation';
+type FilterTab = 'all' | 'fitting' | 'product' | 'variation';
 
-async function fetchSource(source: 'fitting' | 'variation'): Promise<HistoryEntry[]> {
+const PIPELINE_LABEL: Record<HistoryEntry['pipeline'], string> = {
+  fitting: 'AI 피팅',
+  product: 'AI 제품 피팅',
+  variation: 'AI 바리에이션',
+};
+
+async function fetchSource(source: 'fitting' | 'product' | 'variation'): Promise<HistoryEntry[]> {
   try {
     const res = await fetch(`/api/generations/history?source=${source}`);
     const data = await res.json();
@@ -36,12 +43,17 @@ export function HistorySection() {
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<FilterTab>('all');
   const [selected, setSelected] = useState<HistoryEntry | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   useEffect(() => {
     (async () => {
       setIsLoading(true);
-      const [fitting, variation] = await Promise.all([fetchSource('fitting'), fetchSource('variation')]);
-      const merged = [...fitting, ...variation].sort(
+      const [fitting, product, variation] = await Promise.all([
+        fetchSource('fitting'),
+        fetchSource('product'),
+        fetchSource('variation'),
+      ]);
+      const merged = [...fitting, ...product, ...variation].sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       );
       setEntries(merged);
@@ -58,33 +70,36 @@ export function HistorySection() {
     () => ({
       all: entries.length,
       fitting: entries.filter((e) => e.pipeline === 'fitting').length,
+      product: entries.filter((e) => e.pipeline === 'product').length,
       variation: entries.filter((e) => e.pipeline === 'variation').length,
     }),
     [entries],
   );
 
   const TABS: Array<{ id: FilterTab; label: string }> = [
-    { id: 'all', label: `전체 (${counts.all})` },
-    { id: 'fitting', label: `✨ AI 피팅 (${counts.fitting})` },
-    { id: 'variation', label: `🧍 AI 바리에이션 (${counts.variation})` },
+    { id: 'all', label: `전체 ${counts.all}` },
+    { id: 'fitting', label: `AI 피팅 ${counts.fitting}` },
+    { id: 'product', label: `AI 제품 피팅 ${counts.product}` },
+    { id: 'variation', label: `AI 바리에이션 ${counts.variation}` },
   ];
 
   return (
-    <div className="max-w-6xl mx-auto px-8 py-8 space-y-6">
+    <div className="max-w-6xl mx-auto px-8 py-10 space-y-8">
       <div className="space-y-1">
-        <h2 className="text-lg font-black text-gray-900 tracking-tight">📚 전체 히스토리</h2>
-        <p className="text-xs text-gray-400">언제 어떤 파이프라인에서 어떤 결과가 나왔는지 한눈에 확인하세요.</p>
+        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-400">Library</div>
+        <h2 className="text-lg font-semibold text-gray-900 tracking-tight">전체 히스토리</h2>
+        <p className="text-xs text-gray-400">모든 파이프라인의 생성 기록을 한곳에서 확인합니다.</p>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 flex-wrap">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setFilter(tab.id)}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition border ${
+            className={`px-4 py-2 rounded-lg text-xs font-medium tracking-wide transition border ${
               filter === tab.id
                 ? 'bg-gray-900 text-white border-gray-900'
-                : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
+                : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
             }`}
           >
             {tab.label}
@@ -93,19 +108,18 @@ export function HistorySection() {
       </div>
 
       {isLoading ? (
-        <div className="text-center py-24 text-sm text-gray-400">불러오는 중...</div>
+        <div className="text-center py-24 text-sm text-gray-400">불러오는 중</div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-24 space-y-2">
-          <div className="text-3xl">📭</div>
-          <p className="text-sm font-bold text-gray-400">아직 생성 기록이 없습니다.</p>
+          <p className="text-sm font-medium text-gray-400">아직 생성 기록이 없습니다</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
           {filtered.map((entry) => (
             <button
               key={entry.id}
               onClick={() => setSelected(entry)}
-              className="text-left rounded-2xl overflow-hidden border border-gray-200 hover:border-gray-400 transition group relative shadow-sm"
+              className="text-left rounded-lg overflow-hidden border border-gray-200 hover:border-gray-400 transition group relative"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -113,11 +127,11 @@ export function HistorySection() {
                 alt={entry.poseLabel || entry.pipeline}
                 className="w-full aspect-[3/4] object-cover group-hover:scale-105 transition duration-300"
               />
-              <div className="absolute top-2 left-2 px-2 py-1 rounded-full bg-black/70 backdrop-blur-sm text-[9px] font-bold text-white">
-                {entry.pipeline === 'fitting' ? '✨ AI 피팅' : '🧍 AI 바리에이션'}
+              <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm text-[9px] font-medium tracking-wide text-white">
+                {PIPELINE_LABEL[entry.pipeline]}
               </div>
-              <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-2.5 py-2.5">
-                <div className="text-[10px] font-bold text-white truncate">{entry.poseLabel || '결과'}</div>
+              <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent px-2.5 py-2.5">
+                <div className="text-[10px] font-medium text-white truncate">{entry.poseLabel || '결과'}</div>
                 <div className="text-[9px] text-white/70">
                   {new Date(entry.createdAt).toLocaleString('ko-KR', {
                     month: 'numeric',
@@ -139,13 +153,13 @@ export function HistorySection() {
           onClick={() => setSelected(null)}
         >
           <div
-            className="bg-white rounded-3xl p-6 max-w-3xl w-full max-h-[90vh] overflow-auto space-y-4"
+            className="bg-white rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-auto space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 rounded-full bg-gray-900 text-white text-[10px] font-bold">
-                  {selected.pipeline === 'fitting' ? '✨ AI 피팅' : '🧍 AI 바리에이션'}
+                <span className="px-2.5 py-1 rounded-md bg-gray-900 text-white text-[10px] font-medium tracking-wide">
+                  {PIPELINE_LABEL[selected.pipeline]}
                 </span>
                 <span className="text-xs text-gray-400">
                   {new Date(selected.createdAt).toLocaleString('ko-KR')}
@@ -153,28 +167,38 @@ export function HistorySection() {
               </div>
               <button
                 onClick={() => setSelected(null)}
-                className="text-gray-400 hover:text-gray-700 text-sm font-bold"
+                className="text-gray-400 hover:text-gray-900 text-sm font-medium"
               >
-                ✕ 닫기
+                닫기
               </button>
             </div>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={selected.imageUrl} alt={selected.poseLabel || ''} className="w-full rounded-2xl max-h-[60vh] object-contain bg-gray-50" />
+            <img src={selected.imageUrl} alt={selected.poseLabel || ''} className="w-full rounded-xl max-h-[60vh] object-contain bg-gray-50" />
             {selected.poseLabel && (
-              <div className="text-xs font-bold text-gray-900">{selected.poseLabel}</div>
+              <div className="text-xs font-semibold text-gray-900">{selected.poseLabel}</div>
             )}
             {selected.prompt && (
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-[11px] text-gray-500 font-mono leading-relaxed max-h-40 overflow-auto">
                 {selected.prompt}
               </div>
             )}
-            <a
-              href={selected.imageUrl}
-              download={`history_${selected.id}.png`}
-              className="inline-flex px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-900 font-bold text-xs transition border border-gray-200"
+            <button
+              disabled={isDownloading}
+              onClick={async () => {
+                // cross-origin <a download>는 무시되고, 서명 URL은 1시간 만료라 프록시로 받는다
+                setIsDownloading(true);
+                try {
+                  await downloadResultImage(selected.imageUrl, `history_${selected.id}.png`);
+                } catch (err: any) {
+                  alert(err?.message || '다운로드에 실패했습니다.');
+                } finally {
+                  setIsDownloading(false);
+                }
+              }}
+              className="inline-flex px-4 py-2 rounded-lg border border-gray-200 hover:border-gray-400 text-gray-700 font-medium text-xs tracking-wide transition disabled:opacity-40"
             >
-              ⬇️ 다운로드
-            </a>
+              {isDownloading ? '다운로드 중...' : '다운로드'}
+            </button>
           </div>
         </div>
       )}

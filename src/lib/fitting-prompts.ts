@@ -229,17 +229,25 @@ export function buildProductFittingPrompt(
     ? ` MANDATORY POSE/PROP REQUIREMENT (must be included exactly as described): ${userAdditions.trim()}`
     : '';
 
+  // (2026-07-09) "additional input images 중 하나" 같은 모호한 표현으로는 제품 사진(Image 1)
+  // 속 타사 쇼핑몰 모델의 몸/피부톤이 아이덴티티 참고 사진을 이겨버리는 문제가 있었다
+  // (프롬프트 텍스트는 온전히 전달됐는데도 왼쪽이 하얀 피부 타사 모델처럼 나옴).
+  // 이미지 순서는 코드에서 [제품, 아이덴티티, 배경]으로 고정되므로 번호를 명시해서
+  // "출력 인물 = Image 2의 사람"을 시각 참조 차원에서 못박는다.
+  const identityImageNumber = 2;
+  const backgroundImageNumber = hasIdentityReferenceImage ? 3 : 2;
+
   const backgroundLine = hasBackgroundReferenceImage
-    ? `- Background: one of the additional input images shows the EXACT target studio backdrop and lighting setup (soft frontal light, gentle top-down falloff, seamless cyclorama floor curve). Reproduce this exact background, light direction, and shadow softness on the subject. (${stylingSuggestion.background})`
+    ? `- Background: Image ${backgroundImageNumber} shows the EXACT target studio backdrop and lighting setup (soft frontal light, gentle top-down falloff, seamless cyclorama floor curve). Reproduce this exact background, light direction, and shadow softness on the subject. (${stylingSuggestion.background})`
     : `- Background: ${stylingSuggestion.background}`;
 
   const identityReferenceLine = hasIdentityReferenceImage
-    ? '\n- One of the additional input images is a FACE / BODY SHAPE / SKIN TONE reference ONLY — generate this exact person as the model. Do NOT copy any clothing or accessory from that reference photo; the outfit is defined entirely by the PRODUCT and NEW STYLING sections.'
+    ? `\n- Image ${identityImageNumber} shows THE model — the exact person who must appear in the output. Match Image ${identityImageNumber}'s face, skin tone, and body identically; if Image 1 contains a different person, that person must NOT influence the output in any way (not their face, not their skin tone, not their body shape). Do NOT copy any clothing or accessory from Image ${identityImageNumber}; the outfit is defined entirely by the PRODUCT and NEW STYLING sections.`
     : '';
 
   return [
     '=== TASK: PRODUCT PHOTO → MODEL WEARING IT ===',
-    `Image 1 is a shop listing photo of a ${CATEGORY_PRESERVE_LABEL[category]} — it may be laid flat, on a hanger, a catalog shot, or worn by some shop model. In every case, ONLY the product itself is the reference: completely ignore any person, body, face, pose, other garments, and background shown in Image 1. Generate a photorealistic commercial lookbook photograph of the model described below (and ONLY that model) actually WEARING this exact product, fitted naturally on the body.`,
+    `Image 1 is a shop listing photo of a ${CATEGORY_PRESERVE_LABEL[category]} — it may be laid flat, on a hanger, a catalog shot, or worn by some shop model. In every case, ONLY the product itself is the reference: completely ignore any person, body, face, pose, other garments, and background shown in Image 1.${hasIdentityReferenceImage ? ` Generate a photorealistic commercial lookbook photograph of the person shown in Image ${identityImageNumber} (and ONLY that person) actually WEARING this exact product, fitted naturally on the body.` : ' Generate a photorealistic commercial lookbook photograph of the model described below actually WEARING this exact product, fitted naturally on the body.'}`,
     '',
     '=== MODEL (fixed personal standard) ===',
     PERSONAL_BODY_SPEC + identityReferenceLine,

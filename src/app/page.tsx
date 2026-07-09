@@ -63,46 +63,34 @@ export default function StudioPage() {
       <main className="flex-1 overflow-y-auto">
         {/* 상단 헤더 */}
         <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/90 backdrop-blur-xl px-8 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <div>
             {activePage === 'restyle' ? (
               <>
-                <span className="text-xl">✨</span>
-                <div>
-                  <h1 className="text-sm font-black text-gray-900">AI 피팅</h1>
-                  <p className="text-[10px] text-gray-400">대충 찍은 실사 사진 한 장 → 전신 1장으로 확정된 룩</p>
-                </div>
+                <h1 className="text-[13px] font-semibold text-gray-900 tracking-tight">AI 피팅</h1>
+                <p className="text-[10px] text-gray-400">실사 사진 한 장으로 확정 룩 제작</p>
               </>
             ) : activePage === 'product' ? (
               <>
-                <span className="text-xl">🧥</span>
-                <div>
-                  <h1 className="text-sm font-black text-gray-900">AI 제품 피팅</h1>
-                  <p className="text-[10px] text-gray-400">제품 사진만으로 모델이 입은 화보 생성 (색상 옵션별 지원)</p>
-                </div>
+                <h1 className="text-[13px] font-semibold text-gray-900 tracking-tight">AI 제품 피팅</h1>
+                <p className="text-[10px] text-gray-400">제품 사진만으로 모델 착용 화보 제작 — 색상 옵션별 지원</p>
               </>
             ) : activePage === 'fitting' ? (
               <>
-                <span className="text-xl">🧍</span>
-                <div>
-                  <h1 className="text-sm font-black text-gray-900">AI 바리에이션</h1>
-                  <p className="text-[10px] text-gray-400">확정된 룩을 그대로 유지한 채 포즈만 다양하게</p>
-                </div>
+                <h1 className="text-[13px] font-semibold text-gray-900 tracking-tight">AI 바리에이션</h1>
+                <p className="text-[10px] text-gray-400">확정 룩을 그대로 유지한 채 포즈만 다양화</p>
               </>
             ) : (
               <>
-                <span className="text-xl">📚</span>
-                <div>
-                  <h1 className="text-sm font-black text-gray-900">히스토리</h1>
-                  <p className="text-[10px] text-gray-400">전체 생성 기록 보기</p>
-                </div>
+                <h1 className="text-[13px] font-semibold text-gray-900 tracking-tight">히스토리</h1>
+                <p className="text-[10px] text-gray-400">전체 생성 기록</p>
               </>
             )}
           </div>
           <button
             onClick={() => setIsKeyModalOpen(true)}
-            className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 border border-gray-200 text-xs text-gray-600 font-bold transition"
+            className="px-3.5 py-2 rounded-lg border border-gray-200 hover:border-gray-400 text-xs text-gray-500 hover:text-gray-900 font-medium tracking-wide transition"
           >
-            🔑 API 설정
+            API 설정
           </button>
         </header>
 

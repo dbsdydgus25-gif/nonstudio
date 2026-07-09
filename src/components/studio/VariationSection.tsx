@@ -88,7 +88,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
     }
 
     setIsRunning(true);
-    setStageMsg(`${variationCount}장의 포즈 준비 중...`);
+    setStageMsg(`${variationCount}개 포즈 준비 중`);
     setBatchImages([]);
     setCurrentResult(null);
 
@@ -117,7 +117,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
 
       const jobs: Array<{ generationId: string; poseLabel: string; prompt: string }> = startData.jobs || [];
       setBatchImages(jobs.map((j) => ({ generationId: j.generationId, poseLabel: j.poseLabel, status: 'pending' as const })));
-      setStageMsg(`${jobs.length}장의 포즈로 렌더링 중... (최대 90초 소요)`);
+      setStageMsg(`${jobs.length}개 포즈 렌더링 중 (최대 90초)`);
 
       const finalItems = await pollGenerationStatuses(
         jobs.map((j) => j.generationId),
@@ -141,8 +141,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
 
       const succeeded = finalItems.filter((i) => i.status === 'completed' && i.imageUrl);
       if (succeeded.length === 0) {
-        // 실제 원인(각 포즈별 에러 메시지)을 같이 보여줘야 다음에 뭐가 문제인지 바로 알 수 있다 —
-        // 예전엔 "모든 포즈 생성에 실패했습니다"만 떠서 원인 파악이 안 됐음.
+        // 실제 원인(각 포즈별 에러 메시지)을 같이 보여줘야 다음에 뭐가 문제인지 바로 알 수 있다.
         const reasons = Array.from(new Set(finalItems.map((i) => i.errorMessage).filter(Boolean)));
         const detail = reasons.length > 0 ? `\n\n상세: ${reasons.join(' / ')}` : '';
         throw new Error(`모든 포즈 생성에 실패했습니다.${detail}`);
@@ -167,45 +166,45 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-8 py-8 space-y-8">
+    <div className="max-w-4xl mx-auto px-8 py-10 space-y-10">
       {/* 입력 사진 */}
-      <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Step 01</span>
-          <h2 className="text-sm font-black text-gray-900">기준 사진 (AI 피팅 결과 또는 직접 업로드)</h2>
+      <section className="space-y-4">
+        <div className="flex items-baseline gap-3">
+          <span className="text-[11px] font-semibold text-gray-300 tabular-nums">01</span>
+          <h2 className="text-sm font-semibold text-gray-900 tracking-tight">기준 사진</h2>
+          <span className="text-[11px] text-gray-400">AI 피팅 결과 또는 직접 업로드</span>
         </div>
         <ImageUploader
-          label="포즈를 다양화할 확정된 룩 사진"
-          subLabel="몸/피부톤/전체 착장(색상·재질·핏·신발)은 100% 그대로 유지하고 포즈만 바뀝니다"
+          label="포즈를 다양화할 확정 룩 사진"
+          subLabel="몸 · 피부톤 · 전체 착장은 그대로 유지되고 포즈만 바뀝니다"
           image={sourceImage}
           onImageChange={setSourceImage}
-          badgeText="기준 사진"
-          badgeColor="bg-amber-100 text-amber-700"
+          badgeText="기준"
         />
       </section>
 
       {/* 바리에이션 수 */}
-      <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Step 02</span>
-          <h2 className="text-sm font-black text-gray-900">포즈 바리에이션 수</h2>
+      <section className="space-y-4">
+        <div className="flex items-baseline gap-3">
+          <span className="text-[11px] font-semibold text-gray-300 tabular-nums">02</span>
+          <h2 className="text-sm font-semibold text-gray-900 tracking-tight">컷 수</h2>
         </div>
-        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-center justify-between">
+        <div className="bg-white border border-gray-200 rounded-2xl p-5 flex items-center justify-between">
           <div>
-            <div className="text-xs font-bold text-gray-900">룩북 컷 수</div>
-            <div className="text-[10px] text-gray-400 mt-1">서로 다른 포즈로 몇 장 만들지 선택 (몸/옷/배경은 항상 동일)</div>
+            <div className="text-[13px] font-semibold text-gray-900 tracking-tight">룩북 컷 수</div>
+            <div className="text-[11px] text-gray-400 mt-0.5">서로 다른 포즈로 몇 장 만들지 선택합니다</div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <button
               onClick={() => setVariationCount(Math.max(1, variationCount - 1))}
-              className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 border border-gray-200 text-gray-900 font-bold flex items-center justify-center text-sm transition"
+              className="w-9 h-9 rounded-lg border border-gray-200 hover:border-gray-400 text-gray-600 hover:text-gray-900 font-medium flex items-center justify-center text-sm transition"
             >
-              -
+              −
             </button>
-            <span className="text-base font-black text-amber-600 w-6 text-center">{variationCount}장</span>
+            <span className="text-[15px] font-semibold text-gray-900 w-10 text-center tabular-nums">{variationCount}장</span>
             <button
               onClick={() => setVariationCount(Math.min(4, variationCount + 1))}
-              className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 border border-gray-200 text-gray-900 font-bold flex items-center justify-center text-sm transition"
+              className="w-9 h-9 rounded-lg border border-gray-200 hover:border-gray-400 text-gray-600 hover:text-gray-900 font-medium flex items-center justify-center text-sm transition"
             >
               +
             </button>
@@ -218,12 +217,12 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
         <button
           onClick={handleRunVariation}
           disabled={isRunning || !sourceImage}
-          className={`w-full py-5 rounded-2xl font-black text-base tracking-tight transition-all ${
+          className={`w-full py-5 rounded-xl font-semibold text-[15px] tracking-tight transition-all ${
             isRunning
               ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
               : !sourceImage
               ? 'bg-gray-50 text-gray-300 cursor-not-allowed border border-gray-200'
-              : 'bg-gradient-to-r from-amber-500 to-orange-500 text-black hover:from-amber-400 hover:to-orange-400 shadow-lg shadow-amber-500/20 hover:scale-[1.01] active:scale-[0.99]'
+              : 'bg-gray-900 text-white hover:bg-black'
           }`}
         >
           {isRunning ? (
@@ -232,7 +231,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
               {stageMsg}
             </span>
           ) : (
-            <span className="flex items-center justify-center gap-2">🧍 AI 바리에이션 생성</span>
+            'AI 바리에이션 생성'
           )}
         </button>
       </section>
@@ -250,15 +249,17 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
           />
 
           {batchImages.length > 1 && (
-            <div className="space-y-3">
+            <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-black text-gray-900">이번 배치 ({batchImages.length}장)</h4>
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-400 mb-1">Batch</div>
+                  <h4 className="text-sm font-semibold text-gray-900 tracking-tight">이번 배치 {batchImages.length}장</h4>
+                </div>
                 <button
                   disabled={isBatchDownloading}
                   onClick={async () => {
                     // cross-origin URL에 <a download>를 쓰면 브라우저가 조용히 무시함 —
-                    // 서버 프록시로 한 장씩 받아서 저장한다 (동시에 여러 다운로드를 트리거하면
-                    // 브라우저가 일부를 막는 경우가 있어 순차 처리).
+                    // 서버 프록시로 한 장씩 받아서 저장한다 (동시 다운로드는 브라우저가 일부 차단할 수 있어 순차 처리).
                     setIsBatchDownloading(true);
                     try {
                       const completed = batchImages.filter((img) => img.status === 'completed' && img.imageUrl);
@@ -271,17 +272,17 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
                       setIsBatchDownloading(false);
                     }
                   }}
-                  className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 border border-gray-200 text-xs text-gray-600 font-bold transition flex items-center gap-1.5 disabled:opacity-50"
+                  className="px-3.5 py-2 rounded-lg border border-gray-200 hover:border-gray-400 text-gray-600 hover:text-gray-900 text-xs font-medium tracking-wide transition disabled:opacity-40"
                 >
-                  {isBatchDownloading ? '⬇ 저장 중...' : '⬇ 전체 다운로드'}
+                  {isBatchDownloading ? '저장 중...' : '전체 다운로드'}
                 </button>
               </div>
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-4 gap-3">
                 {batchImages.map((img) => (
                   <div
                     key={img.generationId}
-                    className={`group relative rounded-2xl overflow-hidden border border-gray-200 shadow-sm ${
-                      img.status === 'completed' ? 'hover:border-amber-400 transition cursor-pointer' : ''
+                    className={`group relative rounded-lg overflow-hidden border border-gray-200 ${
+                      img.status === 'completed' ? 'hover:border-gray-400 transition cursor-pointer' : ''
                     }`}
                     onClick={() => {
                       if (img.status === 'completed' && img.imageUrl) {
@@ -295,15 +296,15 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
                     ) : (
                       <div className="w-full aspect-[2/3] bg-gray-50 flex items-center justify-center">
                         {img.status === 'failed' ? (
-                          <span className="text-2xl">⚠️</span>
+                          <span className="text-[10px] font-medium text-gray-400 text-center px-2">생성 실패</span>
                         ) : (
-                          <span className="w-6 h-6 border-2 border-gray-300 border-t-amber-500 rounded-full animate-spin" />
+                          <span className="w-5 h-5 border-2 border-gray-200 border-t-gray-900 rounded-full animate-spin" />
                         )}
                       </div>
                     )}
-                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-3">
-                      <div className="text-[10px] font-bold text-white">
-                        {img.status === 'failed' ? `${img.poseLabel} (실패)` : img.poseLabel}
+                    <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent px-3 py-2.5">
+                      <div className="text-[10px] font-medium text-white truncate">
+                        {img.status === 'failed' ? `${img.poseLabel} — 실패` : img.poseLabel}
                       </div>
                     </div>
                   </div>
