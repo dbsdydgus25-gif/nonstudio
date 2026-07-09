@@ -96,14 +96,18 @@ function buildVariationPrompt(
   return [
     '=== TASK: POSE-ONLY EDIT OF A REAL COMMERCIAL PRODUCT PHOTO ===',
     'This is the same photo, just with a different body pose. Keep everything else pixel-faithful to Image 1 — same face, same skin tone, same body, and the exact same garments (same color, same fabric, same fit, same shoes, same accessories). Do not redraw, re-texture, sharpen, or reinterpret the clothing in any way.',
+    // (2026-07-09) 목 위(얼굴)가 안 나오게 크롭된 사진을 넣었는데 결과물에 얼굴이 새로 생성되던
+    // 버그 — 이전 버전이 "head to toe visible"을 무조건 강제해서, 입력 사진에 없는 신체 부위까지
+    // 억지로 만들어내고 있었다. 입력 사진의 크롭/프레이밍 자체를 그대로 유지하도록 명시.
+    'Match the exact framing and crop of Image 1. If Image 1 is cropped and does not show the head, face, or feet, the output must keep that exact same crop — do not extend the frame or invent any body part (face, head, feet, etc.) that is not already visible in Image 1. Only the pose of what IS visible changes.',
     ...imageNotes,
     `New pose: ${poseInstruction}`,
     `Body must still match this fixed physique spec: ${PERSONAL_BODY_SPEC}`,
     '',
     '=== NEGATIVE CONSTRAINTS ===',
-    'cartoon, illustration, CGI, 3D render, different person, different face, different clothing, different color, different footwear, added or altered fabric pattern/texture, extra limbs, bad hands, distorted anatomy, collage, split screen, multi-panel grid, watermark, text, logo, low resolution, blurry.',
+    'cartoon, illustration, CGI, 3D render, different person, different face, different clothing, different color, different footwear, added or altered fabric pattern/texture, inventing body parts not shown in Image 1, extending the frame beyond Image 1\'s crop, extra limbs, bad hands, distorted anatomy, collage, split screen, multi-panel grid, watermark, text, logo, low resolution, blurry.',
     '',
-    'Single photorealistic full-body commercial lookbook photograph, head to toe visible, professional studio lighting.',
+    'Single photorealistic commercial lookbook photograph, same framing/crop as Image 1, professional studio lighting.',
   ].join('\n');
 }
 
