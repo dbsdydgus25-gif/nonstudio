@@ -27,6 +27,8 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
 
   const [isRunning, setIsRunning] = useState(false);
   const [stageMsg, setStageMsg] = useState('');
+  // 초안 품질(low) — medium 대비 약 1/4 비용, 포즈 확인용
+  const [draftMode, setDraftMode] = useState(false);
 
   const [batchImages, setBatchImages] = useState<BatchItem[]>([]);
   const [isBatchDownloading, setIsBatchDownloading] = useState(false);
@@ -102,6 +104,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
           sourceImageBase64: sourceImage,
           variationCount,
           openaiApiKey: openaiKey,
+          draftMode,
         }),
       });
 
@@ -213,7 +216,18 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
       </section>
 
       {/* 실행 버튼 */}
-      <section>
+      <section className="space-y-3">
+        <label className="flex items-center gap-2.5 cursor-pointer select-none px-1">
+          <input
+            type="checkbox"
+            checked={draftMode}
+            onChange={(e) => setDraftMode(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-300 accent-gray-900"
+          />
+          <span className="text-[12px] text-gray-500">
+            <b className="text-gray-700 font-semibold">초안 품질로 생성</b> — 비용 약 1/4. 포즈 확인용으로 쓰고, 최종 컷은 끄고 생성하세요
+          </span>
+        </label>
         <button
           onClick={handleRunVariation}
           disabled={isRunning || !sourceImage}

@@ -57,6 +57,10 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   const [category, setCategory] = useState<SourcedCategory>('top');
   const [poseHint, setPoseHint] = useState('');
   const [styleHints, setStyleHints] = useState<Partial<Record<SourcedCategory, string>>>({});
+  // 제품 자체의 핏/디테일 지시 (예: 머슬핏, 크롭 기장감) — 사진만으로 안 보이는 정보 보강
+  const [productNotes, setProductNotes] = useState('');
+  // 초안 품질(low) — medium 대비 약 1/4 비용, 코디/색상 확인용
+  const [draftMode, setDraftMode] = useState(false);
   const otherSlots = CATEGORY_OPTIONS.map((c) => c.id).filter((id) => id !== category);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -161,6 +165,8 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
           userAdditions,
+          productNotes: productNotes.trim() || undefined,
+          draftMode,
           extractColors,
           // 추출 미리보기를 거쳤으면 색상별 계획(색상별 코디 덮어쓰기 포함)을 그대로 전달
           colorPlans: extractColors && colorPlans?.length
@@ -172,11 +178,15 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                 ),
               }))
             : undefined,
-          userPreferenceHints: otherSlots.reduce<Record<string, string>>((acc, slot) => {
-            const v = styleHints[slot]?.trim();
-            if (v) acc[slot] = v;
-            return acc;
-          }, {}),
+          // 색상별 계획이 있으면 공통 코디 지시는 숨겨져 있으므로 보내지 않는다 (색상 카드가 대체)
+          userPreferenceHints:
+            extractColors && colorPlans?.length
+              ? {}
+              : otherSlots.reduce<Record<string, string>>((acc, slot) => {
+                  const v = styleHints[slot]?.trim();
+                  if (v) acc[slot] = v;
+                  return acc;
+                }, {}),
         }),
       });
 
@@ -349,7 +359,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
               {colorPlans && (
                 <div className="space-y-2">
                   <p className="text-[11px] text-gray-400 leading-relaxed">
-                    {colorPlans.length}개 색상이 인식됐습니다. 색상마다 코디를 다르게 하고 싶으면 해당 색상 칸에만 입력하세요 — 비워두면 아래 공통 스타일링 지시가 그대로 적용됩니다.
+                    {colorPlans.length}개 색상이 인식됐습니다. 저장된 모델 정보(체형 · 피부 · 기준 사진)가 모든 색상에 동일하게 적용되고, 코디는 색상 칸에 입력한 내용이 우선합니다 — 비워두면 아래 자세 지시 외에는 AI가 그 색상에 어울리게 자동 코디합니다.
                   </p>
                   {colorPlans.map((plan, i) => (
                     <div key={i} className="border border-gray-200 rounded-xl p-4 space-y-3">
@@ -398,10 +408,31 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         </div>
       </section>
 
-      {/* 카테고리 */}
+      {/* 제품 핏 · 디테일 지시 — 사진만으로 안 보이는 실착 정보 (머슬핏, 크롭 기장 등) */}
       <section className="space-y-4">
         <div className="flex items-baseline gap-3">
           <span className="text-[11px] font-semibold text-gray-300 tabular-nums">02</span>
+          <h2 className="text-sm font-semibold text-gray-900 tracking-tight">제품 핏 · 디테일 지시</h2>
+          <span className="text-[11px] text-gray-400">선택 — 모든 색상에 공통 적용</span>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
+          <textarea
+            value={productNotes}
+            onChange={(e) => setProductNotes(e.target.value)}
+            placeholder="예: 머슬핏, 크롭 기장감, 어깨 딱 떨어지는 세미오버핏"
+            rows={2}
+            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
+          />
+          <p className="text-[11px] text-gray-400 leading-relaxed">
+            사진만으로는 판단이 어려운 실착 핏 · 기장 · 원단 정보를 적어주세요. 사진에서 보이는 것보다 이 지시가 우선합니다.
+          </p>
+        </div>
+      </section>
+
+      {/* 카테고리 */}
+      <section className="space-y-4">
+        <div className="flex items-baseline gap-3">
+          <span className="text-[11px] font-semibold text-gray-300 tabular-nums">03</span>
           <h2 className="text-sm font-semibold text-gray-900 tracking-tight">제품 카테고리</h2>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
@@ -430,12 +461,16 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         </div>
       </section>
 
-      {/* 추가 스타일링 지시 */}
+      {/* 추가 스타일링 지시 — 색상 추출을 완료했으면 코디는 색상별 카드가 대체하므로 자세만 남긴다 */}
       <section className="space-y-4">
         <div className="flex items-baseline gap-3">
-          <span className="text-[11px] font-semibold text-gray-300 tabular-nums">03</span>
-          <h2 className="text-sm font-semibold text-gray-900 tracking-tight">추가 스타일링 지시</h2>
-          <span className="text-[11px] text-gray-400">선택</span>
+          <span className="text-[11px] font-semibold text-gray-300 tabular-nums">04</span>
+          <h2 className="text-sm font-semibold text-gray-900 tracking-tight">
+            {extractColors && colorPlans ? '자세 지시' : '추가 스타일링 지시'}
+          </h2>
+          <span className="text-[11px] text-gray-400">
+            {extractColors && colorPlans ? '선택 — 코디는 위 색상별 칸에서 지정' : '선택'}
+          </span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -450,26 +485,38 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             />
           </div>
 
-          {otherSlots.map((slot) => {
-            const meta = STYLE_SLOT_META[slot];
-            return (
-              <div key={slot} className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
-                <div className="text-[11px] font-semibold text-gray-900 tracking-wide">{meta.label}</div>
-                <textarea
-                  value={styleHints[slot] || ''}
-                  onChange={(e) => setStyleHints((prev) => ({ ...prev, [slot]: e.target.value }))}
-                  placeholder={meta.placeholder}
-                  rows={3}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
-                />
-              </div>
-            );
-          })}
+          {!(extractColors && colorPlans) &&
+            otherSlots.map((slot) => {
+              const meta = STYLE_SLOT_META[slot];
+              return (
+                <div key={slot} className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
+                  <div className="text-[11px] font-semibold text-gray-900 tracking-wide">{meta.label}</div>
+                  <textarea
+                    value={styleHints[slot] || ''}
+                    onChange={(e) => setStyleHints((prev) => ({ ...prev, [slot]: e.target.value }))}
+                    placeholder={meta.placeholder}
+                    rows={3}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
+                  />
+                </div>
+              );
+            })}
         </div>
       </section>
 
       {/* 실행 버튼 */}
-      <section>
+      <section className="space-y-3">
+        <label className="flex items-center gap-2.5 cursor-pointer select-none px-1">
+          <input
+            type="checkbox"
+            checked={draftMode}
+            onChange={(e) => setDraftMode(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-300 accent-gray-900"
+          />
+          <span className="text-[12px] text-gray-500">
+            <b className="text-gray-700 font-semibold">초안 품질로 생성</b> — 비용 약 1/4. 코디 · 색상 확인용으로 쓰고, 최종 컷은 끄고 생성하세요
+          </span>
+        </label>
         <button
           onClick={handleRun}
           disabled={isRunning || productImages.length === 0}

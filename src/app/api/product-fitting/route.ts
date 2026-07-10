@@ -16,6 +16,7 @@ import { buildProductFittingPrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCateg
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { getModelProfile, getModelIdentityImage, buildBodySpecFromProfile } from '@/lib/model-profile';
+import { downscaleImage, withImageRetry, runWithConcurrency } from '@/lib/image-utils';
 
 export const runtime = 'nodejs';
 export const maxDuration = 280;
@@ -49,8 +50,11 @@ async function runSingleProductFitting(
   prompt: string,
   identityReferenceImage: { buffer: Buffer; mimeType: string } | null,
   backgroundReferenceImage: { buffer: Buffer; mimeType: string } | null,
+  quality: 'low' | 'medium' = 'medium',
 ): Promise<string> {
-  const { buffer, mimeType } = parseBase64Image(productImageBase64);
+  // 입력 이미지는 1024px로 다운스케일 — 업로드 페이로드/입력 토큰 절감 (출력 품질과 무관)
+  const parsed = parseBase64Image(productImageBase64);
+  const { buffer, mimeType } = await downscaleImage(parsed.buffer, parsed.mimeType);
   const productFile = await toOpenAIFile(buffer, mimeType, `product.${mimeType.split('/')[1] || 'jpg'}`);
   // (2026-07-09) 이미지 순서를 [모델, 제품, 배경]으로 변경 — gpt-image-2 edit는 첫 이미지를
   // 편집 대상으로 취급하는 경향이 있어, 모델 사진을 1번에 두면 "이 사람에게 제품을 입힌다"는
@@ -68,14 +72,19 @@ async function runSingleProductFitting(
     ? [refFiles[0], productFile, ...refFiles.slice(1)] // [모델, 제품, 배경]
     : [productFile, ...refFiles]; // 모델 사진 없으면 기존 순서
 
-  const res = await (openai.images as any).edit({
-    model: 'gpt-image-2',
-    image: imageInput,
-    prompt: prompt.slice(0, 12000),
-    n: 1,
-    size: '1024x1536',
-    quality: 'medium',
-  });
+  // 429(분당 이미지 한도)/일시적 5xx는 대기 후 재시도 — 색상 5종 병렬 생성 시 일부만
+  // 성공하고 나머지가 조용히 실패하던 문제("결과가 하나만 나옴")의 방어책.
+  const res: any = await withImageRetry(() =>
+    (openai.images as any).edit({
+      model: 'gpt-image-2',
+      image: imageInput,
+      prompt: prompt.slice(0, 12000),
+      n: 1,
+      size: '1024x1536',
+      // 초안 모드(low)는 medium 대비 약 1/4 비용 — 코디/색상 확인용
+      quality,
+    }),
+  );
 
   const item = res?.data?.[0];
   const imageUrl = item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : '');
@@ -94,6 +103,8 @@ export async function POST(req: Request) {
       userPreferenceHints,
       extractColors,
       colorPlans,
+      productNotes,
+      draftMode,
     }: {
       /** 색상 옵션별 제품 이미지 (1장 이상) — 각 이미지마다 1장씩 생성된다 */
       productImagesBase64: string[];
@@ -102,6 +113,10 @@ export async function POST(req: Request) {
       openaiApiKey: string;
       userAdditions?: string;
       userPreferenceHints?: StyleHintsBySlot;
+      /** 제품 핏/디테일 지시 (예: '머슬핏, 크롭 기장감') — 사진만으로 안 보이는 정보 보강 */
+      productNotes?: string;
+      /** true면 초안 품질(low)로 생성 — medium 대비 약 1/4 비용 */
+      draftMode?: boolean;
       /** true면 첫 이미지(색상 샘플 시트)에서 색상 옵션을 자동 추출해 색상별로 생성 */
       extractColors?: boolean;
       /**
@@ -165,14 +180,20 @@ export async function POST(req: Request) {
 
     after(async () => {
       const openai = new OpenAI({ apiKey: openaiApiKey });
-      const backgroundReferenceImage = getDefaultBackgroundReferenceImage();
+      // 참고 이미지도 다운스케일 — job마다 반복 업로드되므로 절감 효과가 색상 수만큼 곱해진다
+      const rawBackground = getDefaultBackgroundReferenceImage();
+      const backgroundReferenceImage = rawBackground
+        ? await downscaleImage(rawBackground.buffer, rawBackground.mimeType)
+        : null;
       // 모델 정보(참고 이미지 + 체형 스펙)는 "모델 정보" 페이지에서 편집하는 프로필에서 로드
       const modelProfile = await getModelProfile();
-      const identityReferenceImage = await getModelIdentityImage();
+      const rawIdentity = await getModelIdentityImage();
+      const identityReferenceImage = rawIdentity ? await downscaleImage(rawIdentity.buffer, rawIdentity.mimeType) : null;
       const bodySpec = buildBodySpecFromProfile(modelProfile);
 
-      await Promise.allSettled(
-        jobs.map(async ({ generationId, imageBase64, colorVariant, styleHints }) => {
+      // 전체 병렬 대신 3개씩 배치 실행 — OpenAI 이미지 분당 한도(429)로 일부 색상만
+      // 성공하던 문제 방지. 실패한 호출도 과금될 수 있어 성공률이 곧 비용 절감이다.
+      await runWithConcurrency(jobs, 3, async ({ generationId, imageBase64, colorVariant, styleHints }) => {
           try {
             // 색상 옵션마다 색/디테일이 다르므로 이미지별로 개별 분석한다
             const garmentAnalysis = await analyzeGarment(
@@ -215,6 +236,7 @@ export async function POST(req: Request) {
               !!identityReferenceImage,
               bodySpec,
               colorVariant,
+              productNotes,
             );
 
             const imageUrl = await runSingleProductFitting(
@@ -223,6 +245,7 @@ export async function POST(req: Request) {
               prompt,
               identityReferenceImage,
               backgroundReferenceImage,
+              draftMode ? 'low' : 'medium',
             );
             const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
             await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt });
@@ -230,8 +253,7 @@ export async function POST(req: Request) {
             console.error('[api/product-fitting][after] 생성 실패:', err);
             await markGenerationFailed(generationId, err?.message || 'AI 제품 피팅 처리 중 오류가 발생했습니다.');
           }
-        }),
-      );
+      });
     });
 
     return NextResponse.json({

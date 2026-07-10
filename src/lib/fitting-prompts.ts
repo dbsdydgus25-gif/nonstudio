@@ -226,6 +226,8 @@ export function buildProductFittingPrompt(
   bodySpec: string = PERSONAL_BODY_SPEC,
   /** 한 장에 여러 색상이 나온 샘플 시트에서 특정 색상만 뽑아 생성할 때 지정 (예: 'jet black') */
   colorVariant?: string,
+  /** 사용자가 직접 적는 제품 핏/디테일 지시 (예: '머슬핏, 크롭 기장감') — 사진만으로 안 보이는 정보 보강 */
+  productNotes?: string,
 ): string {
   const stylingLines: string[] = [];
   if (stylingSuggestion.top) stylingLines.push(`- 상의: ${stylingSuggestion.top}`);
@@ -258,6 +260,12 @@ export function buildProductFittingPrompt(
     ? `\n- COLORWAY TO GENERATE: this product is sold in multiple colors and Image ${productImageNumber} may show several colorways together. Generate ONLY the "${colorVariant}" colorway — the garment worn by the model must be exactly this color, using the matching colorway in Image ${productImageNumber} as the color/texture source of truth. Ignore the other colorways in the image entirely.`
     : '';
 
+  // 사용자가 직접 적은 제품 핏/디테일 (머슬핏, 크롭 기장 등) — 사진만으로는 판단이 어려운
+  // 실착 핏 정보를 판매자/사용자가 아는 대로 보강하는 것이라 시각 추정보다 우선한다.
+  const productNotesLine = productNotes?.trim()
+    ? `\n- MANDATORY PRODUCT FIT/DETAIL SPEC (provided by the seller — overrides visual guesses from the photo): ${productNotes.trim()}. Apply these fit, length, and detail characteristics exactly to how the garment fits on the model's body.`
+    : '';
+
   return [
     '=== TASK: DRESS THE MODEL IN THE PRODUCT ===',
     `${identityBlock}`,
@@ -268,7 +276,7 @@ export function buildProductFittingPrompt(
     '',
     `=== PRODUCT FIDELITY (Image ${productImageNumber} is the source of truth) ===`,
     `- Reproduce the product in Image ${productImageNumber} with complete fidelity: exact same color and shade, same fabric texture, same details (buttons, stitching, pockets, prints, logos as shown), same overall silhouette — a customer must recognize it as the same product they saw in the shop listing.`,
-    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}`,
+    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}${productNotesLine}`,
     `- CRITICAL COLOR RULE: ${colorVariant ? `the "${colorVariant}" colorway` : `the color shown in Image ${productImageNumber}`} is the actual product color being sold — match it precisely, do not shift the hue, saturation, or brightness.`,
     `- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image ${productImageNumber} — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.`,
     '',

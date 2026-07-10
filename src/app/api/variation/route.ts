@@ -18,6 +18,7 @@ import { FULLBODY_POSES } from '@/lib/fitting-prompts';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { getPoseReferenceImage } from '@/lib/pose-reference';
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
+import { downscaleImage, withImageRetry, runWithConcurrency } from '@/lib/image-utils';
 
 export const runtime = 'nodejs';
 // Vercel Hobby+Fluid Compute는 함수당 최대 300초까지 허용한다 — 포즈 4개를 병렬로 생성해도
@@ -126,11 +127,15 @@ async function runSingleVariation(
   poseInstruction: string,
   backgroundReferenceImage: { buffer: Buffer; mimeType: string } | null,
   poseReferenceImage: { buffer: Buffer; mimeType: string } | null,
+  quality: 'low' | 'medium' = 'medium',
 ): Promise<{ imageUrl: string; engineUsed: string }> {
-  const sourceFile = await toOpenAIFile(sourceBuf, sourceMime, `source.${sourceMime.split('/')[1] || 'jpg'}`);
-  const refs = [backgroundReferenceImage, poseReferenceImage].filter(
+  // 입력 이미지는 1024px로 다운스케일 — 페이로드/입력 토큰 절감
+  const source = await downscaleImage(sourceBuf, sourceMime);
+  const sourceFile = await toOpenAIFile(source.buffer, source.mimeType, `source.${source.mimeType.split('/')[1] || 'jpg'}`);
+  const rawRefs = [backgroundReferenceImage, poseReferenceImage].filter(
     (r): r is { buffer: Buffer; mimeType: string } => !!r,
   );
+  const refs = await Promise.all(rawRefs.map((r) => downscaleImage(r.buffer, r.mimeType)));
   const refFiles = await Promise.all(
     refs.map((r, i) => toOpenAIFile(r.buffer, r.mimeType, `reference-${i}.${r.mimeType.split('/')[1] || 'jpg'}`)),
   );
@@ -138,15 +143,15 @@ async function runSingleVariation(
 
   const prompt = buildVariationPrompt(poseInstruction, !!backgroundReferenceImage, !!poseReferenceImage);
 
-  const res = await (openai.images as any).edit({
+  const res: any = await withImageRetry(() => (openai.images as any).edit({
     model: 'gpt-image-2',
     image: imageInput,
     // restyle과 동일한 이유로 4000자 → 12000자로 상향 (OpenAI 공식 한도 32,000자)
     prompt: prompt.slice(0, 12000),
     n: 1,
     size: '1024x1536',
-    quality: 'medium',
-  });
+    quality, // medium 기본, 초안 모드는 low (약 1/4 비용)
+  }));
 
   const item = res?.data?.[0];
   const imageUrl = item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : '');
@@ -156,7 +161,7 @@ async function runSingleVariation(
 
 export async function POST(req: Request) {
   try {
-    const { sourceImageBase64, variationCount, openaiApiKey } = await req.json();
+    const { sourceImageBase64, variationCount, openaiApiKey, draftMode } = await req.json();
 
     if (!sourceImageBase64) {
       return NextResponse.json({ success: false, error: 'AI 피팅 결과 사진 또는 직접 업로드한 사진이 필요합니다.' }, { status: 400 });
@@ -189,21 +194,20 @@ export async function POST(req: Request) {
       // 배경은 예외 없이 고정 흰색 스튜디오 참고 사진을 사용한다 (AI 피팅과 동일 기준)
       const backgroundReferenceImage = getDefaultBackgroundReferenceImage();
 
-      await Promise.allSettled(
-        jobs.map(async ({ generationId, pose, poseNumber }) => {
+      // 전체 병렬 대신 3개씩 배치 — 이미지 API 분당 한도(429)로 일부 포즈만 성공하는 것 방지
+      await runWithConcurrency(jobs, 3, async ({ generationId, pose, poseNumber }) => {
           try {
-            // 사용자가 public/poses/pose_{N}.png 에 포즈 참고 사진을 넣어두면 자동으로 같이 참고한다.
+            // 사용자가 public/reference_poses/pose_{N}.png 에 포즈 참고 사진을 넣어두면 자동으로 같이 참고한다.
             // 없으면 조용히 건너뛰고 텍스트 포즈 지시만으로 진행(기존 동작 그대로).
             const poseReferenceImage = getPoseReferenceImage(poseNumber);
-            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage);
+            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage, draftMode ? 'low' : 'medium');
             const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
             await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt: pose.poseInstruction });
           } catch (err: any) {
             console.error('[api/variation][after] 포즈 생성 실패:', pose.label, err);
             await markGenerationFailed(generationId, err?.message || '포즈 생성 중 오류가 발생했습니다.');
           }
-        }),
-      );
+      });
     });
 
     return NextResponse.json({

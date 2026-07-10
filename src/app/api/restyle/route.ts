@@ -23,6 +23,7 @@ import { buildRestylePrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCategory } f
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { getModelProfile, getModelIdentityImage, buildBodySpecFromProfile } from '@/lib/model-profile';
+import { downscaleImage, withImageRetry } from '@/lib/image-utils';
 
 export const runtime = 'nodejs';
 // Vercel Hobby+Fluid Compute는 함수당 최대 300초까지 허용한다 — 분석(Gemini 2회) + 코디 제안
@@ -59,18 +60,22 @@ async function runSingleRestyle(
   photoMime: string,
   prompt: string,
   referenceImages: Array<{ buffer: Buffer; mimeType: string }> = [],
+  quality: 'low' | 'medium' = 'medium',
 ): Promise<{ imageUrl: string; engineUsed: string }> {
-  const photoFile = await toOpenAIFile(photoBuf, photoMime, `photo.${photoMime.split('/')[1] || 'jpg'}`);
+  // 입력 이미지는 1024px로 다운스케일 — 휴대폰 원본(수 MB)을 그대로 보내던 페이로드/입력 토큰 절감
+  const photo = await downscaleImage(photoBuf, photoMime);
+  const photoFile = await toOpenAIFile(photo.buffer, photo.mimeType, `photo.${photo.mimeType.split('/')[1] || 'jpg'}`);
 
   // 고정 배경 기준 이미지가 있으면 추가 입력 이미지로 같이 넣어 일관성을 강화한다
+  const refs = await Promise.all(referenceImages.map((ref) => downscaleImage(ref.buffer, ref.mimeType)));
   const refFiles = await Promise.all(
-    referenceImages.map((ref, i) =>
+    refs.map((ref, i) =>
       toOpenAIFile(ref.buffer, ref.mimeType, `reference-${i}.${ref.mimeType.split('/')[1] || 'jpg'}`),
     ),
   );
   const imageInput = refFiles.length > 0 ? [photoFile, ...refFiles] : photoFile;
 
-  const res = await (openai.images as any).edit({
+  const res: any = await withImageRetry(() => (openai.images as any).edit({
     model: 'gpt-image-2',
     image: imageInput,
     // (2026-07-09) 4000자로 잘랐었는데, 이번 세션에 프롬프트를 계속 보강하면서 실제 길이가
@@ -82,9 +87,9 @@ async function runSingleRestyle(
     prompt: prompt.slice(0, 12000),
     n: 1,
     size: '1024x1536',
-    quality: 'medium', // 'auto'(기본값)는 비용/시간이 크게 늘어남 — 커머셜 컷 용도로는 medium이면 충분
+    quality, // medium 기본, 초안 모드는 low (약 1/4 비용) — 'auto'는 비용/시간이 크게 늘어남
     // input_fidelity는 gpt-image-2가 지원하지 않는 파라미터라 400 에러 유발 — 제거함 (SDK 타입엔 있었지만 이 모델은 거부)
-  });
+  }));
 
   const item = res?.data?.[0];
   const imageUrl = item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : '');
@@ -102,6 +107,7 @@ export async function POST(req: Request) {
       userAdditions,
       backgroundHint,
       userPreferenceHints,
+      draftMode,
     }: {
       photoBase64: string;
       category: string;
@@ -110,6 +116,8 @@ export async function POST(req: Request) {
       userAdditions?: string;
       backgroundHint?: string;
       userPreferenceHints?: StyleHintsBySlot;
+      /** true면 초안 품질(low)로 생성 — medium 대비 약 1/4 비용 */
+      draftMode?: boolean;
     } = await req.json();
 
     if (!photoBase64) {
@@ -184,7 +192,7 @@ export async function POST(req: Request) {
 
         // AI 피팅은 항상 전신 샷 1장만 생성한다 — 이 1장이 "확정된 룩"이 되고, AI 바리에이션(포즈 다양화)의
         // 입력으로 이어진다.
-        const { imageUrl } = await runSingleRestyle(openai, photoBuf, photoMime, prompt, referenceImages);
+        const { imageUrl } = await runSingleRestyle(openai, photoBuf, photoMime, prompt, referenceImages, draftMode ? 'low' : 'medium');
         const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
 
         await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt });
