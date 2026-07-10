@@ -93,6 +93,7 @@ export async function POST(req: Request) {
       userAdditions,
       userPreferenceHints,
       extractColors,
+      colorPlans,
     }: {
       /** 색상 옵션별 제품 이미지 (1장 이상) — 각 이미지마다 1장씩 생성된다 */
       productImagesBase64: string[];
@@ -103,6 +104,12 @@ export async function POST(req: Request) {
       userPreferenceHints?: StyleHintsBySlot;
       /** true면 첫 이미지(색상 샘플 시트)에서 색상 옵션을 자동 추출해 색상별로 생성 */
       extractColors?: boolean;
+      /**
+       * 색상 추출 미리보기(extract-colors)를 거쳐 사용자가 확정한 색상별 계획.
+       * 있으면 서버 추출을 건너뛰고 이대로 생성 — styleHints는 색상별 코디 덮어쓰기
+       * (비어 있는 슬롯은 공통 userPreferenceHints를 그대로 사용).
+       */
+      colorPlans?: Array<{ label: string; color: string; styleHints?: StyleHintsBySlot }>;
     } = await req.json();
 
     if (!productImagesBase64?.length) {
@@ -119,12 +126,20 @@ export async function POST(req: Request) {
     const sourcedCategory = category as SourcedCategory;
     const images = productImagesBase64.slice(0, 6); // 색상 옵션 과다 등록 방지
 
-    // 생성 단위(job) 구성 — 두 가지 모드:
-    // (a) 기본: 업로드한 이미지 1장당 1개 생성
-    // (b) 색상 자동 추출: 첫 이미지(도매처 색상 샘플 시트)에서 Gemini로 색상 옵션을 추출해
-    //     색상마다 1개 생성 (모든 색상 job이 같은 샘플 시트 이미지를 참조하고, 프롬프트로 색상 지정)
-    let jobPlans: Array<{ imageBase64: string; label: string; colorVariant?: string }>;
-    if (extractColors) {
+    // 생성 단위(job) 구성 — 세 가지 모드:
+    // (a) 기본: 업로드한 이미지 1장당 1개 생성 (공통 코디 지시 적용)
+    // (b) colorPlans: 색상 추출 미리보기를 거쳐 사용자가 색상별 코디까지 확정한 계획 —
+    //     색상마다 코디가 다를 수 있으므로 styleHints를 색상별로 덮어쓴다
+    // (c) extractColors(레거시/직접 API 호출): 서버에서 즉석 추출해 색상별 생성
+    let jobPlans: Array<{ imageBase64: string; label: string; colorVariant?: string; styleHints?: StyleHintsBySlot }>;
+    if (colorPlans?.length) {
+      jobPlans = colorPlans.slice(0, 6).map((plan) => ({
+        imageBase64: images[0],
+        label: plan.label,
+        colorVariant: plan.color,
+        styleHints: plan.styleHints,
+      }));
+    } else if (extractColors) {
       const { extractColorVariants } = await import('@/lib/garment-agent');
       const colors = await extractColorVariants(images[0], geminiApiKey, openaiApiKey);
       jobPlans = colors.map((c) => ({ imageBase64: images[0], label: c.label, colorVariant: c.color }));
@@ -157,7 +172,7 @@ export async function POST(req: Request) {
       const bodySpec = buildBodySpecFromProfile(modelProfile);
 
       await Promise.allSettled(
-        jobs.map(async ({ generationId, imageBase64, colorVariant }) => {
+        jobs.map(async ({ generationId, imageBase64, colorVariant, styleHints }) => {
           try {
             // 색상 옵션마다 색/디테일이 다르므로 이미지별로 개별 분석한다
             const garmentAnalysis = await analyzeGarment(
@@ -169,20 +184,31 @@ export async function POST(req: Request) {
               openaiApiKey,
             );
 
+            // 색상마다 어울리는 코디가 다를 수 있음 — 색상별 지시(styleHints)가 있는 슬롯은
+            // 공통 지시(userPreferenceHints)를 덮어쓰고, 비어 있는 슬롯은 공통을 그대로 쓴다.
+            const mergedHints: StyleHintsBySlot = { ...userPreferenceHints };
+            for (const [slot, hint] of Object.entries(styleHints || {})) {
+              if (typeof hint === 'string' && hint.trim()) mergedHints[slot as keyof StyleHintsBySlot] = hint.trim();
+            }
+
+            // 색상 시트 모드에서는 분석 결과의 color가 여러 색을 뭉뚱그려 설명함 —
+            // 코디 자동 제안과 프롬프트 스펙이 "이번에 생성할 색상" 기준으로 잡히도록 교체한다.
+            const analysisForThisColor = colorVariant ? { ...garmentAnalysis, color: colorVariant } : garmentAnalysis;
+
             const stylingSuggestion = await generateStylingSuggestion(
               sourcedCategory,
-              garmentAnalysis,
+              analysisForThisColor,
               '제품 단독 사진 (착용자 없음) — 모델 포즈는 자유로운 커머셜 스탠딩 포즈로 새로 생성됨',
               geminiApiKey,
               openaiApiKey,
-              userPreferenceHints,
+              mergedHints,
             );
             // 배경은 예외 없이 고정 흰색 스튜디오 (요구사항)
             stylingSuggestion.background = DEFAULT_STUDIO_BACKGROUND;
 
             const prompt = buildProductFittingPrompt(
               sourcedCategory,
-              garmentAnalysis,
+              analysisForThisColor,
               stylingSuggestion,
               userAdditions || '',
               !!backgroundReferenceImage,

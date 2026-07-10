@@ -51,6 +51,9 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   const [productImages, setProductImages] = useState<string[]>([]);
   // 한 장에 여러 색상이 나온 도매 샘플 시트에서 색상을 자동 추출해 색상별로 생성
   const [extractColors, setExtractColors] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
+  // 추출된 색상별 계획 — 색상마다 코디 지시를 따로 입력할 수 있다 (비운 슬롯은 공통 지시 사용)
+  const [colorPlans, setColorPlans] = useState<Array<{ label: string; color: string; styleHints: Partial<Record<SourcedCategory, string>> }> | null>(null);
   const [category, setCategory] = useState<SourcedCategory>('top');
   const [poseHint, setPoseHint] = useState('');
   const [styleHints, setStyleHints] = useState<Partial<Record<SourcedCategory, string>>>({});
@@ -101,6 +104,34 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     if (!files?.length) return;
     const dataUrls = await Promise.all(Array.from(files).map(fileToDataUrl));
     setProductImages((prev) => [...prev, ...dataUrls].slice(0, 6));
+    setColorPlans(null); // 이미지가 바뀌면 이전 추출 결과는 무효
+  };
+
+  // 색상 샘플 시트에서 색상 옵션 추출 (생성 전 미리보기) — 추출 후 색상별 코디 입력 가능
+  const handleExtractColors = async () => {
+    if (productImages.length === 0) {
+      alert('색상 샘플 사진을 먼저 업로드해주세요.');
+      return;
+    }
+    if (!geminiKey || !openaiKey) {
+      onNeedKeys();
+      return;
+    }
+    setIsExtracting(true);
+    try {
+      const res = await fetch('/api/product-fitting/extract-colors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: productImages[0], geminiApiKey: geminiKey, openaiApiKey: openaiKey }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '색상 추출에 실패했습니다.');
+      setColorPlans(data.colors.map((c: any) => ({ label: c.label, color: c.color, styleHints: {} })));
+    } catch (err: any) {
+      alert(err?.message || '색상 추출 중 오류가 발생했습니다.');
+    } finally {
+      setIsExtracting(false);
+    }
   };
 
   const handleRun = async () => {
@@ -131,6 +162,16 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           openaiApiKey: openaiKey,
           userAdditions,
           extractColors,
+          // 추출 미리보기를 거쳤으면 색상별 계획(색상별 코디 덮어쓰기 포함)을 그대로 전달
+          colorPlans: extractColors && colorPlans?.length
+            ? colorPlans.map((p) => ({
+                label: p.label,
+                color: p.color,
+                styleHints: Object.fromEntries(
+                  Object.entries(p.styleHints).filter(([, v]) => typeof v === 'string' && v.trim()),
+                ),
+              }))
+            : undefined,
           userPreferenceHints: otherSlots.reduce<Record<string, string>>((acc, slot) => {
             const v = styleHints[slot]?.trim();
             if (v) acc[slot] = v;
@@ -255,7 +296,10 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           {/* 색상 자동 추출 토글 — 한 장에 여러 색상이 나온 도매 샘플 시트용 */}
           <button
             type="button"
-            onClick={() => setExtractColors((v) => !v)}
+            onClick={() => {
+              setExtractColors((v) => !v);
+              setColorPlans(null);
+            }}
             className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl border transition text-left ${
               extractColors ? 'border-gray-900 bg-gray-900' : 'border-gray-200 bg-white hover:border-gray-300'
             }`}
@@ -280,6 +324,77 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
               />
             </span>
           </button>
+
+          {/* 색상 추출 미리보기 + 색상별 코디 지시 */}
+          {extractColors && (
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={handleExtractColors}
+                disabled={isExtracting || productImages.length === 0}
+                className="w-full py-3 rounded-xl border border-gray-200 hover:border-gray-400 text-gray-700 hover:text-gray-900 font-medium text-[13px] tracking-tight transition disabled:opacity-40"
+              >
+                {isExtracting ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-3.5 h-3.5 border-2 border-gray-300 border-t-gray-700 rounded-full animate-spin" />
+                    색상 인식 중
+                  </span>
+                ) : colorPlans ? (
+                  '색상 다시 추출'
+                ) : (
+                  '색상 추출하기 — 색상별로 코디를 따로 지정할 수 있습니다'
+                )}
+              </button>
+
+              {colorPlans && (
+                <div className="space-y-2">
+                  <p className="text-[11px] text-gray-400 leading-relaxed">
+                    {colorPlans.length}개 색상이 인식됐습니다. 색상마다 코디를 다르게 하고 싶으면 해당 색상 칸에만 입력하세요 — 비워두면 아래 공통 스타일링 지시가 그대로 적용됩니다.
+                  </p>
+                  {colorPlans.map((plan, i) => (
+                    <div key={i} className="border border-gray-200 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2.5 py-1 rounded-md bg-gray-900 text-white text-[11px] font-semibold tracking-tight">
+                            {plan.label}
+                          </span>
+                          <span className="text-[10px] text-gray-400">{plan.color}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setColorPlans((prev) => prev!.filter((_, idx) => idx !== i))}
+                          className="text-[11px] font-medium text-gray-400 hover:text-gray-900 transition"
+                        >
+                          이 색상 제외
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {otherSlots.map((slot) => {
+                          const meta = STYLE_SLOT_META[slot];
+                          return (
+                            <input
+                              key={slot}
+                              type="text"
+                              value={plan.styleHints[slot] || ''}
+                              onChange={(e) =>
+                                setColorPlans((prev) =>
+                                  prev!.map((p, idx) =>
+                                    idx === i ? { ...p, styleHints: { ...p.styleHints, [slot]: e.target.value } } : p,
+                                  ),
+                                )
+                              }
+                              placeholder={`${meta.label} (공통 사용 시 비움)`}
+                              className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 text-[12px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 transition"
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
