@@ -49,6 +49,8 @@ function fileToDataUrl(file: File): Promise<string> {
 export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSendToVariation }: ProductFittingSectionProps) {
   // 색상 옵션별 제품 이미지 (1장 이상) — 첫 장이 대표, 나머지가 색상 옵션
   const [productImages, setProductImages] = useState<string[]>([]);
+  // 한 장에 여러 색상이 나온 도매 샘플 시트에서 색상을 자동 추출해 색상별로 생성
+  const [extractColors, setExtractColors] = useState(false);
   const [category, setCategory] = useState<SourcedCategory>('top');
   const [poseHint, setPoseHint] = useState('');
   const [styleHints, setStyleHints] = useState<Partial<Record<SourcedCategory, string>>>({});
@@ -112,7 +114,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     }
 
     setIsRunning(true);
-    setStageMsg('제품 분석 및 렌더링 중 (색상별 병렬 생성, 최대 2분)');
+    setStageMsg(extractColors ? '색상 옵션 추출 및 렌더링 중 (색상별 병렬 생성, 최대 2분)' : '제품 분석 및 렌더링 중 (색상별 병렬 생성, 최대 2분)');
     setCurrentResult(null);
     setColorJobs([]);
 
@@ -128,6 +130,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
           userAdditions,
+          extractColors,
           userPreferenceHints: otherSlots.reduce<Record<string, string>>((acc, slot) => {
             const v = styleHints[slot]?.trim();
             if (v) acc[slot] = v;
@@ -248,6 +251,35 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
               e.target.value = '';
             }}
           />
+
+          {/* 색상 자동 추출 토글 — 한 장에 여러 색상이 나온 도매 샘플 시트용 */}
+          <button
+            type="button"
+            onClick={() => setExtractColors((v) => !v)}
+            className={`w-full flex items-center justify-between px-4 py-3.5 rounded-xl border transition text-left ${
+              extractColors ? 'border-gray-900 bg-gray-900' : 'border-gray-200 bg-white hover:border-gray-300'
+            }`}
+          >
+            <span>
+              <span className={`block text-[13px] font-semibold tracking-tight ${extractColors ? 'text-white' : 'text-gray-900'}`}>
+                색상 옵션 자동 추출
+              </span>
+              <span className={`block text-[11px] mt-0.5 ${extractColors ? 'text-gray-300' : 'text-gray-400'}`}>
+                한 장에 여러 색상이 함께 나온 샘플 사진(신상마켓 · 도매꾹 등)이면 켜세요 — 색상을 인식해 색상별로 1장씩 생성합니다
+              </span>
+            </span>
+            <span
+              className={`relative w-10 h-[22px] rounded-full transition flex-shrink-0 ml-4 ${
+                extractColors ? 'bg-white/30' : 'bg-gray-200'
+              }`}
+            >
+              <span
+                className={`absolute top-[3px] w-4 h-4 rounded-full transition-all ${
+                  extractColors ? 'right-[3px] bg-white' : 'left-[3px] bg-white shadow-sm'
+                }`}
+              />
+            </span>
+          </button>
         </div>
       </section>
 
@@ -339,6 +371,8 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
               <span className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
               {stageMsg}
             </span>
+          ) : extractColors ? (
+            'AI 제품 피팅 생성 — 색상 자동 추출'
           ) : (
             `AI 제품 피팅 생성${productImages.length > 1 ? ` — 색상 ${productImages.length}종` : ' — 전신 1장'}`
           )}

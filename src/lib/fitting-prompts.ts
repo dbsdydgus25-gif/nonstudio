@@ -224,6 +224,8 @@ export function buildProductFittingPrompt(
   hasBackgroundReferenceImage: boolean = false,
   hasIdentityReferenceImage: boolean = false,
   bodySpec: string = PERSONAL_BODY_SPEC,
+  /** 한 장에 여러 색상이 나온 샘플 시트에서 특정 색상만 뽑아 생성할 때 지정 (예: 'jet black') */
+  colorVariant?: string,
 ): string {
   const stylingLines: string[] = [];
   if (stylingSuggestion.top) stylingLines.push(`- 상의: ${stylingSuggestion.top}`);
@@ -235,34 +237,40 @@ export function buildProductFittingPrompt(
     ? ` MANDATORY POSE/PROP REQUIREMENT (must be included exactly as described): ${userAdditions.trim()}`
     : '';
 
-  // (2026-07-09) "additional input images 중 하나" 같은 모호한 표현으로는 제품 사진(Image 1)
-  // 속 타사 쇼핑몰 모델의 몸/피부톤이 아이덴티티 참고 사진을 이겨버리는 문제가 있었다
-  // (프롬프트 텍스트는 온전히 전달됐는데도 왼쪽이 하얀 피부 타사 모델처럼 나옴).
-  // 이미지 순서는 코드에서 [제품, 아이덴티티, 배경]으로 고정되므로 번호를 명시해서
-  // "출력 인물 = Image 2의 사람"을 시각 참조 차원에서 못박는다.
-  const identityImageNumber = 2;
-  const backgroundImageNumber = hasIdentityReferenceImage ? 3 : 2;
+  // (2026-07-09, 2차 강화) 이미지 순서를 [모델, 제품, 배경]으로 바꿨다 — gpt-image-2의 edit는
+  // 첫 번째 이미지를 "편집할 대상"으로 취급하는 경향이 있어서, 제품 사진이 1번일 때는 그 사진
+  // 속 타사 모델의 몸/피부가 계속 결과에 배어 나왔다 (AI 피팅이 모델 일관성이 좋은 이유도
+  // 기준 인물 사진이 1번 이미지이기 때문). 이제 "Image 1의 사람을 편집해서 Image 2의 제품을
+  // 입힌다"는 자연스러운 편집 구도가 된다.
+  const productImageNumber = hasIdentityReferenceImage ? 2 : 1;
+  const backgroundImageNumber = productImageNumber + 1;
 
   const backgroundLine = hasBackgroundReferenceImage
     ? `- Background: Image ${backgroundImageNumber} shows the EXACT target studio backdrop and lighting setup (soft frontal light, gentle top-down falloff, seamless cyclorama floor curve). Reproduce this exact background, light direction, and shadow softness on the subject. (${stylingSuggestion.background})`
     : `- Background: ${stylingSuggestion.background}`;
 
-  const identityReferenceLine = hasIdentityReferenceImage
-    ? `\n- Image ${identityImageNumber} shows THE model — the exact person who must appear in the output. Match Image ${identityImageNumber}'s face, skin tone, and body identically; if Image 1 contains a different person, that person must NOT influence the output in any way (not their face, not their skin tone, not their body shape). Do NOT copy any clothing or accessory from Image ${identityImageNumber}; the outfit is defined entirely by the PRODUCT and NEW STYLING sections.`
+  const identityBlock = hasIdentityReferenceImage
+    ? `Image 1 shows THE model — the exact person who must appear in the output. Keep Image 1's face, skin tone, and body identical. Do NOT copy any clothing or accessory from Image 1; the outfit is defined entirely by the PRODUCT and NEW STYLING sections below.`
+    : 'Generate the model described in the MODEL section below.';
+
+  // 색상 옵션 지정 시 — 샘플 시트에 여러 색상이 있어도 이 색상 하나만 입혀서 생성
+  const colorVariantLine = colorVariant
+    ? `\n- COLORWAY TO GENERATE: this product is sold in multiple colors and Image ${productImageNumber} may show several colorways together. Generate ONLY the "${colorVariant}" colorway — the garment worn by the model must be exactly this color, using the matching colorway in Image ${productImageNumber} as the color/texture source of truth. Ignore the other colorways in the image entirely.`
     : '';
 
   return [
-    '=== TASK: PRODUCT PHOTO → MODEL WEARING IT ===',
-    `Image 1 is a shop listing photo of a ${CATEGORY_PRESERVE_LABEL[category]} — it may be laid flat, on a hanger, a catalog shot, or worn by some shop model. In every case, ONLY the product itself is the reference: completely ignore any person, body, face, pose, other garments, and background shown in Image 1.${hasIdentityReferenceImage ? ` Generate a photorealistic commercial lookbook photograph of the person shown in Image ${identityImageNumber} (and ONLY that person) actually WEARING this exact product, fitted naturally on the body.` : ' Generate a photorealistic commercial lookbook photograph of the model described below actually WEARING this exact product, fitted naturally on the body.'}`,
+    '=== TASK: DRESS THE MODEL IN THE PRODUCT ===',
+    `${identityBlock}`,
+    `Image ${productImageNumber} is a shop listing photo of a ${CATEGORY_PRESERVE_LABEL[category]} — it may be laid flat, on a hanger, a catalog shot, or worn by some other shop model. ONLY the product itself is the reference from Image ${productImageNumber}: completely ignore any person, body, face, pose, other garments, and background shown there. Produce a photorealistic commercial lookbook photograph of the Image 1 model actually WEARING this exact product, fitted naturally on the body.`,
     '',
     '=== MODEL (fixed personal standard) ===',
-    bodySpec + identityReferenceLine,
+    bodySpec,
     '',
-    '=== PRODUCT FIDELITY (Image 1 is the source of truth) ===',
-    `- Reproduce the product in Image 1 with complete fidelity: exact same color and shade, same fabric texture, same details (buttons, stitching, pockets, prints, logos as shown), same overall silhouette — a customer must recognize it as the same product they saw in the shop listing.`,
-    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.`,
-    '- CRITICAL COLOR RULE: the color in Image 1 is the actual product color being sold — match it precisely, do not shift the hue, saturation, or brightness. If the spec text and Image 1 seem to disagree, Image 1 wins.',
-    '- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image 1 — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.',
+    `=== PRODUCT FIDELITY (Image ${productImageNumber} is the source of truth) ===`,
+    `- Reproduce the product in Image ${productImageNumber} with complete fidelity: exact same color and shade, same fabric texture, same details (buttons, stitching, pockets, prints, logos as shown), same overall silhouette — a customer must recognize it as the same product they saw in the shop listing.`,
+    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}`,
+    `- CRITICAL COLOR RULE: ${colorVariant ? `the "${colorVariant}" colorway` : `the color shown in Image ${productImageNumber}`} is the actual product color being sold — match it precisely, do not shift the hue, saturation, or brightness.`,
+    `- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image ${productImageNumber} — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.`,
     '',
     '=== POSE & FRAMING (ABSOLUTE) ===',
     `Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped. Clean, confident, polished commercial standing pose with natural hand placement.${poseHintBlock}`,

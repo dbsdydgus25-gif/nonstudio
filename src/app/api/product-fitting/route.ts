@@ -47,16 +47,26 @@ async function runSingleProductFitting(
   openai: OpenAI,
   productImageBase64: string,
   prompt: string,
-  referenceImages: Array<{ buffer: Buffer; mimeType: string }>,
+  identityReferenceImage: { buffer: Buffer; mimeType: string } | null,
+  backgroundReferenceImage: { buffer: Buffer; mimeType: string } | null,
 ): Promise<string> {
   const { buffer, mimeType } = parseBase64Image(productImageBase64);
   const productFile = await toOpenAIFile(buffer, mimeType, `product.${mimeType.split('/')[1] || 'jpg'}`);
+  // (2026-07-09) 이미지 순서를 [모델, 제품, 배경]으로 변경 — gpt-image-2 edit는 첫 이미지를
+  // 편집 대상으로 취급하는 경향이 있어, 모델 사진을 1번에 두면 "이 사람에게 제품을 입힌다"는
+  // 자연스러운 편집이 되어 모델(체형/피부/얼굴) 충실도가 크게 올라간다. 프롬프트의 이미지
+  // 번호(buildProductFittingPrompt)와 반드시 함께 맞춰져 있어야 함.
+  const refs = [identityReferenceImage, backgroundReferenceImage].filter(
+    (r): r is { buffer: Buffer; mimeType: string } => !!r,
+  );
   const refFiles = await Promise.all(
-    referenceImages.map((ref, i) =>
+    refs.map((ref, i) =>
       toOpenAIFile(ref.buffer, ref.mimeType, `reference-${i}.${ref.mimeType.split('/')[1] || 'jpg'}`),
     ),
   );
-  const imageInput = refFiles.length > 0 ? [productFile, ...refFiles] : productFile;
+  const imageInput = identityReferenceImage
+    ? [refFiles[0], productFile, ...refFiles.slice(1)] // [모델, 제품, 배경]
+    : [productFile, ...refFiles]; // 모델 사진 없으면 기존 순서
 
   const res = await (openai.images as any).edit({
     model: 'gpt-image-2',
@@ -82,6 +92,7 @@ export async function POST(req: Request) {
       openaiApiKey,
       userAdditions,
       userPreferenceHints,
+      extractColors,
     }: {
       /** 색상 옵션별 제품 이미지 (1장 이상) — 각 이미지마다 1장씩 생성된다 */
       productImagesBase64: string[];
@@ -90,6 +101,8 @@ export async function POST(req: Request) {
       openaiApiKey: string;
       userAdditions?: string;
       userPreferenceHints?: StyleHintsBySlot;
+      /** true면 첫 이미지(색상 샘플 시트)에서 색상 옵션을 자동 추출해 색상별로 생성 */
+      extractColors?: boolean;
     } = await req.json();
 
     if (!productImagesBase64?.length) {
@@ -106,16 +119,32 @@ export async function POST(req: Request) {
     const sourcedCategory = category as SourcedCategory;
     const images = productImagesBase64.slice(0, 6); // 색상 옵션 과다 등록 방지
 
-    // 색상 옵션 이미지마다 pending 행을 만들어 id 배열을 즉시 반환한다.
+    // 생성 단위(job) 구성 — 두 가지 모드:
+    // (a) 기본: 업로드한 이미지 1장당 1개 생성
+    // (b) 색상 자동 추출: 첫 이미지(도매처 색상 샘플 시트)에서 Gemini로 색상 옵션을 추출해
+    //     색상마다 1개 생성 (모든 색상 job이 같은 샘플 시트 이미지를 참조하고, 프롬프트로 색상 지정)
+    let jobPlans: Array<{ imageBase64: string; label: string; colorVariant?: string }>;
+    if (extractColors) {
+      const { extractColorVariants } = await import('@/lib/garment-agent');
+      const colors = await extractColorVariants(images[0], geminiApiKey, openaiApiKey);
+      jobPlans = colors.map((c) => ({ imageBase64: images[0], label: c.label, colorVariant: c.color }));
+    } else {
+      jobPlans = images.map((imageBase64, i) => ({
+        imageBase64,
+        label: images.length > 1 ? `색상 옵션 ${i + 1}` : 'AI 제품 피팅 결과',
+      }));
+    }
+
+    // job마다 pending 행을 만들어 id 배열을 즉시 반환한다.
     const jobs = await Promise.all(
-      images.map(async (imageBase64, i) => ({
+      jobPlans.map(async (plan) => ({
         generationId: await createPendingGeneration({
           pipeline: 'restyle',
           modeOrCategory: 'product',
-          poseLabel: images.length > 1 ? `색상 옵션 ${i + 1}` : 'AI 제품 피팅 결과',
+          poseLabel: plan.label,
           prompt: '',
         }),
-        imageBase64,
+        ...plan,
       })),
     );
 
@@ -126,12 +155,9 @@ export async function POST(req: Request) {
       const modelProfile = await getModelProfile();
       const identityReferenceImage = await getModelIdentityImage();
       const bodySpec = buildBodySpecFromProfile(modelProfile);
-      const referenceImages = [identityReferenceImage, backgroundReferenceImage].filter(
-        (r): r is { buffer: Buffer; mimeType: string } => !!r,
-      );
 
       await Promise.allSettled(
-        jobs.map(async ({ generationId, imageBase64 }) => {
+        jobs.map(async ({ generationId, imageBase64, colorVariant }) => {
           try {
             // 색상 옵션마다 색/디테일이 다르므로 이미지별로 개별 분석한다
             const garmentAnalysis = await analyzeGarment(
@@ -162,9 +188,16 @@ export async function POST(req: Request) {
               !!backgroundReferenceImage,
               !!identityReferenceImage,
               bodySpec,
+              colorVariant,
             );
 
-            const imageUrl = await runSingleProductFitting(openai, imageBase64, prompt, referenceImages);
+            const imageUrl = await runSingleProductFitting(
+              openai,
+              imageBase64,
+              prompt,
+              identityReferenceImage,
+              backgroundReferenceImage,
+            );
             const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
             await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt });
           } catch (err: any) {
@@ -177,10 +210,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      jobs: jobs.map(({ generationId }, i) => ({
-        generationId,
-        label: images.length > 1 ? `색상 옵션 ${i + 1}` : 'AI 제품 피팅 결과',
-      })),
+      jobs: jobs.map(({ generationId, label }) => ({ generationId, label })),
     });
   } catch (err: any) {
     console.error('[api/product-fitting] 처리 실패:', err);

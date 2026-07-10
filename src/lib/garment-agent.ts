@@ -486,3 +486,86 @@ Return ONLY valid JSON with these exact keys (use an empty string "" for any slo
     };
   }
 }
+
+// ─────────────────────────────────────────────────────────────────
+// 색상 옵션 자동 추출 (AI 제품 피팅용, 2026-07-09)
+// 도매처(신상마켓/도매꾹 등) 샘플 시트는 한 장에 여러 색상이 같이 나오는 경우가 많다 —
+// 그 한 장에서 실제로 판매되는 색상 옵션들을 추출해 색상별 생성으로 이어준다.
+// ─────────────────────────────────────────────────────────────────
+export interface ColorVariant {
+  /** UI 표시용 한글 색상명 (예: "아이보리") */
+  label: string;
+  /** 프롬프트용 정밀 영어 색상 설명 (예: "ivory off-white") */
+  color: string;
+}
+
+export async function extractColorVariants(
+  imageBase64: string,
+  geminiApiKey: string,
+  openaiApiKey?: string,
+): Promise<ColorVariant[]> {
+  const { data, mimeType } = parseBase64(imageBase64);
+  const promptText = `
+This is a wholesale sample sheet photo of ONE clothing product that may show MULTIPLE color options
+(the same garment repeated in different colors, often stacked or side by side).
+List every distinct color option of the product shown in this image.
+
+Rules:
+- Only count actual colorways of the product itself — ignore background, props, print graphics' internal colors, and lighting differences.
+- If the image shows only ONE color of the product, return exactly one entry.
+- Keep the order they appear in the image (top to bottom, left to right).
+
+Return ONLY valid JSON, no markdown:
+{ "colors": [ { "label": "짧은 한글 색상명 (예: 아이보리)", "color": "precise English color description for image generation (e.g., 'ivory off-white', 'jet black', 'light heather gray melange')" } ] }
+`.trim();
+
+  const parseColors = (raw: string): ColorVariant[] => {
+    const parsed = JSON.parse(raw);
+    const list = Array.isArray(parsed?.colors) ? parsed.colors : [];
+    return list
+      .filter((c: any) => c && typeof c.color === 'string' && c.color.trim())
+      .map((c: any) => ({ label: String(c.label || c.color).trim(), color: String(c.color).trim() }))
+      .slice(0, 6); // 색상 옵션 과다 방지 (생성 비용)
+  };
+
+  try {
+    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+    const response = await retryOn429(() =>
+      ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{ role: 'user', parts: [{ inlineData: { data, mimeType } }, { text: promptText }] }],
+        config: { temperature: 0.1, responseMimeType: 'application/json' },
+      }),
+    );
+    const colors = parseColors(response.text?.trim() || '{}');
+    if (colors.length > 0) return colors;
+    throw new Error('색상 추출 결과가 비어 있음');
+  } catch (geminiError) {
+    if (openaiApiKey) {
+      console.warn('[ColorAgent] Gemini 오류 — OpenAI 비전으로 색상 추출을 대체 실행합니다.');
+      try {
+        const openai = new OpenAI({ apiKey: openaiApiKey });
+        const chatCompletion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: promptText },
+                { type: 'image_url', image_url: { url: imageBase64 } },
+              ],
+            },
+          ],
+          temperature: 0.1,
+          response_format: { type: 'json_object' },
+        });
+        const colors = parseColors(chatCompletion.choices[0].message.content?.trim() || '{}');
+        if (colors.length > 0) return colors;
+      } catch (openaiError) {
+        console.error('[ColorAgent] OpenAI 색상 추출 대체 실패:', openaiError);
+      }
+    }
+    // 추출 실패 시 단일 색상으로 폴백 — 기존 동작(이미지 그대로 1장 생성)과 동일해짐
+    return [{ label: '기본 색상', color: 'the exact color shown in the product image' }];
+  }
+}
