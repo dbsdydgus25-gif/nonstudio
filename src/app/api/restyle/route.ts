@@ -22,7 +22,7 @@ import { analyzeGarment, analyzePose, generateStylingSuggestion, type StyleHints
 import { buildRestylePrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCategory } from '@/lib/fitting-prompts';
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
-import { getIdentityReferenceImage } from '@/lib/identity-reference';
+import { getModelProfile, getModelIdentityImage, buildBodySpecFromProfile } from '@/lib/model-profile';
 
 export const runtime = 'nodejs';
 // Vercel Hobby+Fluid Compute는 함수당 최대 300초까지 허용한다 — 분석(Gemini 2회) + 코디 제안
@@ -161,12 +161,11 @@ export async function POST(req: Request) {
         // 실제 사진 한 장이 배경/조명 방향을 훨씬 정확하게 고정시켜준다.
         const backgroundReferenceImage = hasCustomBackground ? null : getDefaultBackgroundReferenceImage();
 
-        // (2026-07-09 재도입) 텍스트 스펙만으로는 피부톤/체형이 매번 미묘하게 흔들려서, 사용자의
-        // 실제 몸/피부톤 사진을 참고 이미지로 다시 넣는다 — 예전에 이 방식이 신발/코디까지 그 사진을
-        // 따라가게 만드는 부작용이 있어서 아예 뺐었는데, 그건 사실 프롬프트 4000자 truncation
-        // 버그와 겹쳐서 "이 사진은 얼굴/체형/피부톤 전용" disambiguation 지시 자체가 온전히
-        // 전달되고 있었는지 불확실한 상태에서 내린 판단이었다. truncation을 고친 지금 다시 시도.
-        const identityReferenceImage = await getIdentityReferenceImage();
+        // (2026-07-09) 모델 정보(참고 이미지 + 체형 스펙)는 이제 "모델 정보" 페이지에서 편집하는
+        // Supabase 프로필에서 매 생성마다 로드한다 — 프로필이 없으면 기존 기본값(seed_1 +
+        // PERSONAL_BODY_SPEC) 그대로 동작.
+        const modelProfile = await getModelProfile();
+        const identityReferenceImage = await getModelIdentityImage();
 
         const prompt = buildRestylePrompt(
           sourcedCategory,
@@ -176,6 +175,7 @@ export async function POST(req: Request) {
           userAdditions || '',
           !!backgroundReferenceImage,
           !!identityReferenceImage,
+          buildBodySpecFromProfile(modelProfile),
         );
 
         const referenceImages = [identityReferenceImage, backgroundReferenceImage].filter(

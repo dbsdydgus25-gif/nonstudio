@@ -3,8 +3,8 @@
 import React from 'react';
 
 interface SidebarProps {
-  activePage: 'fitting' | 'restyle' | 'product' | 'history';
-  onPageChange: (page: 'fitting' | 'restyle' | 'product' | 'history') => void;
+  activePage: 'fitting' | 'restyle' | 'product' | 'model' | 'history';
+  onPageChange: (page: 'fitting' | 'restyle' | 'product' | 'model' | 'history') => void;
   onOpenApiKeys: () => void;
   geminiKey: string;
   openaiKey: string;
@@ -44,10 +44,17 @@ const Icon = {
       <circle cx="13" cy="16" r="2.5" />
     </svg>
   ),
+  model: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-[18px] h-[18px]">
+      <circle cx="12" cy="7" r="3.5" />
+      <path d="M5 21c0-3.9 3.1-7 7-7s7 3.1 7 7" />
+      <path d="M12 14v3" />
+    </svg>
+  ),
 };
 
 const NAV_ITEMS: Array<{
-  id: 'restyle' | 'product' | 'fitting' | 'history';
+  id: 'restyle' | 'product' | 'fitting' | 'model' | 'history';
   label: string;
   desc: string;
   icon: React.ReactNode;
@@ -55,6 +62,7 @@ const NAV_ITEMS: Array<{
   { id: 'restyle', label: 'AI 피팅', desc: '실사 사진 한 장으로 확정 룩 제작', icon: Icon.fitting },
   { id: 'product', label: 'AI 제품 피팅', desc: '제품 사진만으로 착용 화보 제작', icon: Icon.product },
   { id: 'fitting', label: 'AI 바리에이션', desc: '확정 룩 유지, 포즈 다양화', icon: Icon.variation },
+  { id: 'model', label: '모델 정보', desc: '참고 이미지 · 체형 스펙 관리', icon: Icon.model },
   { id: 'history', label: '히스토리', desc: '전체 생성 기록', icon: Icon.history },
 ];
 
@@ -116,7 +124,7 @@ export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, op
             Library
           </div>
           <div className="space-y-0.5">
-            {NAV_ITEMS.slice(3).map((item) => (
+            {NAV_ITEMS.slice(3, 5).map((item) => (
               <button
                 key={item.id}
                 onClick={() => onPageChange(item.id)}

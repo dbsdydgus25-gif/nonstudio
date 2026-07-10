@@ -5,6 +5,7 @@ import { Sidebar } from '@/components/studio/Sidebar';
 import { RestyleSection } from '@/components/studio/RestyleSection';
 import { ProductFittingSection } from '@/components/studio/ProductFittingSection';
 import { VariationSection } from '@/components/studio/VariationSection';
+import { ModelProfileSection } from '@/components/studio/ModelProfileSection';
 import { HistorySection } from '@/components/studio/HistorySection';
 import { ApiKeyModal } from '@/components/studio/ApiKeyModal';
 
@@ -15,7 +16,7 @@ export default function StudioPage() {
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
 
   // Navigation — 'restyle' = AI 피팅, 'product' = AI 제품 피팅, 'fitting' = AI 바리에이션 (내부 상태값 이름은 유지, 화면 라벨만 바뀜)
-  const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'product' | 'history'>('restyle');
+  const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'product' | 'model' | 'history'>('restyle');
 
   // AI 피팅 → AI 바리에이션으로 넘기는 이미지
   const [variationSourceImage, setVariationSourceImage] = useState<string | null>(null);
@@ -79,6 +80,11 @@ export default function StudioPage() {
                 <h1 className="text-[13px] font-semibold text-gray-900 tracking-tight">AI 바리에이션</h1>
                 <p className="text-[10px] text-gray-400">확정 룩을 그대로 유지한 채 포즈만 다양화</p>
               </>
+            ) : activePage === 'model' ? (
+              <>
+                <h1 className="text-[13px] font-semibold text-gray-900 tracking-tight">모델 정보</h1>
+                <p className="text-[10px] text-gray-400">모든 생성이 참고하는 기준 이미지와 체형 스펙 관리</p>
+              </>
             ) : (
               <>
                 <h1 className="text-[13px] font-semibold text-gray-900 tracking-tight">히스토리</h1>
@@ -115,6 +121,8 @@ export default function StudioPage() {
             incomingImage={variationSourceImage}
             onConsumeIncomingImage={() => setVariationSourceImage(null)}
           />
+        ) : activePage === 'model' ? (
+          <ModelProfileSection />
         ) : activePage === 'history' ? (
           <HistorySection />
         ) : null}

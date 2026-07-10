@@ -116,11 +116,15 @@ CRITICAL NEGATIVE CONSTRAINTS (DO NOT GENERATE):
 cartoon, illustration, CGI, 3D render, digital art, video game graphics, airbrushed skin, plastic skin, mannequin texture, artificial doll look, low resolution, blurry, deformed body, incorrect anatomy, extra limbs, bad hands, overlapping fingers, unnatural pose, oversaturated colors, fake lighting, warped background, artifacts, logos, text, watermark, composite look, collage, split screen, multi-panel, grid of photos, side-by-side comparison, diptych, triptych, photo montage, layout of multiple images, soft puffy chest, sagging chest, love handles, flabby untoned body, out-of-shape physique, hunched posture, awkward stiff pose, invented fabric pattern, fake jacquard or paisley print, embossed decorative texture not present on the real garment, moire pattern on fabric, unintended textile print.
 `.trim();
 
-const RESTYLE_BODY_SPEC = `
+// (2026-07-09) 모델 정보 페이지에서 스펙을 편집할 수 있도록 상수 조립 대신 함수로 전환 —
+// bodySpec 미지정 시 기존 PERSONAL_BODY_SPEC이 그대로 쓰여서 동작이 변하지 않는다.
+function buildRestyleBodySpec(bodySpec: string): string {
+  return `
 MODEL BODY SPEC (reshape the body toward this — do not literally copy the input photo's actual body shape):
-${PERSONAL_BODY_SPEC}
+${bodySpec}
 - Keep the same face and general identity recognizable — this is a refinement of the same person, not a different person.
 `.trim();
+}
 
 const CATEGORY_PRESERVE_LABEL: Record<SourcedCategory, string> = {
   top: '상의(윗옷)',
@@ -155,6 +159,7 @@ export function buildRestylePrompt(
   userAdditions: string = '',
   hasBackgroundReferenceImage: boolean = false,
   hasIdentityReferenceImage: boolean = false,
+  bodySpec: string = PERSONAL_BODY_SPEC,
 ): string {
   const stylingLines: string[] = [];
   if (stylingSuggestion.top) stylingLines.push(`- 상의: ${stylingSuggestion.top}`);
@@ -182,7 +187,7 @@ export function buildRestylePrompt(
 
   return [
     '=== MODEL BODY RESHAPE (IMPORTANT — DO NOT KEEP THE ORIGINAL BODY AS-IS) ===',
-    RESTYLE_BODY_SPEC + identityReferenceLine,
+    buildRestyleBodySpec(bodySpec) + identityReferenceLine,
     '',
     '=== SOURCED PRODUCT FIDELITY ===',
     buildGarmentFidelityBlock(category, garmentAnalysis),
@@ -218,6 +223,7 @@ export function buildProductFittingPrompt(
   userAdditions: string = '',
   hasBackgroundReferenceImage: boolean = false,
   hasIdentityReferenceImage: boolean = false,
+  bodySpec: string = PERSONAL_BODY_SPEC,
 ): string {
   const stylingLines: string[] = [];
   if (stylingSuggestion.top) stylingLines.push(`- 상의: ${stylingSuggestion.top}`);
@@ -250,7 +256,7 @@ export function buildProductFittingPrompt(
     `Image 1 is a shop listing photo of a ${CATEGORY_PRESERVE_LABEL[category]} — it may be laid flat, on a hanger, a catalog shot, or worn by some shop model. In every case, ONLY the product itself is the reference: completely ignore any person, body, face, pose, other garments, and background shown in Image 1.${hasIdentityReferenceImage ? ` Generate a photorealistic commercial lookbook photograph of the person shown in Image ${identityImageNumber} (and ONLY that person) actually WEARING this exact product, fitted naturally on the body.` : ' Generate a photorealistic commercial lookbook photograph of the model described below actually WEARING this exact product, fitted naturally on the body.'}`,
     '',
     '=== MODEL (fixed personal standard) ===',
-    PERSONAL_BODY_SPEC + identityReferenceLine,
+    bodySpec + identityReferenceLine,
     '',
     '=== PRODUCT FIDELITY (Image 1 is the source of truth) ===',
     `- Reproduce the product in Image 1 with complete fidelity: exact same color and shade, same fabric texture, same details (buttons, stitching, pockets, prints, logos as shown), same overall silhouette — a customer must recognize it as the same product they saw in the shop listing.`,

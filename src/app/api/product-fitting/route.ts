@@ -15,7 +15,7 @@ import { analyzeGarment, generateStylingSuggestion, type StyleHintsBySlot } from
 import { buildProductFittingPrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCategory } from '@/lib/fitting-prompts';
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
-import { getIdentityReferenceImage } from '@/lib/identity-reference';
+import { getModelProfile, getModelIdentityImage, buildBodySpecFromProfile } from '@/lib/model-profile';
 
 export const runtime = 'nodejs';
 export const maxDuration = 280;
@@ -122,7 +122,10 @@ export async function POST(req: Request) {
     after(async () => {
       const openai = new OpenAI({ apiKey: openaiApiKey });
       const backgroundReferenceImage = getDefaultBackgroundReferenceImage();
-      const identityReferenceImage = await getIdentityReferenceImage();
+      // 모델 정보(참고 이미지 + 체형 스펙)는 "모델 정보" 페이지에서 편집하는 프로필에서 로드
+      const modelProfile = await getModelProfile();
+      const identityReferenceImage = await getModelIdentityImage();
+      const bodySpec = buildBodySpecFromProfile(modelProfile);
       const referenceImages = [identityReferenceImage, backgroundReferenceImage].filter(
         (r): r is { buffer: Buffer; mimeType: string } => !!r,
       );
@@ -158,6 +161,7 @@ export async function POST(req: Request) {
               userAdditions || '',
               !!backgroundReferenceImage,
               !!identityReferenceImage,
+              bodySpec,
             );
 
             const imageUrl = await runSingleProductFitting(openai, imageBase64, prompt, referenceImages);
