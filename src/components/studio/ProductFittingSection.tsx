@@ -53,7 +53,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   const [extractColors, setExtractColors] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   // 추출된 색상별 계획 — 색상마다 코디 지시를 따로 입력할 수 있다 (비운 슬롯은 공통 지시 사용)
-  const [colorPlans, setColorPlans] = useState<Array<{ label: string; color: string; styleHints: Partial<Record<SourcedCategory, string>> }> | null>(null);
+  const [colorPlans, setColorPlans] = useState<Array<{ label: string; color: string; box?: [number, number, number, number]; styleHints: Partial<Record<SourcedCategory, string>> }> | null>(null);
   const [category, setCategory] = useState<SourcedCategory>('top');
   const [poseHint, setPoseHint] = useState('');
   const [styleHints, setStyleHints] = useState<Partial<Record<SourcedCategory, string>>>({});
@@ -130,7 +130,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || '색상 추출에 실패했습니다.');
-      setColorPlans(data.colors.map((c: any) => ({ label: c.label, color: c.color, styleHints: {} })));
+      setColorPlans(data.colors.map((c: any) => ({ label: c.label, color: c.color, box: c.box, styleHints: {} })));
     } catch (err: any) {
       alert(err?.message || '색상 추출 중 오류가 발생했습니다.');
     } finally {
@@ -173,6 +173,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             ? colorPlans.map((p) => ({
                 label: p.label,
                 color: p.color,
+                box: p.box,
                 styleHints: Object.fromEntries(
                   Object.entries(p.styleHints).filter(([, v]) => typeof v === 'string' && v.trim()),
                 ),

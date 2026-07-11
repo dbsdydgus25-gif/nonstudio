@@ -424,6 +424,7 @@ Current pose in the photo: ${poseDescription}
 ${mandatoryLines ? `MANDATORY USER REQUIREMENTS (NOT soft preferences — follow each exactly):\n${mandatoryLines}\nIMPORTANT: if a requirement contains a negation or exclusion (e.g., "not X", "no X", "X 아님", "(X 제외)", "(X 하지마)", "(X X)" meaning "avoid X"), that exclusion is just as mandatory as the positive part — you must actively avoid producing X in your description, not merely fail to mention it.` : ''}
 
 Suggest a cohesive, stylish outfit for ONLY these remaining slots: ${slotsToFill.map((s) => CATEGORY_SLOT_LABELS[s]).join(', ')}, plus a studio/location background that matches the mood. Any slot not covered by a mandatory requirement above should be styled freely to match it.
+NEVER suggest sunglasses, hats, caps, beanies, or anything that covers the model's face or hair — the model's face must stay fully visible (these items are only allowed if a mandatory user requirement explicitly asks for them).
 Return ONLY valid JSON with these exact keys (use an empty string "" for any slot NOT in the list above):
 {
   "top": "detailed description of top/knitwear, or empty string",
@@ -497,6 +498,9 @@ export interface ColorVariant {
   label: string;
   /** 프롬프트용 정밀 영어 색상 설명 (예: "ivory off-white") */
   color: string;
+  /** 시트 안에서 이 색상 제품이 차지하는 영역 [ymin, xmin, ymax, xmax] (0~1000 정규화) —
+   * 생성 전에 이 영역만 잘라 보내면 "여러 벌 중 어느 옷인지" 혼동 없이 제품 재현이 훨씬 정확해짐 */
+  box?: [number, number, number, number];
 }
 
 export async function extractColorVariants(
@@ -508,15 +512,16 @@ export async function extractColorVariants(
   const promptText = `
 This is a wholesale sample sheet photo of ONE clothing product that may show MULTIPLE color options
 (the same garment repeated in different colors, often stacked or side by side).
-List every distinct color option of the product shown in this image.
+List every distinct color option of the product shown in this image, WITH the bounding box of each colorway.
 
 Rules:
 - Only count actual colorways of the product itself — ignore background, props, print graphics' internal colors, and lighting differences.
 - If the image shows only ONE color of the product, return exactly one entry.
 - Keep the order they appear in the image (top to bottom, left to right).
+- "box_2d" is the tight bounding box around that single colorway garment, as [ymin, xmin, ymax, xmax] normalized to 0-1000.
 
 Return ONLY valid JSON, no markdown:
-{ "colors": [ { "label": "짧은 한글 색상명 (예: 아이보리)", "color": "precise English color description for image generation (e.g., 'ivory off-white', 'jet black', 'light heather gray melange')" } ] }
+{ "colors": [ { "label": "짧은 한글 색상명 (예: 아이보리)", "color": "precise English color description for image generation (e.g., 'ivory off-white', 'jet black', 'light heather gray melange')", "box_2d": [ymin, xmin, ymax, xmax] } ] }
 `.trim();
 
   const parseColors = (raw: string): ColorVariant[] => {
@@ -524,7 +529,14 @@ Return ONLY valid JSON, no markdown:
     const list = Array.isArray(parsed?.colors) ? parsed.colors : [];
     return list
       .filter((c: any) => c && typeof c.color === 'string' && c.color.trim())
-      .map((c: any) => ({ label: String(c.label || c.color).trim(), color: String(c.color).trim() }))
+      .map((c: any) => {
+        const b = c.box_2d;
+        const box =
+          Array.isArray(b) && b.length === 4 && b.every((n: any) => typeof n === 'number' && n >= 0 && n <= 1000) && b[0] < b[2] && b[1] < b[3]
+            ? (b as [number, number, number, number])
+            : undefined;
+        return { label: String(c.label || c.color).trim(), color: String(c.color).trim(), box };
+      })
       .slice(0, 6); // 색상 옵션 과다 방지 (생성 비용)
   };
 

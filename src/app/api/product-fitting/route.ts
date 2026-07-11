@@ -16,7 +16,7 @@ import { buildProductFittingPrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCateg
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { getModelProfile, getModelIdentityImage, buildBodySpecFromProfile } from '@/lib/model-profile';
-import { downscaleImage, withImageRetry, runWithConcurrency } from '@/lib/image-utils';
+import { downscaleImage, withImageRetry, runWithConcurrency, cropToBox } from '@/lib/image-utils';
 
 export const runtime = 'nodejs';
 export const maxDuration = 280;
@@ -124,7 +124,13 @@ export async function POST(req: Request) {
        * 있으면 서버 추출을 건너뛰고 이대로 생성 — styleHints는 색상별 코디 덮어쓰기
        * (비어 있는 슬롯은 공통 userPreferenceHints를 그대로 사용).
        */
-      colorPlans?: Array<{ label: string; color: string; styleHints?: StyleHintsBySlot }>;
+      colorPlans?: Array<{
+        label: string;
+        color: string;
+        styleHints?: StyleHintsBySlot;
+        /** 시트 안 해당 색상 위치 (0~1000 정규화, 추출 시 획득) — 있으면 그 영역만 잘라서 생성 */
+        box?: [number, number, number, number];
+      }>;
     } = await req.json();
 
     if (!productImagesBase64?.length) {
@@ -146,18 +152,28 @@ export async function POST(req: Request) {
     // (b) colorPlans: 색상 추출 미리보기를 거쳐 사용자가 색상별 코디까지 확정한 계획 —
     //     색상마다 코디가 다를 수 있으므로 styleHints를 색상별로 덮어쓴다
     // (c) extractColors(레거시/직접 API 호출): 서버에서 즉석 추출해 색상별 생성
+    // 색상 시트 모드에서는 해당 색상 영역만 잘라서 보낸다 — 여러 벌이 한 장에 있으면
+    // gpt-image-2가 "어느 옷인지" 섞어버려 제품 재현이 깨지던 문제의 근본 대응.
     let jobPlans: Array<{ imageBase64: string; label: string; colorVariant?: string; styleHints?: StyleHintsBySlot }>;
     if (colorPlans?.length) {
-      jobPlans = colorPlans.slice(0, 6).map((plan) => ({
-        imageBase64: images[0],
-        label: plan.label,
-        colorVariant: plan.color,
-        styleHints: plan.styleHints,
-      }));
+      jobPlans = await Promise.all(
+        colorPlans.slice(0, 6).map(async (plan) => ({
+          imageBase64: plan.box ? await cropToBox(images[0], plan.box) : images[0],
+          label: plan.label,
+          colorVariant: plan.color,
+          styleHints: plan.styleHints,
+        })),
+      );
     } else if (extractColors) {
       const { extractColorVariants } = await import('@/lib/garment-agent');
       const colors = await extractColorVariants(images[0], geminiApiKey, openaiApiKey);
-      jobPlans = colors.map((c) => ({ imageBase64: images[0], label: c.label, colorVariant: c.color }));
+      jobPlans = await Promise.all(
+        colors.map(async (c) => ({
+          imageBase64: c.box ? await cropToBox(images[0], c.box) : images[0],
+          label: c.label,
+          colorVariant: c.color,
+        })),
+      );
     } else {
       jobPlans = images.map((imageBase64, i) => ({
         imageBase64,
@@ -237,6 +253,7 @@ export async function POST(req: Request) {
               bodySpec,
               colorVariant,
               productNotes,
+              mergedHints,
             );
 
             const imageUrl = await runSingleProductFitting(

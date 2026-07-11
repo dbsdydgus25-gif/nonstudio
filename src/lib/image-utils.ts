@@ -64,6 +64,45 @@ export async function withImageRetry<T>(fn: () => Promise<T>, retries = 2, delay
   }
 }
 
+/**
+ * 색상 샘플 시트에서 특정 색상 영역만 잘라낸다 — box는 [ymin, xmin, ymax, xmax] (0~1000 정규화,
+ * Gemini 바운딩 박스 규격). 여러 벌이 한 장에 있으면 gpt-image-2가 "어느 옷인지" 섞어버리는
+ * 문제가 있어, 생성 전에 해당 색상 한 벌만 크게 잘라 보낸다. 여백 5%를 둬서 소매/밑단이
+ * 잘리지 않게 한다. 실패하면 원본 그대로 반환.
+ */
+export async function cropToBox(
+  base64DataUrl: string,
+  box: [number, number, number, number],
+): Promise<string> {
+  try {
+    const [header, data] = base64DataUrl.startsWith('data:')
+      ? base64DataUrl.split(',')
+      : ['data:image/png;base64', base64DataUrl];
+    const mimeType = header.match(/data:([^;]+)/)?.[1] || 'image/png';
+    const buffer = Buffer.from(data, 'base64');
+    const meta = await sharp(buffer).metadata();
+    const W = meta.width || 0;
+    const H = meta.height || 0;
+    if (!W || !H) return base64DataUrl;
+
+    const [ymin, xmin, ymax, xmax] = box;
+    const pad = 0.05; // 5% 여백
+    const left = Math.max(0, Math.round(((xmin / 1000) - pad) * W));
+    const top = Math.max(0, Math.round(((ymin / 1000) - pad) * H));
+    const right = Math.min(W, Math.round(((xmax / 1000) + pad) * W));
+    const bottom = Math.min(H, Math.round(((ymax / 1000) + pad) * H));
+    const width = right - left;
+    const height = bottom - top;
+    // 박스가 비정상적으로 작으면(오탐) 크롭하지 않는 게 안전
+    if (width < W * 0.1 || height < H * 0.05) return base64DataUrl;
+
+    const out = await sharp(buffer).extract({ left, top, width, height }).png().toBuffer();
+    return `data:image/png;base64,${out.toString('base64')}`;
+  } catch {
+    return base64DataUrl;
+  }
+}
+
 /** 배열을 동시성 제한으로 순차 배치 처리 — 전체 병렬 대신 batchSize개씩 나눠 실행 */
 export async function runWithConcurrency<T>(
   items: T[],

@@ -228,6 +228,9 @@ export function buildProductFittingPrompt(
   colorVariant?: string,
   /** 사용자가 직접 적는 제품 핏/디테일 지시 (예: '머슬핏, 크롭 기장감') — 사진만으로 안 보이는 정보 보강 */
   productNotes?: string,
+  /** 사용자 코디 지시 원문 (슬롯별) — 코디 자동 제안(Gemini)을 거치며 "와이드"가 순화되는 문제가
+   * 있어서, 원문을 최종 프롬프트에도 문자 그대로 한 번 더 강제한다 */
+  userSlotMandates?: Partial<Record<'top' | 'bottom' | 'shoes' | 'accessory', string>>,
 ): string {
   const stylingLines: string[] = [];
   if (stylingSuggestion.top) stylingLines.push(`- 상의: ${stylingSuggestion.top}`);
@@ -266,6 +269,17 @@ export function buildProductFittingPrompt(
     ? `\n- MANDATORY PRODUCT FIT/DETAIL SPEC (provided by the seller — overrides visual guesses from the photo): ${productNotes.trim()}. Apply these fit, length, and detail characteristics exactly to how the garment fits on the model's body.`
     : '';
 
+  // 사용자 코디 지시 원문 — Gemini 코디 제안이 "와이드"를 "테일러드"로 순화하는 등 지시가
+  // 희석되는 경우가 있어, 원문을 문자 그대로 따르라고 최종 프롬프트에 한 번 더 박는다.
+  const SLOT_LABELS: Record<string, string> = { top: '상의', bottom: '하의', shoes: '신발', accessory: '액세서리' };
+  const mandateLines = Object.entries(userSlotMandates || {})
+    .filter(([, text]) => typeof text === 'string' && text.trim())
+    .map(
+      ([slot, text]) =>
+        `- USER MANDATE for ${SLOT_LABELS[slot] || slot}: "${text!.trim()}" — follow this LITERALLY. If it says 와이드/wide, the silhouette must be clearly and visibly wide-leg (NOT tapered, NOT slim); if it specifies a color/material/length, match it exactly. This mandate wins over the AI styling description above if they conflict.`,
+    );
+  const mandateBlock = mandateLines.length > 0 ? `\n${mandateLines.join('\n')}` : '';
+
   return [
     '=== TASK: DRESS THE MODEL IN THE PRODUCT ===',
     `${identityBlock}`,
@@ -284,8 +298,9 @@ export function buildProductFittingPrompt(
     `Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped. Clean, confident, polished commercial standing pose with natural hand placement.${poseHintBlock}`,
     '',
     '=== NEW STYLING TO GENERATE (everything except the product above) ===',
-    stylingLines.length > 0 ? stylingLines.join('\n') : '- Complete the outfit naturally with cohesive, stylish items that flatter the product.',
+    (stylingLines.length > 0 ? stylingLines.join('\n') : '- Complete the outfit naturally with cohesive, stylish items that flatter the product.') + mandateBlock,
     backgroundLine,
+    '- The model\'s face must be fully and clearly visible — bare face, no eyewear or headwear of any kind unless a USER MANDATE above explicitly asks for it.',
     '',
     '=== NEGATIVE CONSTRAINTS (ABSOLUTE) ===',
     RESTYLE_QUALITY_CONSTRAINTS,
