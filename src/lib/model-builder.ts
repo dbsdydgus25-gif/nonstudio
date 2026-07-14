@@ -89,11 +89,21 @@ export function buildModelSpecText(input: ModelBuilderInput): string {
       `- Distinct body characteristics (follow each item exactly as written; keep every detail subtle and photo-realistic, visible only at the described intensity): ${input.featuresText.trim()}`,
     );
   }
+  lines.push(NATURALNESS_CLAUSE);
   lines.push(
     '- This physique, face, and skin tone are a fixed personal standard and must stay identical across every generation.',
   );
   return lines.join('\n');
 }
+
+/**
+ * (2026-07-14) 모델이 "너무 AI 같다"(핏줄/근육/복근 과장)는 피드백 대응 —
+ * gpt-image-2가 평범한 몸을 피트니스 모델처럼 과장하는 경향을 억제하는 공통 문구.
+ * 특정 부위(핏줄 등)를 부정형으로 반복 언급하면 오히려 강조되던 과거 교훈을 피해,
+ * "평범한 실제 스냅사진처럼"이라는 긍정 프레이밍으로 전체 톤을 눌러준다.
+ */
+const NATURALNESS_CLAUSE =
+  '- OVERALL REALISM (critical): render this as an ordinary, candid real photograph of a normal person — natural, un-idealized skin and build. Keep muscle definition, skin surface, and every listed physical detail understated and realistic, only as subtle as they would look in a casual real photo. Do NOT stylize into a fitness-magazine, bodybuilder, or glossy AI-render look; the body should read as an average real person, not an exaggerated ideal.';
 
 /**
  * 확정 정보(specText)와 참고 이미지 속 얼굴이 충돌할 때의 우선순위 안내 —
@@ -164,6 +174,53 @@ export function buildModelFrontFinalPrompt(input: ModelBuilderInput): string {
     buildModelSpecText(input),
     '',
     'Photorealistic, natural skin texture, professional lighting. No CGI, no collage, no text.',
+  ].join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 트랙 2 — "사진으로 만들기" (실제 사진 업로드 → 그 사람 그대로 모델 저장)
+// 텍스트 생성이 몸을 과장하던 문제를 실물 앵커로 근본 회피한다.
+// 업로드 사진 자체를 정면 기준 이미지로 저장하고, 뒤/좌/우만 그 사진에서 파생 생성.
+// ─────────────────────────────────────────────────────────────────
+export interface PhotoModelInput {
+  name: string;
+  gender?: 'male' | 'female';
+  age?: number;
+  heightCm: number;
+  weightKg: number;
+  shoeSizeMm: number;
+}
+
+/** 사진 기반 모델의 백엔드 스펙 — 최소한만 담고 "실물 그대로, 과장 금지"에 집중 */
+export function buildPhotoModelSpecText(input: PhotoModelInput): string {
+  const lines = [
+    `- Height ${input.heightCm}cm, Weight ${input.weightKg}kg, Shoe/foot size ${input.shoeSizeMm}mm (Korean ${input.shoeSizeMm} size).`,
+  ];
+  if (input.gender && input.age) {
+    lines.push(`- ${input.gender === 'male' ? 'Male' : 'Female'}, ${input.age} years old.`);
+  }
+  lines.push(
+    '- The identity reference image IS this exact model — a real person from a real photograph. Reproduce that person faithfully: same face, same real skin, same natural body and proportions, exactly as photographed.',
+    NATURALNESS_CLAUSE,
+    '- This real person is a fixed personal standard and must stay identical across every generation.',
+  );
+  return lines.join('\n');
+}
+
+/** 사진 기반 모델의 뒤/좌/우 뷰 — 업로드한 실제 사진과 같은 옷/분위기를 유지한 채 회전만 */
+export function buildPhotoViewPrompt(view: 'back' | 'left' | 'right'): string {
+  const viewLine =
+    view === 'back'
+      ? 'Show a full BACK view — the camera sees the back of the head, back, and legs. Do not show the face.'
+      : view === 'left'
+        ? 'Show a full LEFT-SIDE profile view — body rotated 90 degrees to the left, face in true side profile.'
+        : 'Show a full RIGHT-SIDE profile view — body rotated 90 degrees to the right, face in true side profile.';
+  return [
+    'The input image is a real photograph of the fitting model. Generate the SAME real person — identical face, hairstyle, skin, body and proportions, wearing the SAME clothing, in the same kind of setting and lighting.',
+    viewLine,
+    'Standing straight, arms relaxed naturally at the sides. FULL BODY head to toe, nothing cropped. Exactly ONE person, one single frame.',
+    NATURALNESS_CLAUSE,
+    'Reproduce the real person faithfully — do NOT beautify, smooth, or exaggerate. Photorealistic, natural skin texture. No CGI, no collage, no text.',
   ].join('\n');
 }
 

@@ -72,6 +72,8 @@ export interface ModelProfile {
   appearanceText?: string;
   builderStatus?: ModelBuilderStatus;
   builderError?: string | null;
+  /** 어느 트랙으로 만든 모델인지 — 'text'=말로 만들기, 'photo'=사진으로 만들기 */
+  builderTrack?: 'text' | 'photo';
 }
 
 /** 코드에 박혀 있던 기존 스펙을 기본값으로 사용 — 프로필 저장 전에도 동작이 바뀌지 않도록 */

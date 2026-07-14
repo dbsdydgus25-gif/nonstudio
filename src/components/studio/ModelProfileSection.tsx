@@ -99,15 +99,18 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
 
   // 마법사 상태
   const [mode, setMode] = useState<'summary' | 'wizard'>('summary');
+  const [track, setTrack] = useState<'text' | 'photo' | null>(null); // 트랙 선택 전엔 null
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [input, setInput] = useState<BuilderInput>(DEFAULT_INPUT);
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  const [photoImage, setPhotoImage] = useState<string | null>(null); // 트랙 2 업로드 사진
   const [draftImage, setDraftImage] = useState<string | null>(null);
   const [isDrafting, setIsDrafting] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [error, setError] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const referenceInputRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const loadProfile = useCallback(async () => {
     try {
@@ -158,9 +161,50 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
     });
     setDraftImage(null);
     setReferenceImage(null);
+    setPhotoImage(null);
+    setTrack(null);
     setError('');
     setStep(1);
     setMode('wizard');
+  };
+
+  const buildFromPhoto = async () => {
+    if (!openaiKey) {
+      onNeedKeys();
+      return;
+    }
+    if (!photoImage) {
+      setError('모델 사진을 업로드해 주세요.');
+      return;
+    }
+    setIsConfirming(true);
+    setError('');
+    try {
+      const res = await fetch('/api/model-builder/from-photo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: {
+            name: input.name,
+            gender: input.gender,
+            age: input.age,
+            heightCm: input.heightCm,
+            weightKg: input.weightKg,
+            shoeSizeMm: input.shoeSizeMm,
+          },
+          photoBase64: photoImage,
+          openaiApiKey: openaiKey,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '사진 모델 저장에 실패했습니다.');
+      await loadProfile(); // building 반영 → 폴링 시작
+      setMode('summary');
+    } catch (err: any) {
+      setError(err?.message || '사진 모델 저장 중 오류가 발생했습니다.');
+    } finally {
+      setIsConfirming(false);
+    }
   };
 
   const makeDraft = async () => {
@@ -380,13 +424,158 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
           <h2 className="text-lg font-semibold text-gray-900 tracking-tight">가상 모델 만들기</h2>
         </div>
         <button
-          onClick={() => setMode('summary')}
+          onClick={() => (track ? setTrack(null) : setMode('summary'))}
           className="text-[11px] text-gray-400 hover:text-gray-900 underline underline-offset-2 transition"
         >
-          취소하고 돌아가기
+          {track ? '방식 다시 선택' : '취소하고 돌아가기'}
         </button>
       </div>
 
+      {error && !track && (
+        <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-4 py-3">{error}</p>
+      )}
+
+      {/* 트랙 선택 — 말로 만들기 vs 사진으로 만들기 */}
+      {!track && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <button
+            onClick={() => { setError(''); setTrack('text'); setStep(1); }}
+            className="text-left bg-white border border-gray-200 hover:border-gray-900 rounded-2xl p-6 space-y-2 transition group"
+          >
+            <div className="w-10 h-10 rounded-xl bg-gray-900 text-white flex items-center justify-center">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5">
+                <path d="M4 7h16M4 12h10M4 17h7" />
+              </svg>
+            </div>
+            <h3 className="text-[14px] font-semibold text-gray-900">말로 만들기</h3>
+            <p className="text-[11px] text-gray-500 leading-relaxed">
+              성별 · 나이 · 신체 스펙 · 특징 · 외모를 입력해 가상 모델을 새로 생성합니다. (참고 이미지 첨부 가능)
+            </p>
+          </button>
+          <button
+            onClick={() => { setError(''); setTrack('photo'); }}
+            className="text-left bg-white border border-gray-200 hover:border-gray-900 rounded-2xl p-6 space-y-2 transition group"
+          >
+            <div className="w-10 h-10 rounded-xl bg-gray-900 text-white flex items-center justify-center">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5">
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <circle cx="8.5" cy="10" r="1.5" />
+                <path d="m21 16-5-5L5 19" />
+              </svg>
+            </div>
+            <h3 className="text-[14px] font-semibold text-gray-900">사진으로 만들기</h3>
+            <p className="text-[11px] text-gray-500 leading-relaxed">
+              실제 자기 사진이나 원하는 사진을 업로드하면 <b className="text-gray-700">그 사람 그대로</b> 모델로 저장합니다. AI 과장 없이 가장 자연스럽습니다.
+            </p>
+          </button>
+        </div>
+      )}
+
+      {/* 트랙 2 — 사진으로 만들기 */}
+      {track === 'photo' && (
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-5">
+          <div>
+            <h3 className="text-[13px] font-semibold text-gray-900">사진으로 만들기</h3>
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              전신이 나온 사진일수록 좋습니다. 이 사진이 그대로 정면 기준이 되고, 뒤 · 좌 · 우 컷만 이 사진에서 만들어집니다.
+            </p>
+          </div>
+
+          {photoImage ? (
+            <div className="flex items-start gap-4">
+              <div className="w-32 aspect-[2/3] rounded-xl overflow-hidden border border-gray-200 bg-gray-50 flex-shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={photoImage} alt="모델 사진" className="w-full h-full object-cover" />
+              </div>
+              <button
+                onClick={() => setPhotoImage(null)}
+                className="text-[11px] text-gray-400 hover:text-gray-900 underline underline-offset-2 transition"
+              >
+                다른 사진으로 교체
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => photoInputRef.current?.click()}
+              className="w-full aspect-[3/2] max-h-56 rounded-xl border border-dashed border-gray-300 hover:border-gray-400 bg-gray-50 flex flex-col items-center justify-center gap-1.5 text-gray-400 hover:text-gray-600 transition"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-7 h-7">
+                <path d="M12 16V4m0 0 4 4m-4-4-4 4" />
+                <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+              </svg>
+              <span className="text-[12px] font-medium">모델 사진 업로드</span>
+              <span className="text-[10px]">JPG · PNG · WEBP</span>
+            </button>
+          )}
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (file) setPhotoImage(await fileToDataUrl(file));
+              e.target.value = '';
+            }}
+          />
+
+          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
+            <div className="space-y-1.5 col-span-2">
+              <label className="text-[11px] font-medium text-gray-500">모델 이름</label>
+              <input type="text" value={input.name} onChange={(e) => setInput({ ...input, name: e.target.value })} className={inputCls} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium text-gray-500">성별</label>
+              <div className="grid grid-cols-2 gap-2">
+                {(['male', 'female'] as const).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setInput({ ...input, gender: g })}
+                    className={`py-2.5 rounded-lg border text-[13px] font-medium transition ${
+                      input.gender === g ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+                    }`}
+                  >
+                    {g === 'male' ? '남성' : '여성'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium text-gray-500">나이</label>
+              <input type="number" value={input.age} onChange={(e) => setInput({ ...input, age: Number(e.target.value) })} className={`${inputCls} tabular-nums`} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium text-gray-500">키 (cm)</label>
+              <input type="number" value={input.heightCm} onChange={(e) => setInput({ ...input, heightCm: Number(e.target.value) })} className={`${inputCls} tabular-nums`} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium text-gray-500">몸무게 (kg)</label>
+              <input type="number" value={input.weightKg} onChange={(e) => setInput({ ...input, weightKg: Number(e.target.value) })} className={`${inputCls} tabular-nums`} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium text-gray-500">신발 사이즈 (mm)</label>
+              <input type="number" value={input.shoeSizeMm} onChange={(e) => setInput({ ...input, shoeSizeMm: Number(e.target.value) })} className={`${inputCls} tabular-nums`} />
+            </div>
+          </div>
+
+          {error && <p className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-4 py-3">{error}</p>}
+
+          <div className="flex justify-end">
+            <button
+              onClick={buildFromPhoto}
+              disabled={isConfirming || !photoImage}
+              className="px-8 py-3 rounded-xl bg-gray-900 hover:bg-black text-white font-semibold text-[13px] transition disabled:opacity-40"
+            >
+              {isConfirming ? '저장 중…' : '이 사진으로 모델 만들기'}
+            </button>
+          </div>
+          <p className="text-right text-[10px] text-gray-400">확정 후 뒤 · 좌 · 우 컷 생성에 2~4분 걸립니다</p>
+        </div>
+      )}
+
+      {/* 트랙 1 — 말로 만들기 (스텝 마법사) */}
+      {track === 'text' && (
+      <>
       {/* 스텝 인디케이터 */}
       <div className="flex items-center gap-2">
         {[1, 2, 3, 4].map((s) => (
@@ -642,6 +831,8 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
             </button>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );
