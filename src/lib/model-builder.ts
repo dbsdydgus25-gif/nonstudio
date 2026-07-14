@@ -95,6 +95,40 @@ export function buildModelSpecText(input: ModelBuilderInput): string {
   return lines.join('\n');
 }
 
+/**
+ * 확정 정보(specText)와 참고 이미지 속 얼굴이 충돌할 때의 우선순위 안내 —
+ * 사용자가 입력한 수치(키/몸무게/나이 등)와 텍스트 특징은 항상 참고 이미지보다 우선한다.
+ * (참고 이미지는 "얼굴/헤어스타일/분위기"만 가져오는 용도로 스코프를 명확히 제한 —
+ * 스코프 없는 우선순위 문구가 다른 섹션을 무력화시켰던 과거 사고 패턴을 피한다.)
+ */
+const REFERENCE_IMAGE_SCOPE =
+  'One of the input images is an APPEARANCE REFERENCE ONLY — use it to match the face shape, facial features, hairstyle, and general impression of the person. Do NOT copy the clothing, pose, background, or lighting from that reference photo; those are fully replaced by the instructions below. If the reference photo conflicts with the MODEL SPEC below (age, height/weight impression, skin tone, etc.), the MODEL SPEC always wins.';
+
+/** 초안(정면 전신 1장) 생성 프롬프트 — 참고 이미지가 있을 때 (images.edit 용) */
+export function buildModelDraftFromReferencePrompt(input: ModelBuilderInput): string {
+  return [
+    '=== TASK: CREATE A VIRTUAL FITTING MODEL FROM AN APPEARANCE REFERENCE ===',
+    'Generate a photorealistic full-body studio photograph of exactly ONE person — a virtual fashion fitting model for a clothing brand. This is a real-photo-grade image, not an illustration or 3D render.',
+    '',
+    REFERENCE_IMAGE_SCOPE,
+    '',
+    '=== MODEL SPEC (ground truth) ===',
+    buildModelSpecText(input),
+    '',
+    FIXED_OUTFIT,
+    '',
+    '=== POSE & FRAMING (ABSOLUTE) ===',
+    'Standing straight facing the camera, arms relaxed naturally at the sides, feet shoulder-width apart. FULL BODY — head to toe fully visible, nothing cropped. Gaze relaxed toward the camera, calm neutral expression.',
+    `Background: ${DEFAULT_STUDIO_BACKGROUND}`,
+    '',
+    '=== NEGATIVE CONSTRAINTS ===',
+    'cartoon, illustration, CGI, 3D render, airbrushed plastic skin, mannequin look, deformed anatomy, extra limbs, bad hands, multiple people, collage, split screen, text, watermark, logo.',
+    '',
+    '=== OUTPUT ===',
+    'One single authentic studio photograph of one person. Natural skin texture with pores, natural fabric folds, professional soft studio lighting.',
+  ].join('\n');
+}
+
 /** 초안(정면 전신 1장) 생성 프롬프트 — images.generate 용 */
 export function buildModelDraftPrompt(input: ModelBuilderInput): string {
   return [

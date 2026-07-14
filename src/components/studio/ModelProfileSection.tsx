@@ -12,6 +12,16 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
+/** 파일을 base64 data URL로 읽는다 */
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 interface ModelProfile {
   name: string;
   heightCm: number;
@@ -91,11 +101,13 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
   const [mode, setMode] = useState<'summary' | 'wizard'>('summary');
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [input, setInput] = useState<BuilderInput>(DEFAULT_INPUT);
+  const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const [draftImage, setDraftImage] = useState<string | null>(null);
   const [isDrafting, setIsDrafting] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [error, setError] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const referenceInputRef = useRef<HTMLInputElement>(null);
 
   const loadProfile = useCallback(async () => {
     try {
@@ -145,6 +157,7 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
       name: profile?.name && profile.name !== '윤용현' ? profile.name : DEFAULT_INPUT.name,
     });
     setDraftImage(null);
+    setReferenceImage(null);
     setError('');
     setStep(1);
     setMode('wizard');
@@ -161,7 +174,11 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
       const res = await fetch('/api/model-builder/draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: toServerInput(input), openaiApiKey: openaiKey }),
+        body: JSON.stringify({
+          input: toServerInput(input),
+          openaiApiKey: openaiKey,
+          appearanceReferenceImageBase64: referenceImage,
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || '초안 생성에 실패했습니다.');
@@ -523,6 +540,47 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
               className={`${inputCls} resize-y leading-relaxed`}
             />
           )}
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-medium text-gray-500">참고 이미지 (선택 — 없어도 진행 가능)</label>
+            <p className="text-[10px] text-gray-400 leading-relaxed">
+              사진을 넣으면 얼굴 · 헤어스타일 · 분위기를 참고해서 초안을 만듭니다. 옷 · 포즈 · 배경은 참고하지 않고 위 설정대로 새로 생성됩니다.
+            </p>
+            {referenceImage ? (
+              <div className="flex items-center gap-3">
+                <div className="w-16 h-20 rounded-lg overflow-hidden border border-gray-200 bg-gray-50 flex-shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={referenceImage} alt="참고 이미지" className="w-full h-full object-cover" />
+                </div>
+                <div className="flex-1 text-[11px] text-gray-500">참고 이미지가 등록되었습니다</div>
+                <button
+                  onClick={() => setReferenceImage(null)}
+                  className="text-[11px] text-gray-400 hover:text-gray-900 underline underline-offset-2 transition"
+                >
+                  제거
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => referenceInputRef.current?.click()}
+                className="w-full py-4 rounded-lg border border-dashed border-gray-300 hover:border-gray-400 text-[12px] text-gray-400 hover:text-gray-600 transition"
+              >
+                클릭해서 참고 이미지 업로드
+              </button>
+            )}
+            <input
+              ref={referenceInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (file) setReferenceImage(await fileToDataUrl(file));
+                e.target.value = '';
+              }}
+            />
+          </div>
+
           <div className="bg-gray-50 border border-gray-100 rounded-lg px-4 py-3 text-[11px] text-gray-500 leading-relaxed">
             초안은 <b className="text-gray-700">검은 반팔 티셔츠 + 검은 반바지</b>를 입은 전신 정면 1장으로, 저비용 초안 품질로
             생성됩니다. 마음에 들 때까지 다시 만들 수 있습니다.
