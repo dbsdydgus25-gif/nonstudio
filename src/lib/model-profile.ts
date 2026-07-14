@@ -21,6 +21,23 @@ const GLOBAL_PROFILE_JSON_PATH = 'model/profile.json';
 const GLOBAL_IDENTITY_IMAGE_PATH = 'model/identity_reference.png';
 /** 예전부터 쓰던 기본 아이덴티티 사진 (상반신 실사) — 최후 폴백 */
 const LEGACY_IDENTITY_PATH = 'restyle/seed_1.png';
+/**
+ * 전역(구) 경로 폴백은 로그인 도입 전 데이터의 원 소유자인 nonfitting 계정에만 적용한다 —
+ * 모든 계정에 폴백을 열면 신규 계정이 윤용현 모델을 물려받아 "모델 먼저 만들기" 관문이
+ * 무력화되고 남의 모델로 생성하게 되는 문제가 있음 (2026-07-14 테스트 계정으로 실제 확인).
+ */
+const LEGACY_OWNER_UID = '2bdbdfee-e3a6-425a-aca8-c8b8826faf08';
+
+function profileFallbackPaths(uid: string): string[] {
+  return uid === LEGACY_OWNER_UID
+    ? [profileJsonPath(uid), GLOBAL_PROFILE_JSON_PATH]
+    : [profileJsonPath(uid)];
+}
+function identityFallbackPaths(uid: string): string[] {
+  return uid === LEGACY_OWNER_UID
+    ? [identityImagePath(uid), GLOBAL_IDENTITY_IMAGE_PATH, LEGACY_IDENTITY_PATH]
+    : [identityImagePath(uid)];
+}
 
 function profileJsonPath(uid: string): string {
   return `users/${uid}/model/profile.json`;
@@ -28,17 +45,33 @@ function profileJsonPath(uid: string): string {
 function identityImagePath(uid: string): string {
   return `users/${uid}/model/identity_reference.png`;
 }
+/** 가상 모델 생성 시 저장되는 추가 뷰(뒤/좌/우) 경로 */
+export function viewImagePath(uid: string, view: 'back' | 'left' | 'right'): string {
+  return `users/${uid}/model/view_${view}.png`;
+}
+
+/** 가상 모델 빌더 진행 상태 — 'building'이면 뷰 4컷 생성 중, 'ready'면 사용 가능 */
+export type ModelBuilderStatus = 'building' | 'ready' | 'failed';
 
 export interface ModelProfile {
   name: string;
   heightCm: number;
   weightKg: number;
   shoeSizeMm: number;
-  /** 체형/피부/디테일 상세 스펙 — 프롬프트에 그대로 들어가는 영어 텍스트 */
+  /** 체형/피부/디테일 상세 스펙 — 프롬프트에 그대로 들어가는 텍스트 (백엔드 전용, UI엔 요약만 노출) */
   specText: string;
   /** 참고 이미지가 업로드되어 있는지 */
   hasCustomIdentityImage: boolean;
   updatedAt: string | null;
+  // ── 가상 모델 빌더 필드 (2026-07-14 추가, 전부 옵셔널 — 레거시 프로필과 호환) ──
+  gender?: 'male' | 'female';
+  age?: number;
+  /** 사용자가 입력한 신체 특징 원문 (피부톤/털/핏줄/상처 등, 한국어) — 요약 표시용 */
+  featuresText?: string;
+  /** 외모 프리셋 라벨 또는 직접 입력 원문 — 요약 표시용 */
+  appearanceText?: string;
+  builderStatus?: ModelBuilderStatus;
+  builderError?: string | null;
 }
 
 /** 코드에 박혀 있던 기존 스펙을 기본값으로 사용 — 프로필 저장 전에도 동작이 바뀌지 않도록 */
@@ -54,7 +87,7 @@ export const DEFAULT_MODEL_PROFILE: ModelProfile = {
 
 export async function getModelProfile(uid: string): Promise<ModelProfile> {
   const supabase = getSupabaseAdmin();
-  for (const path of [profileJsonPath(uid), GLOBAL_PROFILE_JSON_PATH]) {
+  for (const path of profileFallbackPaths(uid)) {
     try {
       const { data, error } = await supabase.storage.from(GENERATIONS_BUCKET).download(path);
       if (error || !data) continue;
@@ -98,7 +131,7 @@ export async function getModelIdentityImage(
   uid: string,
 ): Promise<{ buffer: Buffer; mimeType: string } | null> {
   const supabase = getSupabaseAdmin();
-  for (const path of [identityImagePath(uid), GLOBAL_IDENTITY_IMAGE_PATH, LEGACY_IDENTITY_PATH]) {
+  for (const path of identityFallbackPaths(uid)) {
     try {
       const { data, error } = await supabase.storage.from(GENERATIONS_BUCKET).download(path);
       if (error || !data) continue;
@@ -123,9 +156,38 @@ export function buildBodySpecFromProfile(profile: ModelProfile): string {
 /** 모델 정보 페이지 미리보기용 — 현재 참고 이미지의 서명 URL (1시간) */
 export async function getIdentityImagePreviewUrl(uid: string): Promise<string | null> {
   const supabase = getSupabaseAdmin();
-  for (const path of [identityImagePath(uid), GLOBAL_IDENTITY_IMAGE_PATH, LEGACY_IDENTITY_PATH]) {
+  for (const path of identityFallbackPaths(uid)) {
     const { data } = await supabase.storage.from(GENERATIONS_BUCKET).createSignedUrl(path, 3600);
     if (data?.signedUrl) return data.signedUrl;
   }
   return null;
+}
+
+/** 가상 모델 빌더가 만든 뷰(뒤/좌/우) 미리보기 URL — 없는 뷰는 null */
+export async function getViewImagePreviewUrls(
+  uid: string,
+): Promise<Record<'back' | 'left' | 'right', string | null>> {
+  const supabase = getSupabaseAdmin();
+  const result: Record<'back' | 'left' | 'right', string | null> = { back: null, left: null, right: null };
+  for (const view of ['back', 'left', 'right'] as const) {
+    const { data } = await supabase.storage
+      .from(GENERATIONS_BUCKET)
+      .createSignedUrl(viewImagePath(uid, view), 3600);
+    result[view] = data?.signedUrl ?? null;
+  }
+  return result;
+}
+
+/** 뷰 이미지 저장 (가상 모델 빌더 confirm 단계) */
+export async function saveViewImage(
+  uid: string,
+  view: 'back' | 'left' | 'right',
+  buffer: Buffer,
+  mimeType: string,
+): Promise<void> {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.storage
+    .from(GENERATIONS_BUCKET)
+    .upload(viewImagePath(uid, view), buffer, { contentType: mimeType, upsert: true });
+  if (error) throw error;
 }

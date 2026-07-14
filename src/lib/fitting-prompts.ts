@@ -182,8 +182,11 @@ export function buildRestylePrompt(
   // 사용자가 입력한 자세/소품 지시 — POSE & FRAMING 섹션 안에 두고 "필수 준수"로 명시해야 반영됨.
   // 예전엔 STYLING 섹션 맨 끝에 "추가 스타일링 지시"로 잘못 라벨링되어 있어서 포즈/소품 지시가
   // 거의 무시됐었음 (예: "한손엔 토트백"을 지시해도 가방이 안 나옴).
+  // (2026-07-14) 사용자가 자세 칸에 "다양한 포즈 / 하나는 팔짱 / 하나는..."처럼 여러 포즈를
+  // 나열하면 gpt-image-2가 한 프레임에 사람 여러 명(포즈별 1명씩)을 그려버리는 사고가 있었음 —
+  // 지시를 받아들이되 "한 장 = 한 명 = 한 포즈"를 지시문 안에서 직접 강제한다.
   const poseHintBlock = userAdditions.trim()
-    ? ` MANDATORY POSE/PROP REQUIREMENT (overrides the generic pose direction above — must be included exactly as described, e.g. if it mentions holding an item, that item must be visibly held in the model's hand): ${userAdditions.trim()}`
+    ? ` MANDATORY POSE/PROP REQUIREMENT (overrides the generic pose direction above — must be included exactly as described, e.g. if it mentions holding an item, that item must be visibly held in the model's hand): ${userAdditions.trim()} (STRICT: the output is ONE photograph of exactly ONE person in ONE pose. If the requirement above lists multiple different poses, pick only the single most suitable one — NEVER render several people, a multi-pose lineup, or the same person repeated side by side in one image.)`
     : '';
 
   const backgroundLine = hasBackgroundReferenceImage
@@ -251,7 +254,7 @@ export function buildProductFittingPrompt(
   if (stylingSuggestion.accessory) stylingLines.push(`- 액세서리: ${stylingSuggestion.accessory}`);
 
   const poseHintBlock = userAdditions.trim()
-    ? ` MANDATORY POSE/PROP REQUIREMENT (must be included exactly as described): ${userAdditions.trim()}`
+    ? ` MANDATORY POSE/PROP REQUIREMENT (must be included exactly as described): ${userAdditions.trim()} (STRICT: the output is ONE photograph of exactly ONE person in ONE pose. If the requirement above lists multiple different poses, pick only the single most suitable one — NEVER render several people, a multi-pose lineup, or the same person repeated side by side in one image.)`
     : '';
 
   // (2026-07-09, 2차 강화) 이미지 순서를 [모델, 제품, 배경]으로 바꿨다 — gpt-image-2의 edit는

@@ -10,6 +10,8 @@ interface SidebarProps {
   openaiKey: string;
   username: string;
   onLogout: () => void;
+  /** 가상 모델 확정 여부 — false면 생성 서비스 3종이 잠긴다 */
+  modelReady: boolean;
 }
 
 /** 미니멀 라인 아이콘 (stroke=currentColor) — 이모지 대신 사용 */
@@ -68,7 +70,7 @@ const NAV_ITEMS: Array<{
   { id: 'history', label: '히스토리', desc: '전체 생성 기록', icon: Icon.history },
 ];
 
-export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, openaiKey, username, onLogout }: SidebarProps) {
+export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, openaiKey, username, onLogout, modelReady }: SidebarProps) {
   const keysSet = geminiKey && openaiKey;
 
   return (
@@ -106,16 +108,24 @@ export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, op
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
                   activePage === item.id
                     ? 'bg-gray-900 text-white'
-                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                    : modelReady
+                      ? 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                      : 'text-gray-300 hover:bg-gray-50 cursor-not-allowed'
                 }`}
               >
-                <span className={activePage === item.id ? 'text-white' : 'text-gray-400'}>{item.icon}</span>
-                <span className="overflow-hidden">
+                <span className={activePage === item.id ? 'text-white' : modelReady ? 'text-gray-400' : 'text-gray-300'}>{item.icon}</span>
+                <span className="overflow-hidden flex-1">
                   <span className="block text-[13px] font-semibold tracking-tight truncate">{item.label}</span>
                   <span className={`block text-[10px] truncate ${activePage === item.id ? 'text-gray-300' : 'text-gray-400'}`}>
-                    {item.desc}
+                    {modelReady ? item.desc : '모델 생성 후 사용 가능'}
                   </span>
                 </span>
+                {!modelReady && (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3.5 h-3.5 text-gray-300 flex-shrink-0">
+                    <rect x="5" y="11" width="14" height="9" rx="2" />
+                    <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                  </svg>
+                )}
               </button>
             ))}
           </div>

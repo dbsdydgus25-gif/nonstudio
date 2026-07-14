@@ -11,6 +11,7 @@ import {
   saveModelProfile,
   saveIdentityImage,
   getIdentityImagePreviewUrl,
+  getViewImagePreviewUrls,
 } from '@/lib/model-profile';
 import { getSessionUserId } from '@/lib/auth';
 
@@ -30,11 +31,12 @@ export async function GET() {
     const uid = await getSessionUserId();
     if (!uid) return NextResponse.json({ success: false }, { status: 401 });
 
-    const [profile, identityImageUrl] = await Promise.all([
+    const [profile, identityImageUrl, viewImageUrls] = await Promise.all([
       getModelProfile(uid),
       getIdentityImagePreviewUrl(uid),
+      getViewImagePreviewUrls(uid),
     ]);
-    return NextResponse.json({ success: true, profile, identityImageUrl });
+    return NextResponse.json({ success: true, profile, identityImageUrl, viewImageUrls });
   } catch (err: any) {
     console.error('[api/model-profile] 조회 실패:', err);
     return NextResponse.json({ success: false, error: err?.message || '모델 정보 조회에 실패했습니다.' }, { status: 500 });

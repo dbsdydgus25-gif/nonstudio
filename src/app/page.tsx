@@ -23,8 +23,25 @@ export default function StudioPage() {
   // Navigation — 'restyle' = AI 피팅, 'product' = AI 제품 피팅, 'fitting' = AI 바리에이션
   const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'product' | 'model' | 'history'>('restyle');
 
+  // 가상 모델 확정 여부 — 모델이 없으면 생성 서비스(피팅/제품 피팅/바리에이션)는 잠금
+  const [modelReady, setModelReady] = useState(false);
+
   // AI 피팅 → AI 바리에이션으로 넘기는 이미지
   const [variationSourceImage, setVariationSourceImage] = useState<string | null>(null);
+
+  /** 모델 준비 여부 확인 — 기준 이미지가 있고 빌더가 생성 중이 아니면 사용 가능 */
+  const checkModelReady = async (): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/model-profile');
+      if (!res.ok) return false;
+      const data = await res.json();
+      const ready = !!data?.identityImageUrl && data?.profile?.builderStatus !== 'building';
+      setModelReady(ready);
+      return ready;
+    } catch {
+      return false;
+    }
+  };
 
   /** 로그인 후 계정 설정(API 키) 로드 — 과거 localStorage에 남아있던 키는 1회 서버로 이관 */
   const loadSettings = async () => {
@@ -65,7 +82,8 @@ export default function StudioPage() {
           const data = await res.json();
           setUsername(data.username || '');
           setAuthState('loggedIn');
-          await loadSettings();
+          const [, ready] = await Promise.all([loadSettings(), checkModelReady()]);
+          if (!ready) setActivePage('model'); // 모델이 없으면 모델 만들기부터
         } else {
           setAuthState('loggedOut');
         }
@@ -79,7 +97,8 @@ export default function StudioPage() {
   const handleLoggedIn = async (name: string) => {
     setUsername(name);
     setAuthState('loggedIn');
-    await loadSettings();
+    const [, ready] = await Promise.all([loadSettings(), checkModelReady()]);
+    if (!ready) setActivePage('model');
   };
 
   const handleLogout = async () => {
@@ -131,12 +150,20 @@ export default function StudioPage() {
       {/* 왼쪽 사이드바 */}
       <Sidebar
         activePage={activePage}
-        onPageChange={(p) => setActivePage(p)}
+        onPageChange={(p) => {
+          // 모델 미확정 상태에선 생성 서비스 진입을 막고 모델 만들기로 유도
+          if (!modelReady && (p === 'restyle' || p === 'product' || p === 'fitting')) {
+            setActivePage('model');
+            return;
+          }
+          setActivePage(p);
+        }}
         onOpenApiKeys={() => setIsKeyModalOpen(true)}
         geminiKey={geminiKey}
         openaiKey={openaiKey}
         username={username}
         onLogout={handleLogout}
+        modelReady={modelReady}
       />
 
       {/* 오른쪽 워크스페이스 */}
@@ -201,7 +228,12 @@ export default function StudioPage() {
             onConsumeIncomingImage={() => setVariationSourceImage(null)}
           />
         ) : activePage === 'model' ? (
-          <ModelProfileSection />
+          <ModelProfileSection
+            geminiKey={geminiKey}
+            openaiKey={openaiKey}
+            onNeedKeys={() => setIsKeyModalOpen(true)}
+            onModelReady={() => setModelReady(true)}
+          />
         ) : activePage === 'history' ? (
           <HistorySection />
         ) : null}
