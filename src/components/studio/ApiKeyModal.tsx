@@ -42,7 +42,7 @@ export function ApiKeyModal({
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-400 mb-1">Settings</div>
             <h3 className="text-base font-semibold text-gray-900 tracking-tight">API 키 설정</h3>
-            <p className="text-xs text-gray-400 mt-0.5">키는 이 브라우저에만 저장됩니다</p>
+            <p className="text-xs text-gray-400 mt-0.5">키는 로그인 계정에 안전하게 저장됩니다</p>
           </div>
           <button
             onClick={onClose}
@@ -122,7 +122,7 @@ export function ApiKeyModal({
           </div>
 
           <p className="text-[11px] text-gray-400 leading-relaxed border-t border-gray-100 pt-4">
-            입력한 API 키는 브라우저 내부(localStorage)에만 보관되며 서버로 저장되지 않습니다.
+            입력한 API 키는 로그인 계정(비공개 저장소)에 보관됩니다 — 어느 브라우저에서 로그인해도 동일하게 유지되고, 브라우저 데이터를 지워도 사라지지 않습니다.
           </p>
 
           <div className="flex gap-2 pt-1">

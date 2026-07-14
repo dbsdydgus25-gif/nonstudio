@@ -8,6 +8,8 @@ interface SidebarProps {
   onOpenApiKeys: () => void;
   geminiKey: string;
   openaiKey: string;
+  username: string;
+  onLogout: () => void;
 }
 
 /** 미니멀 라인 아이콘 (stroke=currentColor) — 이모지 대신 사용 */
@@ -66,7 +68,7 @@ const NAV_ITEMS: Array<{
   { id: 'history', label: '히스토리', desc: '전체 생성 기록', icon: Icon.history },
 ];
 
-export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, openaiKey }: SidebarProps) {
+export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, openaiKey, username, onLogout }: SidebarProps) {
   const keysSet = geminiKey && openaiKey;
 
   return (
@@ -74,7 +76,7 @@ export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, op
       {/* 로고 */}
       <div className="px-6 py-7 border-b border-gray-100">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo.png" alt="NON STUDIO" className="w-full h-auto" />
+        <img src="/logo.png" alt="NON FITTING" className="w-full h-auto" />
       </div>
 
       {/* API 상태 */}
@@ -157,10 +159,22 @@ export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, op
         </div>
       </nav>
 
-      {/* 하단 */}
+      {/* 하단 — 로그인 계정 + 로그아웃 */}
       <div className="px-6 py-5 border-t border-gray-100">
-        <div className="text-[10px] font-medium tracking-[0.18em] text-gray-400 uppercase">Non Studio</div>
-        <div className="text-[10px] text-gray-300 mt-0.5">AI Fitting Suite v2</div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="overflow-hidden">
+            <div className="text-[10px] font-medium tracking-[0.18em] text-gray-400 uppercase truncate">
+              {username || 'Non Fitting'}
+            </div>
+            <div className="text-[10px] text-gray-300 mt-0.5">AI Fitting Suite v2</div>
+          </div>
+          <button
+            onClick={onLogout}
+            className="flex-shrink-0 px-2.5 py-1.5 rounded-md border border-gray-200 hover:border-gray-400 text-[10px] text-gray-400 hover:text-gray-900 font-medium transition"
+          >
+            로그아웃
+          </button>
+        </div>
       </div>
     </aside>
   );

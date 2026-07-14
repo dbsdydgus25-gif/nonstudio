@@ -116,12 +116,24 @@ CRITICAL NEGATIVE CONSTRAINTS (DO NOT GENERATE):
 cartoon, illustration, CGI, 3D render, digital art, video game graphics, airbrushed skin, plastic skin, mannequin texture, artificial doll look, low resolution, blurry, deformed body, incorrect anatomy, extra limbs, bad hands, overlapping fingers, unnatural pose, oversaturated colors, fake lighting, warped background, artifacts, logos, text, watermark, composite look, collage, split screen, multi-panel, grid of photos, side-by-side comparison, diptych, triptych, photo montage, layout of multiple images, soft puffy chest, sagging chest, love handles, flabby untoned body, out-of-shape physique, hunched posture, awkward stiff pose, invented fabric pattern, fake jacquard or paisley print, embossed decorative texture not present on the real garment, moire pattern on fabric, unintended textile print.
 `.trim();
 
+// (2026-07-14) MODEL LOCK — AI 피팅과 AI 제품 피팅이 완전히 동일한 문구로 모델을 규정한다.
+// 두 파이프라인의 모델 서술이 조금이라도 다르면 결과 모델이 서로 다르게 흔들리는 원인이 되므로,
+// 핵심 고정 문구를 한 곳에서 관리한다. (반복 강조는 오히려 과장을 유발하므로 각 항목은 한 번만 서술)
+export function buildModelLockLines(bodySpec: string): string {
+  return `
+MODEL LOCK — this brand uses ONE fixed model. Every generation must show the exact same person, as if the same model returned to the same white studio for another shot of the same campaign. A viewer comparing any two generations must believe they are photos of the same person taken the same day.
+Body & identity spec (ground truth — reproduce exactly; do not idealize, slim down, bulk up, or beautify):
+${bodySpec}
+The following must match the spec and the reference photo exactly, never randomized between generations: facial features, skin tone, hairstyle, body-hair amount, moles and skin marks, faint scars, vein visibility, muscle definition, and overall body proportions.
+`.trim();
+}
+
 // (2026-07-09) 모델 정보 페이지에서 스펙을 편집할 수 있도록 상수 조립 대신 함수로 전환 —
 // bodySpec 미지정 시 기존 PERSONAL_BODY_SPEC이 그대로 쓰여서 동작이 변하지 않는다.
 function buildRestyleBodySpec(bodySpec: string): string {
   return `
-MODEL BODY SPEC (reshape the body toward this — do not literally copy the input photo's actual body shape):
-${bodySpec}
+${buildModelLockLines(bodySpec)}
+- Reshape the body in the input photo toward this spec — do not literally copy the input photo's actual body shape.
 - Keep the same face and general identity recognizable — this is a refinement of the same person, not a different person.
 `.trim();
 }
@@ -286,7 +298,7 @@ export function buildProductFittingPrompt(
     `Image ${productImageNumber} is a shop listing photo of a ${CATEGORY_PRESERVE_LABEL[category]} — it may be laid flat, on a hanger, a catalog shot, or worn by some other shop model. ONLY the product itself is the reference from Image ${productImageNumber}: completely ignore any person, body, face, pose, other garments, and background shown there. Produce a photorealistic commercial lookbook photograph of the Image 1 model actually WEARING this exact product, fitted naturally on the body.`,
     '',
     '=== MODEL (fixed personal standard) ===',
-    bodySpec,
+    buildModelLockLines(bodySpec),
     '',
     `=== PRODUCT FIDELITY (Image ${productImageNumber} is the source of truth) ===`,
     `- Reproduce the product in Image ${productImageNumber} with complete fidelity: exact same color and shade, same fabric texture, same details (buttons, stitching, pockets, prints, logos as shown), same overall silhouette — a customer must recognize it as the same product they saw in the shop listing.`,

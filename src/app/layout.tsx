@@ -9,10 +9,10 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'NonFitting - AI 가상 피팅 위젯 데모',
+  title: 'NON FITTING — AI 피팅 스튜디오',
   description:
-    'AI 기반 가상 피팅 위젯 데모 페이지. 체형 정보를 입력하고 장바구니 상품을 가상으로 착용해보세요.',
-  keywords: ['가상피팅', 'AI 피팅', '온라인 쇼핑', 'VTON', '가상착용'],
+    'NON FITTING 내부 AI 피팅 스튜디오. 제품 사진으로 모델 착용 화보를 제작하고 포즈를 다양화합니다.',
+  keywords: ['가상피팅', 'AI 피팅', 'NON FITTING', 'VTON', '가상착용'],
 };
 
 export default function RootLayout({

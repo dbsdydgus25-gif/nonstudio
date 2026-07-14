@@ -16,6 +16,7 @@ import { buildProductFittingPrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCateg
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { getModelProfile, getModelIdentityImage, buildBodySpecFromProfile } from '@/lib/model-profile';
+import { getSessionUserId } from '@/lib/auth';
 import { downscaleImage, withImageRetry, runWithConcurrency, cropToBox } from '@/lib/image-utils';
 
 export const runtime = 'nodejs';
@@ -147,6 +148,12 @@ export async function POST(req: Request) {
     const sourcedCategory = category as SourcedCategory;
     const images = productImagesBase64.slice(0, 6); // 색상 옵션 과다 등록 방지
 
+    // 로그인 계정의 모델 정보를 쓰기 위해 uid를 응답 전에 확보한다 (after() 안에서는 쿠키 접근 불가).
+    const uid = await getSessionUserId();
+    if (!uid) {
+      return NextResponse.json({ success: false, error: '로그인이 필요합니다.' }, { status: 401 });
+    }
+
     // 생성 단위(job) 구성 — 세 가지 모드:
     // (a) 기본: 업로드한 이미지 1장당 1개 생성 (공통 코디 지시 적용)
     // (b) colorPlans: 색상 추출 미리보기를 거쳐 사용자가 색상별 코디까지 확정한 계획 —
@@ -202,8 +209,8 @@ export async function POST(req: Request) {
         ? await downscaleImage(rawBackground.buffer, rawBackground.mimeType)
         : null;
       // 모델 정보(참고 이미지 + 체형 스펙)는 "모델 정보" 페이지에서 편집하는 프로필에서 로드
-      const modelProfile = await getModelProfile();
-      const rawIdentity = await getModelIdentityImage();
+      const modelProfile = await getModelProfile(uid);
+      const rawIdentity = await getModelIdentityImage(uid);
       const identityReferenceImage = rawIdentity ? await downscaleImage(rawIdentity.buffer, rawIdentity.mimeType) : null;
       const bodySpec = buildBodySpecFromProfile(modelProfile);
 

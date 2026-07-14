@@ -8,46 +8,123 @@ import { VariationSection } from '@/components/studio/VariationSection';
 import { ModelProfileSection } from '@/components/studio/ModelProfileSection';
 import { HistorySection } from '@/components/studio/HistorySection';
 import { ApiKeyModal } from '@/components/studio/ApiKeyModal';
+import { LoginScreen } from '@/components/studio/LoginScreen';
 
 export default function StudioPage() {
-  // API Keys
+  // 로그인 상태 — API 키/모델 정보/히스토리가 전부 계정에 귀속되므로 로그인이 첫 관문
+  const [authState, setAuthState] = useState<'loading' | 'loggedOut' | 'loggedIn'>('loading');
+  const [username, setUsername] = useState('');
+
+  // API Keys — 계정별로 서버(Supabase Storage)에 저장. localStorage는 더 이상 쓰지 않는다.
   const [geminiKey, setGeminiKey] = useState('');
   const [openaiKey, setOpenaiKey] = useState('');
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
 
-  // Navigation — 'restyle' = AI 피팅, 'product' = AI 제품 피팅, 'fitting' = AI 바리에이션 (내부 상태값 이름은 유지, 화면 라벨만 바뀜)
+  // Navigation — 'restyle' = AI 피팅, 'product' = AI 제품 피팅, 'fitting' = AI 바리에이션
   const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'product' | 'model' | 'history'>('restyle');
 
   // AI 피팅 → AI 바리에이션으로 넘기는 이미지
   const [variationSourceImage, setVariationSourceImage] = useState<string | null>(null);
 
+  /** 로그인 후 계정 설정(API 키) 로드 — 과거 localStorage에 남아있던 키는 1회 서버로 이관 */
+  const loadSettings = async () => {
+    try {
+      const res = await fetch('/api/settings');
+      if (!res.ok) return;
+      const data = await res.json();
+      let g = data?.settings?.geminiKey || '';
+      let o = data?.settings?.openaiKey || '';
+
+      if (!g && !o) {
+        const legacyG =
+          localStorage.getItem('elon_gemini_key') || localStorage.getItem('personal_gemini_key') || '';
+        const legacyO =
+          localStorage.getItem('elon_openai_key') || localStorage.getItem('personal_openai_key') || '';
+        if (legacyG || legacyO) {
+          g = legacyG;
+          o = legacyO;
+          await fetch('/api/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ geminiKey: g, openaiKey: o }),
+          });
+        }
+      }
+      setGeminiKey(g);
+      setOpenaiKey(o);
+    } catch {
+      // 설정 로드 실패해도 스튜디오는 열어준다 — API 설정 모달에서 다시 저장 가능
+    }
+  };
+
   useEffect(() => {
-    const g =
-      localStorage.getItem('elon_gemini_key') ||
-      localStorage.getItem('personal_gemini_key') ||
-      '';
-    const o =
-      localStorage.getItem('elon_openai_key') ||
-      localStorage.getItem('personal_openai_key') ||
-      '';
-    setGeminiKey(g);
-    setOpenaiKey(o);
-    if (g) localStorage.setItem('elon_gemini_key', g);
-    if (o) localStorage.setItem('elon_openai_key', o);
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          setUsername(data.username || '');
+          setAuthState('loggedIn');
+          await loadSettings();
+        } else {
+          setAuthState('loggedOut');
+        }
+      } catch {
+        setAuthState('loggedOut');
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSaveKeys = (g: string, o: string) => {
-    localStorage.setItem('elon_gemini_key', g);
-    localStorage.setItem('elon_openai_key', o);
+  const handleLoggedIn = async (name: string) => {
+    setUsername(name);
+    setAuthState('loggedIn');
+    await loadSettings();
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } finally {
+      setGeminiKey('');
+      setOpenaiKey('');
+      setUsername('');
+      setAuthState('loggedOut');
+    }
+  };
+
+  const handleSaveKeys = async (g: string, o: string) => {
     setGeminiKey(g);
     setOpenaiKey(o);
+    try {
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ geminiKey: g, openaiKey: o }),
+      });
+    } catch {
+      // 저장 실패 시에도 이번 세션 상태에는 반영되어 있음 — 다음 저장에서 재시도
+    }
   };
 
   const handleSendToVariation = (imageUrl: string) => {
     setVariationSourceImage(imageUrl);
     setActivePage('fitting');
   };
+
+  if (authState === 'loading') {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-[11px] tracking-[0.22em] text-gray-300 uppercase animate-pulse">
+          Non Fitting
+        </div>
+      </div>
+    );
+  }
+
+  if (authState === 'loggedOut') {
+    return <LoginScreen onLoggedIn={handleLoggedIn} />;
+  }
 
   return (
     <div className="flex min-h-screen bg-white text-gray-900 font-sans">
@@ -58,6 +135,8 @@ export default function StudioPage() {
         onOpenApiKeys={() => setIsKeyModalOpen(true)}
         geminiKey={geminiKey}
         openaiKey={openaiKey}
+        username={username}
+        onLogout={handleLogout}
       />
 
       {/* 오른쪽 워크스페이스 */}

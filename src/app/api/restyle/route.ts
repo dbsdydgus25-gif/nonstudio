@@ -23,6 +23,7 @@ import { buildRestylePrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCategory } f
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { getModelProfile, getModelIdentityImage, buildBodySpecFromProfile } from '@/lib/model-profile';
+import { getSessionUserId } from '@/lib/auth';
 import { downscaleImage, withImageRetry } from '@/lib/image-utils';
 
 export const runtime = 'nodejs';
@@ -133,6 +134,12 @@ export async function POST(req: Request) {
 
     const sourcedCategory = category as SourcedCategory;
 
+    // 로그인 계정의 모델 정보를 쓰기 위해 uid를 응답 전에 확보한다 (after() 안에서는 쿠키 접근 불가).
+    const uid = await getSessionUserId();
+    if (!uid) {
+      return NextResponse.json({ success: false, error: '로그인이 필요합니다.' }, { status: 401 });
+    }
+
     // "처리 중" 행을 즉시 만들어 id를 반환 — 실제 분석/생성은 아래 after()에서 진행된다.
     const generationId = await createPendingGeneration({
       pipeline: 'restyle',
@@ -172,8 +179,8 @@ export async function POST(req: Request) {
         // (2026-07-09) 모델 정보(참고 이미지 + 체형 스펙)는 이제 "모델 정보" 페이지에서 편집하는
         // Supabase 프로필에서 매 생성마다 로드한다 — 프로필이 없으면 기존 기본값(seed_1 +
         // PERSONAL_BODY_SPEC) 그대로 동작.
-        const modelProfile = await getModelProfile();
-        const identityReferenceImage = await getModelIdentityImage();
+        const modelProfile = await getModelProfile(uid);
+        const identityReferenceImage = await getModelIdentityImage(uid);
 
         const prompt = buildRestylePrompt(
           sourcedCategory,
