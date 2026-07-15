@@ -313,12 +313,16 @@ export function buildProductFittingPrompt(
 
   // (2026-07-14) 같은 제품의 다른 각도 사진 — 색상이 아니라 실루엣/디테일 교차 확인용.
   const extraAngleLine = extraProductImageNumbers.length
-    ? `\n- Image${extraProductImageNumbers.length > 1 ? 's' : ''} ${extraProductImageNumbers.join(', ')} show ADDITIONAL real photos of this EXACT SAME product from other angles, sides, or close-ups — NOT a different product, NOT a different color. Use ${extraProductImageNumbers.length > 1 ? 'them' : 'it'} together with Image ${productImageNumber} to get the silhouette, proportions, and any details (buttons, pockets, collar shape, hem) that aren't fully visible in Image ${productImageNumber} exactly right.`
+    ? `\n- Image${extraProductImageNumbers.length > 1 ? 's' : ''} ${extraProductImageNumbers.join(', ')} show ADDITIONAL real photos of this EXACT SAME product from other angles, sides, or close-ups — NOT a different product, NOT a different color. Use ${extraProductImageNumbers.length > 1 ? 'them' : 'it'} together with Image ${productImageNumber} to get the silhouette, proportions, and any details (buttons, pockets, collar shape, hem) that aren't fully visible in Image ${productImageNumber} exactly right. If any part of a person is visible in ${extraProductImageNumbers.length > 1 ? 'these images' : 'this image'} (worn on a different shop model, for example), COMPLETELY IGNORE that person just like in Image ${productImageNumber} — their face and identity must have ZERO influence on the output.`
     : '';
   // (2026-07-14) 재질 전용 클로즈업 — 색상 추출 대상이 아니라 원단/버튼/스티치 디테일 전용.
   // 위쪽 메인 제품 사진은 색상/핏 위주로, 이 사진은 재질/디테일 위주로 분석하고 결합한다.
+  // (2026-07-15) 재질 클로즈업이 실제로는 다른 실제 모델이 그 제품을 입은 사진의 크롭(목/칼라
+  // 부근 등, 피부가 같이 찍힘)인 경우가 흔한데, identityBlock/identityReferenceLine과 달리
+  // 이 사진 속 사람은 "무시하라"는 지시가 없었음 — 그래서 그 사람 얼굴/피부가 결과에 새어
+  // 들어가 "갑자기 다른 모델이 나온다"는 사고로 이어짐(실제 재현 확인). 반드시 무시하도록 명시.
   const materialLine = materialImageNumbers.length
-    ? `\n- Image${materialImageNumbers.length > 1 ? 's' : ''} ${materialImageNumbers.join(', ')} ${materialImageNumbers.length > 1 ? 'are' : 'is'} CLOSE-UP MATERIAL REFERENCE photo${materialImageNumbers.length > 1 ? 's' : ''} of this exact product's fabric/hardware — use ${materialImageNumbers.length > 1 ? 'them' : 'it'} ONLY to get the surface texture, weave/knit structure, sheen, and button/stitching/zipper detail exactly right. Do NOT use ${materialImageNumbers.length > 1 ? 'them' : 'it'} as a color reference — Image ${productImageNumber} remains the source of truth for color.`
+    ? `\n- Image${materialImageNumbers.length > 1 ? 's' : ''} ${materialImageNumbers.join(', ')} ${materialImageNumbers.length > 1 ? 'are' : 'is'} CLOSE-UP MATERIAL REFERENCE photo${materialImageNumbers.length > 1 ? 's' : ''} of this exact product's fabric/hardware — use ${materialImageNumbers.length > 1 ? 'them' : 'it'} ONLY to get the surface texture, weave/knit structure, sheen, and button/stitching/zipper detail exactly right. Do NOT use ${materialImageNumbers.length > 1 ? 'them' : 'it'} as a color reference — Image ${productImageNumber} remains the source of truth for color. If any part of a person (skin, neck, jaw, hand, face, hair) is visible in ${materialImageNumbers.length > 1 ? 'these material images' : 'this material image'}, COMPLETELY IGNORE that person — their identity, skin tone, and face must have ZERO influence on the output. The model's face and identity come ONLY from Image 1.`
     : '';
 
   return [
