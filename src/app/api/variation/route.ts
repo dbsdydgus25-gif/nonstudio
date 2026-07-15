@@ -220,7 +220,11 @@ export async function POST(req: Request) {
     );
 
     after(async () => {
-      const { buffer: sourceBuf, mimeType: sourceMime } = parseBase64Image(sourceImageBase64);
+      // (2026-07-15) "바리에이션으로 보내기"로 넘어온 이미지는 base64가 아니라 Supabase 서명 URL
+      // (https://...)이다 — parseBase64Image는 data: URL만 처리해서, URL 문자열을 그대로 base64로
+      // 디코딩하려다 깨진 이미지가 되어 OpenAI가 "Invalid image file" 400을 반환하던 버그.
+      // resultImageToBuffer는 URL/data: 둘 다 처리하므로 이걸로 통일한다.
+      const { buffer: sourceBuf, mimeType: sourceMime } = await resultImageToBuffer(sourceImageBase64);
       const openai = new OpenAI({ apiKey: oKey });
       // 배경은 예외 없이 고정 흰색 스튜디오 참고 사진을 사용한다 (AI 피팅과 동일 기준)
       const backgroundReferenceImage = getDefaultBackgroundReferenceImage();
