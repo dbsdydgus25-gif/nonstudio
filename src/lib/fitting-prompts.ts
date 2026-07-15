@@ -306,7 +306,7 @@ export function buildProductFittingPrompt(
     .filter(([, text]) => typeof text === 'string' && text.trim())
     .map(
       ([slot, text]) =>
-        `- USER MANDATE for ${SLOT_LABELS[slot] || slot}: "${text!.trim()}" — follow this LITERALLY. If it says 와이드/wide, the silhouette must be clearly and visibly wide-leg (NOT tapered, NOT slim); if it specifies a color/material/length, match it exactly. This mandate wins over the AI styling description above if they conflict.`,
+        `- USER MANDATE for ${SLOT_LABELS[slot] || slot}: "${text!.trim()}" — follow this LITERALLY. If it says 와이드/wide, the silhouette must be clearly and visibly wide-leg (NOT tapered, NOT slim); if it specifies a color/material/length, match it exactly. If this mandate contains a negation or exclusion (e.g., "not X", "no X", "X 아님", "(X 제외)"), that exclusion is just as mandatory as the positive part — the output must NOT show X; actively check the result against this before finalizing. This mandate wins over the AI styling description above if they conflict.`,
     );
   const mandateBlock = mandateLines.length > 0 ? `\n${mandateLines.join('\n')}` : '';
 
@@ -333,6 +333,7 @@ export function buildProductFittingPrompt(
     `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}${productNotesLine}${extraAngleLine}${materialLine}`,
     `- CRITICAL COLOR RULE: ${colorVariant ? `the "${colorVariant}" colorway` : `the color shown in Image ${productImageNumber}`} is the actual product color being sold — match it precisely, do not shift the hue, saturation, or brightness.`,
     `- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image ${productImageNumber}${materialImageNumbers.length ? ` and the material reference image${materialImageNumbers.length > 1 ? 's' : ''}` : ''} — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.`,
+    `- CRITICAL BUTTON/HARDWARE COUNT RULE: before finalizing, actually count the buttons, snaps, zippers, or other hardware visible in ${materialImageNumbers.length ? `the close-up material reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')}) — this is the clearest, most zoomed-in view and is the authoritative source for the exact count and spacing` : `Image ${productImageNumber}`}. The output must show that exact same count in the exact same positions — neither more nor fewer. This is a common failure mode: do not casually add an extra button or omit one out of habit.`,
     '',
     '=== POSE & FRAMING (ABSOLUTE) ===',
     `Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped. Clean, confident, polished commercial standing pose with natural hand placement.${poseHintBlock}`,

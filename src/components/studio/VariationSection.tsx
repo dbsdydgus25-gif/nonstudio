@@ -24,8 +24,9 @@ interface VariationSectionProps {
 export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsumeIncomingImage }: VariationSectionProps) {
   const [sourceImage, setSourceImage] = useState<string | null>(null);
   const [variationCount, setVariationCount] = useState(4);
-  // 사용자가 직접 자세를 지정 — 비워두면 기존처럼 프리셋 포즈 중 랜덤으로 뽑힘
-  const [customPoseText, setCustomPoseText] = useState('');
+  // 컷마다 자세를 따로 지정 — 특정 컷을 비워두면 그 컷만 기존처럼 프리셋 포즈 중 랜덤으로 뽑힘.
+  // 최대 컷 수(4)만큼 고정 슬롯을 두고, 실제로는 variationCount개만 화면에 노출/전송한다.
+  const [customPoseTexts, setCustomPoseTexts] = useState<string[]>(['', '', '', '']);
 
   const [isRunning, setIsRunning] = useState(false);
   const [stageMsg, setStageMsg] = useState('');
@@ -107,7 +108,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
           variationCount,
           openaiApiKey: openaiKey,
           draftMode,
-          customPoseText: customPoseText.trim() || undefined,
+          customPoseTexts: customPoseTexts.slice(0, variationCount).map((t) => t.trim()),
         }),
       });
 
@@ -202,7 +203,9 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
           <div>
             <div className="text-[13px] font-semibold text-gray-900 tracking-tight">룩북 컷 수</div>
             <div className="text-[11px] text-gray-400 mt-0.5">
-              {customPoseText.trim() ? '아래 지정한 자세로 몇 장 만들지 선택합니다' : '서로 다른 포즈로 몇 장 만들지 선택합니다'}
+              {customPoseTexts.slice(0, variationCount).some((t) => t.trim())
+                ? '컷마다 아래에서 자세를 지정할 수 있습니다'
+                : '서로 다른 포즈로 몇 장 만들지 선택합니다'}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -223,24 +226,33 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
         </div>
       </section>
 
-      {/* 자세 직접 지정 — 비워두면 기존처럼 프리셋 포즈 중 랜덤으로 다양하게 뽑힌다 */}
+      {/* 자세 직접 지정 — 컷마다 따로 지정 가능, 비워둔 컷은 프리셋 포즈 중 랜덤으로 뽑힌다 */}
       <section className="space-y-4">
         <div className="flex items-baseline gap-3">
           <span className="text-[11px] font-semibold text-gray-300 tabular-nums">03</span>
           <h2 className="text-sm font-semibold text-gray-900 tracking-tight">자세 지시</h2>
-          <span className="text-[11px] text-gray-400">선택 — 비워두면 프리셋 포즈 중 랜덤</span>
+          <span className="text-[11px] text-gray-400">선택 — 컷별로 지정, 비워두면 그 컷은 프리셋 포즈 중 랜덤</span>
         </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
-          <textarea
-            value={customPoseText}
-            onChange={(e) => setCustomPoseText(e.target.value)}
-            placeholder="예: 오른쪽을 바라보며 몸을 살짝 돌린 자세, 정면 응시 아님"
-            rows={3}
-            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
-          />
-          <p className="text-[11px] text-gray-400 leading-relaxed">
-            입력하면 이 자세로 {variationCount}장을 만듭니다(포즈만 다른 여러 장이 아님). 방향(왼쪽 · 오른쪽 · 뒤)을 지정하면 몸과
-            카메라 앵글이 실제로 그 방향을 보도록 반영됩니다.
+        <div className="space-y-3">
+          {Array.from({ length: variationCount }, (_, i) => (
+            <div key={i} className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2">
+              <div className="text-[11px] font-semibold text-gray-500 tracking-tight">자세 지시 {i + 1}</div>
+              <textarea
+                value={customPoseTexts[i] ?? ''}
+                onChange={(e) => {
+                  const next = [...customPoseTexts];
+                  next[i] = e.target.value;
+                  setCustomPoseTexts(next);
+                }}
+                placeholder="예: 오른쪽을 바라보며 몸을 살짝 돌린 자세, 정면 응시 아님 (비워두면 랜덤 포즈)"
+                rows={2}
+                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
+              />
+            </div>
+          ))}
+          <p className="text-[11px] text-gray-400 leading-relaxed px-1">
+            방향(왼쪽 · 오른쪽 · 뒤)을 지정하면 몸과 카메라 앵글이 실제로 그 방향을 보도록 반영됩니다. 컷 수를 줄이면 뒤쪽 지시는
+            무시됩니다.
           </p>
         </div>
       </section>

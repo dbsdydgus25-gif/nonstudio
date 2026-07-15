@@ -168,7 +168,7 @@ async function runSingleVariation(
 
 export async function POST(req: Request) {
   try {
-    const { sourceImageBase64, variationCount, openaiApiKey, draftMode, customPoseText } = await req.json();
+    const { sourceImageBase64, variationCount, openaiApiKey, draftMode, customPoseTexts } = await req.json();
 
     if (!sourceImageBase64) {
       return NextResponse.json({ success: false, error: 'AI 피팅 결과 사진 또는 직접 업로드한 사진이 필요합니다.' }, { status: 400 });
@@ -179,13 +179,31 @@ export async function POST(req: Request) {
     }
 
     const count = Math.min(4, Math.max(1, Number(variationCount) || 4));
-    const customPose = typeof customPoseText === 'string' ? customPoseText.trim() : '';
+    // (2026-07-15) 컷마다 자세를 따로 지정할 수 있도록 배열로 받는다 — 인덱스가 비어있으면
+    // 그 컷만 기존처럼 프리셋 랜덤 포즈를 쓴다(전부 채우지 않아도 됨, 컷별로 섞어 쓸 수 있음).
+    const customTexts: string[] = Array.isArray(customPoseTexts)
+      ? customPoseTexts.slice(0, count).map((t: unknown) => (typeof t === 'string' ? t.trim() : ''))
+      : [];
 
-    // (2026-07-14) 사용자가 자세를 직접 지정하면 프리셋 랜덤 풀 대신 그 자세로 count장을 만든다
-    // (포즈 참고 이미지는 프리셋 번호에 매칭되는 것이라 커스텀 자세에는 적용하지 않는다).
-    const poses: Array<{ pose: (typeof FULLBODY_POSES)[number]; poseNumber: number | null }> = customPose
-      ? Array.from({ length: count }, () => ({ pose: { id: 'custom', label: '커스텀 자세', poseInstruction: customPose }, poseNumber: null }))
-      : pickRandomPoses(count);
+    // 커스텀 자세가 없는 슬롯 개수만큼만 프리셋 풀에서 무작위로 뽑고, 순서대로 채워 넣는다.
+    const emptySlotCount = Array.from({ length: count }, (_, i) => customTexts[i] || '').filter((t) => !t).length;
+    const randomPosesForEmptySlots = pickRandomPoses(emptySlotCount);
+    let randomCursor = 0;
+    const poses: Array<{ pose: (typeof FULLBODY_POSES)[number]; poseNumber: number | null }> = Array.from(
+      { length: count },
+      (_, i) => {
+        const custom = customTexts[i];
+        if (custom) {
+          return {
+            pose: { id: 'custom', label: count > 1 ? `커스텀 자세 ${i + 1}` : '커스텀 자세', poseInstruction: custom },
+            poseNumber: null,
+          };
+        }
+        const picked = randomPosesForEmptySlots[randomCursor];
+        randomCursor += 1;
+        return picked;
+      },
+    );
 
     // 포즈마다 "처리 중" 행을 먼저 만들어 id를 즉시 반환한다 — 실제 생성은 아래 after()에서 진행.
     const jobs = await Promise.all(
@@ -213,7 +231,7 @@ export async function POST(req: Request) {
             // 사용자가 public/reference_poses/pose_{N}.png 에 포즈 참고 사진을 넣어두면 자동으로 같이 참고한다.
             // 커스텀 자세(poseNumber=null)는 프리셋 번호가 없으므로 건너뛴다.
             const poseReferenceImage = poseNumber ? getPoseReferenceImage(poseNumber) : null;
-            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage, draftMode ? 'low' : 'medium', !!customPose);
+            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage, draftMode ? 'low' : 'medium', pose.id === 'custom');
             const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
             await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt: pose.poseInstruction });
           } catch (err: any) {
