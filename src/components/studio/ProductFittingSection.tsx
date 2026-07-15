@@ -47,8 +47,11 @@ function fileToDataUrl(file: File): Promise<string> {
 }
 
 export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSendToVariation }: ProductFittingSectionProps) {
-  // 색상 옵션별 제품 이미지 (1장 이상) — 첫 장이 대표, 나머지가 색상 옵션
+  // 제품 이미지 (1장 이상) — extractColors를 안 쓰면 전부 "같은 제품의 다른 각도" 참고 사진으로 함께 쓰인다
   const [productImages, setProductImages] = useState<string[]>([]);
+  // 재질/텍스처 클로즈업 참고 사진 — 색상 아닌 원단/버튼/스티치 디테일 전용 (별도 슬롯)
+  const [materialImages, setMaterialImages] = useState<string[]>([]);
+  const materialFileInputRef = useRef<HTMLInputElement>(null);
   // 한 장에 여러 색상이 나온 도매 샘플 시트에서 색상을 자동 추출해 색상별로 생성
   const [extractColors, setExtractColors] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
@@ -111,6 +114,12 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     setColorPlans(null); // 이미지가 바뀌면 이전 추출 결과는 무효
   };
 
+  const handleAddMaterialFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const dataUrls = await Promise.all(Array.from(files).map(fileToDataUrl));
+    setMaterialImages((prev) => [...prev, ...dataUrls].slice(0, 4));
+  };
+
   // 색상 샘플 시트에서 색상 옵션 추출 (생성 전 미리보기) — 추출 후 색상별 코디 입력 가능
   const handleExtractColors = async () => {
     if (productImages.length === 0) {
@@ -149,7 +158,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     }
 
     setIsRunning(true);
-    setStageMsg(extractColors ? '색상 옵션 추출 및 렌더링 중 (색상별 병렬 생성, 최대 2분)' : '제품 분석 및 렌더링 중 (색상별 병렬 생성, 최대 2분)');
+    setStageMsg(extractColors ? '색상 옵션 추출 및 렌더링 중 (색상별 병렬 생성, 최대 2분)' : '제품 분석 및 렌더링 중 (최대 2분)');
     setCurrentResult(null);
     setColorJobs([]);
 
@@ -161,6 +170,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           productImagesBase64: productImages,
+          materialImagesBase64: materialImages.length ? materialImages : undefined,
           category,
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
@@ -258,11 +268,12 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         <div className="flex items-baseline gap-3">
           <span className="text-[11px] font-semibold text-gray-300 tabular-nums">01</span>
           <h2 className="text-sm font-semibold text-gray-900 tracking-tight">제품 이미지 업로드</h2>
-          <span className="text-[11px] text-gray-400">색상 옵션별 여러 장 가능</span>
+          <span className="text-[11px] text-gray-400">같은 제품 여러 각도 · 색상 옵션 모두 가능</span>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
           <p className="text-xs text-gray-400 leading-relaxed">
-            제품 단독 컷(누끼 · 행거 · 상세페이지)이나 타사 착용샷 모두 가능합니다. 색상 옵션 이미지를 전부 올리면 색상별로 1장씩 생성됩니다 (최대 6장).
+            제품 단독 컷(누끼 · 행거 · 상세페이지)이나 타사 착용샷 모두 가능합니다. 아래 <b className="text-gray-600">색상 옵션 자동 추출</b>을 켜지 않으면,
+            여러 장을 올려도 전부 <b className="text-gray-600">같은 제품의 다른 각도/디테일</b> 참고 사진으로 함께 분석해 1장을 생성합니다 (색상이 실제로 다르면 추출 기능을 켜세요).
           </p>
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
             {productImages.map((img, i) => (
@@ -277,7 +288,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                   ✕
                 </button>
                 <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-medium tracking-wide">
-                  {productImages.length > 1 ? `색상 ${i + 1}` : '대표'}
+                  {i === 0 ? '대표' : extractColors ? `색상 ${i + 1}` : `각도 ${i + 1}`}
                 </span>
               </div>
             ))}
@@ -406,6 +417,52 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
               )}
             </div>
           )}
+
+          {/* 재질 참고 사진 — 색상 아닌 원단/버튼/스티치 클로즈업 전용, 위 제품 사진과 분리 분석 */}
+          <div className="pt-2 border-t border-gray-100 space-y-2.5">
+            <div>
+              <div className="text-[13px] font-semibold text-gray-900 tracking-tight">재질 참고 사진</div>
+              <p className="text-[11px] text-gray-400 mt-0.5 leading-relaxed">
+                원단 결 · 단추 · 스티치 같은 디테일 클로즈업이 있으면 추가하세요. 위 제품 사진은 색상 · 핏 위주로,
+                여기 사진은 재질 · 디테일 위주로 따로 분석해서 결과에 함께 반영합니다 (선택, 최대 4장).
+              </p>
+            </div>
+            <div className="grid grid-cols-4 sm:grid-cols-6 gap-2.5">
+              {materialImages.map((img, i) => (
+                <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 group bg-gray-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={img} alt={`재질 참고 ${i + 1}`} className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => setMaterialImages((prev) => prev.filter((_, idx) => idx !== i))}
+                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-[10px] opacity-0 group-hover:opacity-100 transition"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {materialImages.length < 4 && (
+                <button
+                  type="button"
+                  onClick={() => materialFileInputRef.current?.click()}
+                  className="aspect-square rounded-lg border border-dashed border-gray-300 hover:border-gray-400 transition flex items-center justify-center text-gray-400 hover:text-gray-600"
+                >
+                  <span className="text-lg font-light leading-none">+</span>
+                </button>
+              )}
+            </div>
+            <input
+              ref={materialFileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                handleAddMaterialFiles(e.target.files);
+                e.target.value = '';
+              }}
+            />
+          </div>
         </div>
       </section>
 
@@ -537,7 +594,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           ) : extractColors ? (
             'AI 제품 피팅 생성 — 색상 자동 추출'
           ) : (
-            `AI 제품 피팅 생성${productImages.length > 1 ? ` — 색상 ${productImages.length}종` : ' — 전신 1장'}`
+            `AI 제품 피팅 생성 — 전신 1장${productImages.length > 1 ? ` (참고 사진 ${productImages.length}장 종합)` : ''}`
           )}
         </button>
       </section>

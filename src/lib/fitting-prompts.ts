@@ -186,7 +186,7 @@ export function buildRestylePrompt(
   // 나열하면 gpt-image-2가 한 프레임에 사람 여러 명(포즈별 1명씩)을 그려버리는 사고가 있었음 —
   // 지시를 받아들이되 "한 장 = 한 명 = 한 포즈"를 지시문 안에서 직접 강제한다.
   const poseHintBlock = userAdditions.trim()
-    ? ` MANDATORY POSE/PROP REQUIREMENT (overrides the generic pose direction above — must be included exactly as described, e.g. if it mentions holding an item, that item must be visibly held in the model's hand): ${userAdditions.trim()} (STRICT: the output is ONE photograph of exactly ONE person in ONE pose. If the requirement above lists multiple different poses, pick only the single most suitable one — NEVER render several people, a multi-pose lineup, or the same person repeated side by side in one image.)`
+    ? ` MANDATORY POSE/PROP REQUIREMENT (overrides the generic pose direction above — must be included exactly as described, e.g. if it mentions holding an item, that item must be visibly held in the model's hand): ${userAdditions.trim()} (If this specifies a direction or turn — e.g. facing left/right, three-quarter turn, back view — the body orientation AND camera framing must clearly and unambiguously show that turn; do not default to a front-facing pose with only a slight head tilt. STRICT: the output is ONE photograph of exactly ONE person in ONE pose. If the requirement above lists multiple different poses, pick only the single most suitable one — NEVER render several people, a multi-pose lineup, or the same person repeated side by side in one image.)`
     : '';
 
   const backgroundLine = hasBackgroundReferenceImage
@@ -246,6 +246,10 @@ export function buildProductFittingPrompt(
   /** 사용자 코디 지시 원문 (슬롯별) — 코디 자동 제안(Gemini)을 거치며 "와이드"가 순화되는 문제가
    * 있어서, 원문을 최종 프롬프트에도 문자 그대로 한 번 더 강제한다 */
   userSlotMandates?: Partial<Record<'top' | 'bottom' | 'shoes' | 'accessory', string>>,
+  /** (2026-07-14) 같은 제품의 다른 각도/디테일 참고 사진 개수 — 색상 아님, 실루엣/디테일 교차 확인용 */
+  extraProductImageCount: number = 0,
+  /** (2026-07-14) 재질/텍스처 클로즈업 참고 사진 개수 — 색상 아닌 원단/버튼/스티치 디테일 전용 */
+  materialImageCount: number = 0,
 ): string {
   const stylingLines: string[] = [];
   if (stylingSuggestion.top) stylingLines.push(`- 상의: ${stylingSuggestion.top}`);
@@ -253,17 +257,23 @@ export function buildProductFittingPrompt(
   if (stylingSuggestion.shoes) stylingLines.push(`- 신발: ${stylingSuggestion.shoes}`);
   if (stylingSuggestion.accessory) stylingLines.push(`- 액세서리: ${stylingSuggestion.accessory}`);
 
+  // (2026-07-14) 기존엔 "override" 문구가 없어서 바로 위 "confident standing pose"(정면 기본값)와
+  // 충돌 시 방향 지시(예: "오른쪽 보고 돌아선 자세")가 무시되고 정면으로 나오는 경우가 있었다 —
+  // buildRestylePrompt와 동일하게 명시적 override 문구 + 방향 지시 강조를 추가한다.
   const poseHintBlock = userAdditions.trim()
-    ? ` MANDATORY POSE/PROP REQUIREMENT (must be included exactly as described): ${userAdditions.trim()} (STRICT: the output is ONE photograph of exactly ONE person in ONE pose. If the requirement above lists multiple different poses, pick only the single most suitable one — NEVER render several people, a multi-pose lineup, or the same person repeated side by side in one image.)`
+    ? ` MANDATORY POSE/PROP REQUIREMENT (overrides the generic "confident standing pose" direction above — must be included exactly as described): ${userAdditions.trim()} (If this specifies a direction or turn — e.g. facing left/right, three-quarter turn, back view — the body orientation AND camera framing must clearly and unambiguously show that turn; do not default to a front-facing pose with only a slight head tilt. STRICT: the output is ONE photograph of exactly ONE person in ONE pose. If the requirement above lists multiple different poses, pick only the single most suitable one — NEVER render several people, a multi-pose lineup, or the same person repeated side by side in one image.)`
     : '';
 
-  // (2026-07-09, 2차 강화) 이미지 순서를 [모델, 제품, 배경]으로 바꿨다 — gpt-image-2의 edit는
-  // 첫 번째 이미지를 "편집할 대상"으로 취급하는 경향이 있어서, 제품 사진이 1번일 때는 그 사진
-  // 속 타사 모델의 몸/피부가 계속 결과에 배어 나왔다 (AI 피팅이 모델 일관성이 좋은 이유도
-  // 기준 인물 사진이 1번 이미지이기 때문). 이제 "Image 1의 사람을 편집해서 Image 2의 제품을
-  // 입힌다"는 자연스러운 편집 구도가 된다.
+  // (2026-07-09, 2차 강화) 이미지 순서를 [모델, 제품, (다른 각도), (재질), 배경]으로 구성한다 —
+  // gpt-image-2의 edit는 첫 번째 이미지를 "편집할 대상"으로 취급하는 경향이 있어서, 제품 사진이
+  // 1번일 때는 그 사진 속 타사 모델의 몸/피부가 계속 결과에 배어 나왔다 (AI 피팅이 모델 일관성이
+  // 좋은 이유도 기준 인물 사진이 1번 이미지이기 때문). "Image 1의 사람을 편집해서 Image 2의
+  // 제품을 입힌다"는 자연스러운 편집 구도가 된다.
   const productImageNumber = hasIdentityReferenceImage ? 2 : 1;
-  const backgroundImageNumber = productImageNumber + 1;
+  const extraProductImageNumbers = Array.from({ length: extraProductImageCount }, (_, i) => productImageNumber + 1 + i);
+  const materialImageStart = productImageNumber + 1 + extraProductImageCount;
+  const materialImageNumbers = Array.from({ length: materialImageCount }, (_, i) => materialImageStart + i);
+  const backgroundImageNumber = materialImageStart + materialImageCount;
 
   const backgroundLine = hasBackgroundReferenceImage
     ? `- Background: Image ${backgroundImageNumber} shows the EXACT target studio backdrop and lighting setup (soft frontal light, gentle top-down falloff, seamless cyclorama floor curve). Reproduce this exact background, light direction, and shadow softness on the subject. (${stylingSuggestion.background})`
@@ -295,6 +305,16 @@ export function buildProductFittingPrompt(
     );
   const mandateBlock = mandateLines.length > 0 ? `\n${mandateLines.join('\n')}` : '';
 
+  // (2026-07-14) 같은 제품의 다른 각도 사진 — 색상이 아니라 실루엣/디테일 교차 확인용.
+  const extraAngleLine = extraProductImageNumbers.length
+    ? `\n- Image${extraProductImageNumbers.length > 1 ? 's' : ''} ${extraProductImageNumbers.join(', ')} show ADDITIONAL real photos of this EXACT SAME product from other angles, sides, or close-ups — NOT a different product, NOT a different color. Use ${extraProductImageNumbers.length > 1 ? 'them' : 'it'} together with Image ${productImageNumber} to get the silhouette, proportions, and any details (buttons, pockets, collar shape, hem) that aren't fully visible in Image ${productImageNumber} exactly right.`
+    : '';
+  // (2026-07-14) 재질 전용 클로즈업 — 색상 추출 대상이 아니라 원단/버튼/스티치 디테일 전용.
+  // 위쪽 메인 제품 사진은 색상/핏 위주로, 이 사진은 재질/디테일 위주로 분석하고 결합한다.
+  const materialLine = materialImageNumbers.length
+    ? `\n- Image${materialImageNumbers.length > 1 ? 's' : ''} ${materialImageNumbers.join(', ')} ${materialImageNumbers.length > 1 ? 'are' : 'is'} CLOSE-UP MATERIAL REFERENCE photo${materialImageNumbers.length > 1 ? 's' : ''} of this exact product's fabric/hardware — use ${materialImageNumbers.length > 1 ? 'them' : 'it'} ONLY to get the surface texture, weave/knit structure, sheen, and button/stitching/zipper detail exactly right. Do NOT use ${materialImageNumbers.length > 1 ? 'them' : 'it'} as a color reference — Image ${productImageNumber} remains the source of truth for color.`
+    : '';
+
   return [
     '=== TASK: DRESS THE MODEL IN THE PRODUCT ===',
     `${identityBlock}`,
@@ -303,11 +323,11 @@ export function buildProductFittingPrompt(
     '=== MODEL (fixed personal standard) ===',
     buildModelLockLines(bodySpec),
     '',
-    `=== PRODUCT FIDELITY (Image ${productImageNumber} is the source of truth) ===`,
-    `- Reproduce the product in Image ${productImageNumber} with complete fidelity: exact same color and shade, same fabric texture, same details (buttons, stitching, pockets, prints, logos as shown), same overall silhouette — a customer must recognize it as the same product they saw in the shop listing.`,
-    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}${productNotesLine}`,
+    `=== PRODUCT FIDELITY (Image ${productImageNumber} is the source of truth for color/fit) ===`,
+    `- Reproduce the product in Image ${productImageNumber} with complete fidelity: exact same color and shade, same fabric texture, same details (buttons, stitching, pockets, prints, logos as shown), same overall silhouette — a customer must recognize it as the same product they saw in the shop listing. Do NOT add a button/detail that is not shown, and do NOT drop or omit a button/detail that IS shown — match the exact count and placement.`,
+    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}${productNotesLine}${extraAngleLine}${materialLine}`,
     `- CRITICAL COLOR RULE: ${colorVariant ? `the "${colorVariant}" colorway` : `the color shown in Image ${productImageNumber}`} is the actual product color being sold — match it precisely, do not shift the hue, saturation, or brightness.`,
-    `- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image ${productImageNumber} — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.`,
+    `- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image ${productImageNumber}${materialImageNumbers.length ? ` and the material reference image${materialImageNumbers.length > 1 ? 's' : ''}` : ''} — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.`,
     '',
     '=== POSE & FRAMING (ABSOLUTE) ===',
     `Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped. Clean, confident, polished commercial standing pose with natural hand placement.${poseHintBlock}`,

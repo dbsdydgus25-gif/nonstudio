@@ -92,20 +92,39 @@ export async function analyzeGarment(
   sourceUrl?: string,
   rawSpecs?: string,
   userCategory?: string,
-  openaiApiKey?: string
+  openaiApiKey?: string,
+  /**
+   * (2026-07-14) 재질/디테일 전용 클로즈업 사진 — 색상 추출 대상이 아니다.
+   * 메인 사진(garmentImagesBase64)은 색상/핏 위주로, 이 사진들은 질감/버튼/스티치 위주로
+   * 분석하도록 이미지마다 역할을 명시해서 함께 보낸다 (라벨 없이 여러 장을 섞으면 Gemini가
+   * 어느 사진을 색상 기준으로 삼아야 할지 헷갈려 함).
+   */
+  materialImagesBase64?: string[],
 ): Promise<GarmentAnalysis> {
   const parts: any[] = [];
+  const hasMaterialImages = !!materialImagesBase64?.length;
 
-  // 모든 의류 이미지 추가
-  garmentImagesBase64.forEach((imgBase64) => {
+  // 메인 제품 이미지 — 색상/핏/실루엣 기준
+  garmentImagesBase64.forEach((imgBase64, i) => {
     const { data, mimeType } = parseBase64(imgBase64);
-    parts.push({
-      inlineData: {
-        data,
-        mimeType,
-      },
-    });
+    if (hasMaterialImages || garmentImagesBase64.length > 1) {
+      parts.push({
+        text: `Image ${i + 1} — PRIMARY product photo. Use this for color, fit, silhouette, and category.`,
+      });
+    }
+    parts.push({ inlineData: { data, mimeType } });
   });
+
+  // 재질 참고 이미지 — 텍스처/버튼/스티치 전용, 색상 판단에는 쓰지 않음
+  if (hasMaterialImages) {
+    materialImagesBase64!.forEach((imgBase64, i) => {
+      const { data, mimeType } = parseBase64(imgBase64);
+      parts.push({
+        text: `Material reference photo ${i + 1} — a close-up of the SAME product's fabric/hardware. Use this ONLY to refine "material", "texture", "lightReaction", and "details" (buttons, stitching, weave/knit structure). Do NOT use it to determine "color" — trust the PRIMARY product photo(s) above for color.`,
+      });
+      parts.push({ inlineData: { data, mimeType } });
+    });
+  }
 
   parts.push({
     text: ANALYSIS_SYSTEM_PROMPT,
@@ -195,9 +214,18 @@ Output raw JSON ONLY. No markdown formatting, no \`\`\`json block. Just the raw 
             content: [
               {
                 type: 'text',
-                text: `Analyze these garment photos. Category requested by user: ${userCategory || 'unknown'}. Additional specs: ${rawSpecs || ''}.`
+                text: `Analyze these garment photos. Category requested by user: ${userCategory || 'unknown'}. Additional specs: ${rawSpecs || ''}.${hasMaterialImages ? ' The additional images after the primary ones are CLOSE-UP MATERIAL REFERENCE photos of the same product — use them only to refine material/texture/details, NOT color.' : ''}`
               },
               ...garmentImagesBase64.map(b64 => {
+                const { data, mimeType } = parseBase64(b64);
+                return {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:${mimeType};base64,${data}`
+                  }
+                };
+              }),
+              ...(materialImagesBase64 || []).map(b64 => {
                 const { data, mimeType } = parseBase64(b64);
                 return {
                   type: 'image_url',

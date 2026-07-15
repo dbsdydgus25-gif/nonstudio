@@ -103,7 +103,7 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [input, setInput] = useState<BuilderInput>(DEFAULT_INPUT);
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
-  const [photoImage, setPhotoImage] = useState<string | null>(null); // 트랙 2 업로드 사진
+  const [photoImages, setPhotoImages] = useState<string[]>([]); // 트랙 2 업로드 사진 (여러 장 가능)
   const [draftImage, setDraftImage] = useState<string | null>(null);
   const [isDrafting, setIsDrafting] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -161,7 +161,7 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
     });
     setDraftImage(null);
     setReferenceImage(null);
-    setPhotoImage(null);
+    setPhotoImages([]);
     setTrack(null);
     setError('');
     setStep(1);
@@ -173,8 +173,8 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
       onNeedKeys();
       return;
     }
-    if (!photoImage) {
-      setError('모델 사진을 업로드해 주세요.');
+    if (!photoImages.length) {
+      setError('모델 사진을 최소 1장 업로드해 주세요.');
       return;
     }
     setIsConfirming(true);
@@ -192,7 +192,7 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
             weightKg: input.weightKg,
             shoeSizeMm: input.shoeSizeMm,
           },
-          photoBase64: photoImage,
+          photosBase64: photoImages,
           openaiApiKey: openaiKey,
         }),
       });
@@ -477,44 +477,52 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
           <div>
             <h3 className="text-[13px] font-semibold text-gray-900">사진으로 만들기</h3>
             <p className="text-[11px] text-gray-400 mt-0.5">
-              전신이 나온 사진일수록 좋습니다. 이 사진이 그대로 정면 기준이 되고, 뒤 · 좌 · 우 컷만 이 사진에서 만들어집니다.
+              전신이 나온 사진일수록 좋습니다. 여러 장을 넣으면 첫 번째 사진을 기준(포즈 · 착장)으로 삼고, 나머지는 얼굴 · 피부 · 체형을
+              더 정확히 반영하는 데 사용해 하나로 종합합니다. 그 결과가 정면 기준이 되고, 뒤 · 좌 · 우 컷은 거기서 파생됩니다.
             </p>
           </div>
 
-          {photoImage ? (
-            <div className="flex items-start gap-4">
-              <div className="w-32 aspect-[2/3] rounded-xl overflow-hidden border border-gray-200 bg-gray-50 flex-shrink-0">
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+            {photoImages.map((img, i) => (
+              <div key={i} className="relative aspect-[2/3] rounded-xl overflow-hidden border border-gray-200 bg-gray-50 group">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={photoImage} alt="모델 사진" className="w-full h-full object-cover" />
+                <img src={img} alt={`모델 사진 ${i + 1}`} className="w-full h-full object-cover" />
+                {i === 0 && (
+                  <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-gray-900 text-white text-[9px] font-medium">기준</span>
+                )}
+                <button
+                  onClick={() => setPhotoImages(photoImages.filter((_, idx) => idx !== i))}
+                  className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[11px] font-medium transition"
+                >
+                  제거
+                </button>
               </div>
+            ))}
+            {photoImages.length < 6 && (
               <button
-                onClick={() => setPhotoImage(null)}
-                className="text-[11px] text-gray-400 hover:text-gray-900 underline underline-offset-2 transition"
+                onClick={() => photoInputRef.current?.click()}
+                className="aspect-[2/3] rounded-xl border border-dashed border-gray-300 hover:border-gray-400 bg-gray-50 flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-gray-600 transition"
               >
-                다른 사진으로 교체
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-6 h-6">
+                  <path d="M12 16V4m0 0 4 4m-4-4-4 4" />
+                  <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+                </svg>
+                <span className="text-[10px] font-medium">{photoImages.length === 0 ? '사진 업로드' : '사진 추가'}</span>
               </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => photoInputRef.current?.click()}
-              className="w-full aspect-[3/2] max-h-56 rounded-xl border border-dashed border-gray-300 hover:border-gray-400 bg-gray-50 flex flex-col items-center justify-center gap-1.5 text-gray-400 hover:text-gray-600 transition"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-7 h-7">
-                <path d="M12 16V4m0 0 4 4m-4-4-4 4" />
-                <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
-              </svg>
-              <span className="text-[12px] font-medium">모델 사진 업로드</span>
-              <span className="text-[10px]">JPG · PNG · WEBP</span>
-            </button>
-          )}
+            )}
+          </div>
           <input
             ref={photoInputRef}
             type="file"
             accept="image/*"
+            multiple
             className="hidden"
             onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (file) setPhotoImage(await fileToDataUrl(file));
+              const files = Array.from(e.target.files || []).slice(0, 6 - photoImages.length);
+              if (files.length) {
+                const dataUrls = await Promise.all(files.map(fileToDataUrl));
+                setPhotoImages([...photoImages, ...dataUrls]);
+              }
               e.target.value = '';
             }}
           />
@@ -563,7 +571,7 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
           <div className="flex justify-end">
             <button
               onClick={buildFromPhoto}
-              disabled={isConfirming || !photoImage}
+              disabled={isConfirming || !photoImages.length}
               className="px-8 py-3 rounded-xl bg-gray-900 hover:bg-black text-white font-semibold text-[13px] transition disabled:opacity-40"
             >
               {isConfirming ? '저장 중…' : '이 사진으로 모델 만들기'}

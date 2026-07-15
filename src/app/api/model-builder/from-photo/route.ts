@@ -1,9 +1,10 @@
 /**
  * /api/model-builder/from-photo — 트랙 2: 실제 사진 업로드로 모델 만들기 (비동기)
  *
- * 업로드한 사진을 그대로 정면 기준 이미지(identity_reference)로 저장하고 —
- * 재생성하지 않으므로 실물 그대로, AI 과장이 없음 — 뒤/좌/우 3컷만 그 사진에서 파생한다.
- * 즉시 builderStatus='building'으로 저장하고 응답, after()에서 뷰 생성 후 'ready'.
+ * 사진 1장: 그대로 정면 기준 이미지(identity_reference)로 저장 (재생성 없음 = 실물 그대로).
+ * 사진 2장 이상: images.edit 다중 이미지 입력으로 하나의 정면 기준 사진으로 종합
+ *   (Image 1 = 포즈/구도/착장 기준, 나머지 = 얼굴·피부·체형 정확도 보강용).
+ * 이후 공통: 정면 기준 이미지에서 뒤/좌/우 3컷만 파생 생성.
  */
 
 import { NextResponse } from 'next/server';
@@ -11,6 +12,7 @@ import { after } from 'next/server';
 import OpenAI, { toFile } from 'openai';
 import {
   buildPhotoModelSpecText,
+  buildPhotoSynthesisPrompt,
   buildPhotoViewPrompt,
   type PhotoModelInput,
 } from '@/lib/model-builder';
@@ -56,6 +58,36 @@ async function editView(
   throw new Error('빈 이미지 응답 (사진 모델 뷰 생성)');
 }
 
+/** 여러 장을 하나의 정면 기준 사진으로 종합 (images.edit 다중 이미지 입력) */
+async function synthesizeFront(
+  openai: OpenAI,
+  photos: Array<{ buffer: Buffer; mimeType: string }>,
+  input: PhotoModelInput,
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  const downs = await Promise.all(photos.map((p) => downscaleImage(p.buffer, p.mimeType)));
+  const files = await Promise.all(
+    downs.map((d, i) => toFile(d.buffer, `ref-${i}.${d.mimeType.split('/')[1] || 'jpg'}`, { type: d.mimeType })),
+  );
+  const prompt = buildPhotoSynthesisPrompt(input, files.length);
+  const res: any = await withImageRetry(() =>
+    (openai.images as any).edit({
+      model: 'gpt-image-2',
+      image: files,
+      prompt: prompt.slice(0, 12000),
+      n: 1,
+      size: '1024x1536',
+      quality: 'medium',
+    }),
+  );
+  const item = res?.data?.[0];
+  if (item?.b64_json) return { buffer: Buffer.from(item.b64_json, 'base64'), mimeType: 'image/png' };
+  if (item?.url) {
+    const r = await fetch(item.url);
+    return { buffer: Buffer.from(await r.arrayBuffer()), mimeType: r.headers.get('content-type') || 'image/png' };
+  }
+  throw new Error('빈 이미지 응답 (사진 종합)');
+}
+
 export async function POST(req: Request) {
   try {
     const uid = await getSessionUserId();
@@ -63,26 +95,27 @@ export async function POST(req: Request) {
 
     const {
       input,
-      photoBase64,
+      photosBase64,
       openaiApiKey,
-    }: { input: PhotoModelInput; photoBase64: string; openaiApiKey: string } = await req.json();
+    }: { input: PhotoModelInput; photosBase64: string[]; openaiApiKey: string } = await req.json();
 
     if (!openaiApiKey) {
       return NextResponse.json({ success: false, error: 'OpenAI API 키가 필요합니다.' }, { status: 400 });
     }
-    if (!photoBase64) {
+    if (!photosBase64?.length) {
       return NextResponse.json({ success: false, error: '모델 사진을 업로드해 주세요.' }, { status: 400 });
     }
     if (!input?.heightCm || !input?.weightKg) {
       return NextResponse.json({ success: false, error: '키·몸무게를 입력해 주세요.' }, { status: 400 });
     }
 
+    const photos = photosBase64.slice(0, 6).map(parseBase64Image);
     const specText = buildPhotoModelSpecText(input);
 
-    // 업로드 사진을 정면 기준 이미지로 즉시 저장 (재생성 없음 = 실물 그대로)
-    const photo = parseBase64Image(photoBase64);
-    const photoDown = await downscaleImage(photo.buffer, photo.mimeType);
-    await saveIdentityImage(uid, photoDown.buffer, photoDown.mimeType);
+    // 사진 1장이면 그대로 정면으로 저장 (재생성 없음 = 실물 그대로).
+    // 2장 이상이면 종합은 after()에서 진행하고, 여기서는 첫 장을 임시 정면으로 즉시 보여준다.
+    const firstDown = await downscaleImage(photos[0].buffer, photos[0].mimeType);
+    await saveIdentityImage(uid, firstDown.buffer, firstDown.mimeType);
 
     await saveModelProfile(uid, {
       name: input.name?.trim() || '내 모델',
@@ -93,7 +126,7 @@ export async function POST(req: Request) {
       hasCustomIdentityImage: true,
       gender: input.gender,
       age: input.age,
-      featuresText: '업로드한 실제 사진 기반',
+      featuresText: photos.length > 1 ? `업로드한 실제 사진 ${photos.length}장 종합` : '업로드한 실제 사진 기반',
       appearanceText: '사진 기반',
       builderStatus: 'building',
       builderError: null,
@@ -103,9 +136,14 @@ export async function POST(req: Request) {
     after(async () => {
       const openai = new OpenAI({ apiKey: openaiApiKey });
       try {
-        // 뒤/좌/우 3컷을 업로드 사진에서 파생 (정면은 이미 실물 사진으로 저장됨)
+        let front = firstDown;
+        if (photos.length > 1) {
+          front = await synthesizeFront(openai, photos, input);
+          await saveIdentityImage(uid, front.buffer, front.mimeType);
+        }
+
         await runWithConcurrency(['back', 'left', 'right'] as const, 3, async (view) => {
-          const img = await editView(openai, photoDown, buildPhotoViewPrompt(view));
+          const img = await editView(openai, front, buildPhotoViewPrompt(view));
           await saveViewImage(uid, view, img.buffer, img.mimeType);
         });
 
@@ -115,11 +153,11 @@ export async function POST(req: Request) {
         console.error('[model-builder/from-photo][after] 실패:', err);
         try {
           const current = await getModelProfile(uid);
-          // 정면(실물)은 이미 저장돼 있으니, 뷰 생성만 실패해도 모델 자체는 사용 가능하게 ready 처리
+          // 정면은 이미 저장돼 있으니, 뷰/종합 생성만 실패해도 모델 자체는 사용 가능하게 ready 처리
           await saveModelProfile(uid, {
             ...current,
             builderStatus: 'ready',
-            builderError: '뒤/좌/우 뷰 일부 생성에 실패했지만 정면 사진으로 사용 가능합니다.',
+            builderError: '일부 뷰 생성에 실패했지만 정면 사진으로 사용 가능합니다.',
           });
         } catch {
           // 무시 — 폴링 타임아웃으로 처리

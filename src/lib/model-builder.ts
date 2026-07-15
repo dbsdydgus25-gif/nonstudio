@@ -207,6 +207,33 @@ export function buildPhotoModelSpecText(input: PhotoModelInput): string {
   return lines.join('\n');
 }
 
+/**
+ * 여러 장의 실제 사진을 하나의 정면 기준 이미지로 종합할 때 쓰는 프롬프트 (images.edit, 다중 이미지 입력).
+ * Image 1을 "기준(포즈/구도/착장)"으로 삼고, 나머지는 얼굴·피부·체형 정확도를 보강하는 용도로만 쓴다 —
+ * 스코프를 명확히 해서 다른 사진들의 배경/옷이 섞여 들어가는 것을 방지한다.
+ */
+export function buildPhotoSynthesisPrompt(input: PhotoModelInput, photoCount: number): string {
+  const multiNote =
+    photoCount > 1
+      ? 'The other input images are ADDITIONAL real photographs of the SAME exact person, taken at other times or angles — use them ONLY to double-check and reinforce the identity (face shape, skin tone, hairstyle, body build) if anything is unclear in Image 1. Do NOT mix in the clothing, background, or pose from these extra images — Image 1 alone defines the outfit, setting, and pose.'
+      : '';
+  return [
+    '=== TASK: PRODUCE ONE CONSISTENT FRONT STUDIO PHOTO FROM REAL REFERENCE PHOTOS ===',
+    'Image 1 is the primary real photograph of this exact fitting model — use it as the base for the face, hairstyle, skin tone, body proportions, and the outfit the person is wearing.',
+    multiNote,
+    '',
+    'Generate a single full-body photograph of this exact same real person, standing straight facing the camera, arms relaxed naturally at the sides, feet shoulder-width apart. FULL BODY — head to toe fully visible, nothing cropped. Wearing the SAME clothing as shown in Image 1.',
+    `Background: ${DEFAULT_STUDIO_BACKGROUND}`,
+    '',
+    input.heightCm ? `Height ${input.heightCm}cm, Weight ${input.weightKg}kg — reflect this build faithfully without exaggerating it.` : '',
+    NATURALNESS_CLAUSE,
+    '',
+    'Reproduce the real person faithfully — do NOT beautify, smooth, idealize, or stylize. Exactly ONE person, one single frame, no collage. Photorealistic, natural skin texture, professional studio lighting.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 /** 사진 기반 모델의 뒤/좌/우 뷰 — 업로드한 실제 사진과 같은 옷/분위기를 유지한 채 회전만 */
 export function buildPhotoViewPrompt(view: 'back' | 'left' | 'right'): string {
   const viewLine =

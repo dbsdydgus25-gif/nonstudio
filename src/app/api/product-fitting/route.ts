@@ -52,26 +52,47 @@ async function runSingleProductFitting(
   identityReferenceImage: { buffer: Buffer; mimeType: string } | null,
   backgroundReferenceImage: { buffer: Buffer; mimeType: string } | null,
   quality: 'low' | 'medium' = 'medium',
+  /** (2026-07-14) 같은 제품의 다른 각도/디테일 참고 사진 — 색상 아님, 실루엣/디테일 교차 확인용 */
+  otherProductImages: Array<{ buffer: Buffer; mimeType: string }> = [],
+  /** (2026-07-14) 재질/텍스처 클로즈업 참고 사진 — 색상 아닌 원단/버튼/스티치 디테일 전용 */
+  materialImages: Array<{ buffer: Buffer; mimeType: string }> = [],
 ): Promise<string> {
   // 입력 이미지는 1024px로 다운스케일 — 업로드 페이로드/입력 토큰 절감 (출력 품질과 무관)
   const parsed = parseBase64Image(productImageBase64);
   const { buffer, mimeType } = await downscaleImage(parsed.buffer, parsed.mimeType);
   const productFile = await toOpenAIFile(buffer, mimeType, `product.${mimeType.split('/')[1] || 'jpg'}`);
-  // (2026-07-09) 이미지 순서를 [모델, 제품, 배경]으로 변경 — gpt-image-2 edit는 첫 이미지를
-  // 편집 대상으로 취급하는 경향이 있어, 모델 사진을 1번에 두면 "이 사람에게 제품을 입힌다"는
-  // 자연스러운 편집이 되어 모델(체형/피부/얼굴) 충실도가 크게 올라간다. 프롬프트의 이미지
-  // 번호(buildProductFittingPrompt)와 반드시 함께 맞춰져 있어야 함.
-  const refs = [identityReferenceImage, backgroundReferenceImage].filter(
-    (r): r is { buffer: Buffer; mimeType: string } => !!r,
-  );
-  const refFiles = await Promise.all(
-    refs.map((ref, i) =>
-      toOpenAIFile(ref.buffer, ref.mimeType, `reference-${i}.${ref.mimeType.split('/')[1] || 'jpg'}`),
+
+  const otherProductFiles = await Promise.all(
+    otherProductImages.map((img, i) =>
+      toOpenAIFile(img.buffer, img.mimeType, `product-angle-${i}.${img.mimeType.split('/')[1] || 'jpg'}`),
     ),
   );
-  const imageInput = identityReferenceImage
-    ? [refFiles[0], productFile, ...refFiles.slice(1)] // [모델, 제품, 배경]
-    : [productFile, ...refFiles]; // 모델 사진 없으면 기존 순서
+  const materialFiles = await Promise.all(
+    materialImages.map((img, i) =>
+      toOpenAIFile(img.buffer, img.mimeType, `material-${i}.${img.mimeType.split('/')[1] || 'jpg'}`),
+    ),
+  );
+
+  // (2026-07-09) 이미지 순서를 [모델, 제품, 배경]으로 변경 — gpt-image-2 edit는 첫 이미지를
+  // 편집 대상으로 취급하는 경향이 있어, 모델 사진을 1번에 두면 "이 사람에게 제품을 입힌다"는
+  // 자연스러운 편집이 되어 모델(체형/피부/얼굴) 충실도가 크게 올라간다.
+  // (2026-07-14) 순서를 [모델, 제품, 다른 각도, 재질, 배경]으로 확장 — buildProductFittingPrompt의
+  // 이미지 번호 계산(extraProductImageCount, materialImageCount)과 반드시 함께 맞춰져 있어야 함.
+  // identity/background는 호출부에서 이미 다운스케일된 상태로 전달됨(job마다 재사용, 중복 계산 방지).
+  const backgroundFile = backgroundReferenceImage
+    ? await toOpenAIFile(backgroundReferenceImage.buffer, backgroundReferenceImage.mimeType, 'background.jpg')
+    : null;
+  const identityFile = identityReferenceImage
+    ? await toOpenAIFile(identityReferenceImage.buffer, identityReferenceImage.mimeType, 'identity.jpg')
+    : null;
+
+  const imageInput = [
+    ...(identityFile ? [identityFile] : []),
+    productFile,
+    ...otherProductFiles,
+    ...materialFiles,
+    ...(backgroundFile ? [backgroundFile] : []),
+  ];
 
   // 429(분당 이미지 한도)/일시적 5xx는 대기 후 재시도 — 색상 5종 병렬 생성 시 일부만
   // 성공하고 나머지가 조용히 실패하던 문제("결과가 하나만 나옴")의 방어책.
@@ -97,6 +118,7 @@ export async function POST(req: Request) {
   try {
     const {
       productImagesBase64,
+      materialImagesBase64,
       category,
       geminiApiKey,
       openaiApiKey,
@@ -107,8 +129,10 @@ export async function POST(req: Request) {
       productNotes,
       draftMode,
     }: {
-      /** 색상 옵션별 제품 이미지 (1장 이상) — 각 이미지마다 1장씩 생성된다 */
+      /** 제품 사진 — extractColors/colorPlans 없으면 전부 "같은 제품의 다른 각도" 참고 사진으로 함께 쓰인다 */
       productImagesBase64: string[];
+      /** (2026-07-14) 재질/텍스처 클로즈업 참고 사진 — 색상 아닌 원단/버튼/스티치 디테일 전용, 별도 슬롯 */
+      materialImagesBase64?: string[];
       category: string;
       geminiApiKey: string;
       openaiApiKey: string;
@@ -161,7 +185,7 @@ export async function POST(req: Request) {
     // (c) extractColors(레거시/직접 API 호출): 서버에서 즉석 추출해 색상별 생성
     // 색상 시트 모드에서는 해당 색상 영역만 잘라서 보낸다 — 여러 벌이 한 장에 있으면
     // gpt-image-2가 "어느 옷인지" 섞어버려 제품 재현이 깨지던 문제의 근본 대응.
-    let jobPlans: Array<{ imageBase64: string; label: string; colorVariant?: string; styleHints?: StyleHintsBySlot }>;
+    let jobPlans: Array<{ imageBase64: string; label: string; colorVariant?: string; styleHints?: StyleHintsBySlot; otherAngles?: string[] }>;
     if (colorPlans?.length) {
       jobPlans = await Promise.all(
         colorPlans.slice(0, 6).map(async (plan) => ({
@@ -182,10 +206,16 @@ export async function POST(req: Request) {
         })),
       );
     } else {
-      jobPlans = images.map((imageBase64, i) => ({
-        imageBase64,
-        label: images.length > 1 ? `색상 옵션 ${i + 1}` : 'AI 제품 피팅 결과',
-      }));
+      // (2026-07-14) 이전엔 이미지가 2장 이상이면 각각 별도 "색상 옵션 N"으로 쪼개 색상이
+      // 아닌데도 별개 생성이 되어버리는 문제가 있었음 — extractColors/colorPlans를 쓰지 않는 한
+      // 여러 장은 전부 "같은 제품의 다른 각도/디테일" 참고 사진으로 취급해 단일 생성에 함께 쓴다.
+      jobPlans = [
+        {
+          imageBase64: images[0],
+          label: 'AI 제품 피팅 결과',
+          otherAngles: images.slice(1),
+        },
+      ];
     }
 
     // job마다 pending 행을 만들어 id 배열을 즉시 반환한다.
@@ -214,18 +244,28 @@ export async function POST(req: Request) {
       const identityReferenceImage = rawIdentity ? await downscaleImage(rawIdentity.buffer, rawIdentity.mimeType) : null;
       const bodySpec = buildBodySpecFromProfile(modelProfile);
 
+      // 재질 참고 사진은 색상 옵션과 무관하게 모든 job에 공통으로 쓰인다 — 한 번만 다운스케일.
+      const materialImagesDownscaled = await Promise.all(
+        (materialImagesBase64 || []).slice(0, 4).map(async (b64) => {
+          const parsed = parseBase64Image(b64);
+          return downscaleImage(parsed.buffer, parsed.mimeType);
+        }),
+      );
+
       // 전체 병렬 대신 3개씩 배치 실행 — OpenAI 이미지 분당 한도(429)로 일부 색상만
       // 성공하던 문제 방지. 실패한 호출도 과금될 수 있어 성공률이 곧 비용 절감이다.
-      await runWithConcurrency(jobs, 3, async ({ generationId, imageBase64, colorVariant, styleHints }) => {
+      await runWithConcurrency(jobs, 3, async ({ generationId, imageBase64, colorVariant, styleHints, otherAngles }) => {
           try {
-            // 색상 옵션마다 색/디테일이 다르므로 이미지별로 개별 분석한다
+            // 색상 옵션마다 색/디테일이 다르므로 이미지별로 개별 분석한다 — 같은 제품의 다른
+            // 각도(otherAngles)는 색상/핏 분석에 함께 쓰고, 재질 사진은 텍스처 전용으로 분리한다.
             const garmentAnalysis = await analyzeGarment(
-              [imageBase64],
+              [imageBase64, ...(otherAngles || [])],
               geminiApiKey,
               undefined,
               undefined,
               sourcedCategory,
               openaiApiKey,
+              materialImagesBase64?.length ? materialImagesBase64 : undefined,
             );
 
             // 색상마다 어울리는 코디가 다를 수 있음 — 색상별 지시(styleHints)가 있는 슬롯은
@@ -250,6 +290,13 @@ export async function POST(req: Request) {
             // 배경은 예외 없이 고정 흰색 스튜디오 (요구사항)
             stylingSuggestion.background = DEFAULT_STUDIO_BACKGROUND;
 
+            const otherAngleImagesDownscaled = await Promise.all(
+              (otherAngles || []).map(async (b64) => {
+                const parsed = parseBase64Image(b64);
+                return downscaleImage(parsed.buffer, parsed.mimeType);
+              }),
+            );
+
             const prompt = buildProductFittingPrompt(
               sourcedCategory,
               analysisForThisColor,
@@ -261,6 +308,8 @@ export async function POST(req: Request) {
               colorVariant,
               productNotes,
               mergedHints,
+              otherAngleImagesDownscaled.length,
+              materialImagesDownscaled.length,
             );
 
             const imageUrl = await runSingleProductFitting(
@@ -270,6 +319,8 @@ export async function POST(req: Request) {
               identityReferenceImage,
               backgroundReferenceImage,
               draftMode ? 'low' : 'medium',
+              otherAngleImagesDownscaled,
+              materialImagesDownscaled,
             );
             const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
             await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt });

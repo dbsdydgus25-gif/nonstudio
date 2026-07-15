@@ -79,6 +79,8 @@ function buildVariationPrompt(
   poseInstruction: string,
   hasBackgroundReferenceImage: boolean,
   hasPoseReferenceImage: boolean,
+  /** (2026-07-14) 사용자가 직접 자세를 지정했는지 — true면 프리셋보다 우선한다는 문구를 강조한다 */
+  isCustomPose: boolean = false,
 ): string {
   const imageNotes: string[] = [
     'Image 1 (the base photo): the exact person and exact outfit to reproduce — the single source of truth for face, skin tone, body, and every garment/accessory.',
@@ -94,6 +96,10 @@ function buildVariationPrompt(
     );
   }
 
+  const poseLine = isCustomPose
+    ? `MANDATORY POSE (user-specified — this is the actual pose to render, not a suggestion; overrides any default frontal/standing assumption. If it specifies a direction or turn — e.g. facing left/right, three-quarter turn, back view — the body orientation AND camera framing must clearly and unambiguously show that turn, not a front-facing pose with only a slight head tilt. Apply only to body parts that are visible in Image 1): ${poseInstruction} (STRICT: ONE person, ONE pose, ONE photograph — never render several people or a multi-pose lineup.)`
+    : `New pose (apply only to body parts that are visible in Image 1): ${poseInstruction}`;
+
   return [
     '=== TASK: POSE-ONLY EDIT OF A REAL COMMERCIAL PRODUCT PHOTO ===',
     'This is the same photo, just with a different body pose. Keep everything else pixel-faithful to Image 1 — same face, same skin tone, same body, and the exact same garments (same color, same fabric, same fit, same shoes, same accessories). Do not redraw, re-texture, sharpen, or reinterpret the clothing in any way.',
@@ -106,7 +112,7 @@ function buildVariationPrompt(
     // 고개/시선 부분 자체를 무시하라고 우선순위를 명시적으로 못박는다.
     'FRAMING RULE (HIGHEST PRIORITY — overrides everything else in this prompt including the pose instruction): the output must have the exact same framing and crop as Image 1. If Image 1 does not show the head/face (cropped at the neck or chest), the output must be cropped identically and contain NO head and NO face — in that case, ignore every part of the pose instruction that mentions the head, face, chin, or gaze, and apply only the body/arm/leg parts of the pose. Never extend the frame or invent any body part (head, face, feet, etc.) that is not visible in Image 1.',
     ...imageNotes,
-    `New pose (apply only to body parts that are visible in Image 1): ${poseInstruction}`,
+    poseLine,
     // (2026-07-09) PERSONAL_BODY_SPEC 텍스트를 여기서 제거함 — 사용자 결정: AI 바리에이션은
     // "첨부된 사진을 그대로 가져와서 포즈만 바꾸는" 단계라, 텍스트 체형 스펙이 이미지와
     // 미묘하게 충돌해 재해석을 유발할 여지를 없앤다. 체형/피부톤/털/흉터 등 모델 정보는
@@ -128,6 +134,7 @@ async function runSingleVariation(
   backgroundReferenceImage: { buffer: Buffer; mimeType: string } | null,
   poseReferenceImage: { buffer: Buffer; mimeType: string } | null,
   quality: 'low' | 'medium' = 'medium',
+  isCustomPose: boolean = false,
 ): Promise<{ imageUrl: string; engineUsed: string }> {
   // 입력 이미지는 1024px로 다운스케일 — 페이로드/입력 토큰 절감
   const source = await downscaleImage(sourceBuf, sourceMime);
@@ -141,7 +148,7 @@ async function runSingleVariation(
   );
   const imageInput = refFiles.length > 0 ? [sourceFile, ...refFiles] : sourceFile;
 
-  const prompt = buildVariationPrompt(poseInstruction, !!backgroundReferenceImage, !!poseReferenceImage);
+  const prompt = buildVariationPrompt(poseInstruction, !!backgroundReferenceImage, !!poseReferenceImage, isCustomPose);
 
   const res: any = await withImageRetry(() => (openai.images as any).edit({
     model: 'gpt-image-2',
@@ -161,7 +168,7 @@ async function runSingleVariation(
 
 export async function POST(req: Request) {
   try {
-    const { sourceImageBase64, variationCount, openaiApiKey, draftMode } = await req.json();
+    const { sourceImageBase64, variationCount, openaiApiKey, draftMode, customPoseText } = await req.json();
 
     if (!sourceImageBase64) {
       return NextResponse.json({ success: false, error: 'AI 피팅 결과 사진 또는 직접 업로드한 사진이 필요합니다.' }, { status: 400 });
@@ -172,7 +179,13 @@ export async function POST(req: Request) {
     }
 
     const count = Math.min(4, Math.max(1, Number(variationCount) || 4));
-    const poses = pickRandomPoses(count);
+    const customPose = typeof customPoseText === 'string' ? customPoseText.trim() : '';
+
+    // (2026-07-14) 사용자가 자세를 직접 지정하면 프리셋 랜덤 풀 대신 그 자세로 count장을 만든다
+    // (포즈 참고 이미지는 프리셋 번호에 매칭되는 것이라 커스텀 자세에는 적용하지 않는다).
+    const poses: Array<{ pose: (typeof FULLBODY_POSES)[number]; poseNumber: number | null }> = customPose
+      ? Array.from({ length: count }, () => ({ pose: { id: 'custom', label: '커스텀 자세', poseInstruction: customPose }, poseNumber: null }))
+      : pickRandomPoses(count);
 
     // 포즈마다 "처리 중" 행을 먼저 만들어 id를 즉시 반환한다 — 실제 생성은 아래 after()에서 진행.
     const jobs = await Promise.all(
@@ -198,9 +211,9 @@ export async function POST(req: Request) {
       await runWithConcurrency(jobs, 3, async ({ generationId, pose, poseNumber }) => {
           try {
             // 사용자가 public/reference_poses/pose_{N}.png 에 포즈 참고 사진을 넣어두면 자동으로 같이 참고한다.
-            // 없으면 조용히 건너뛰고 텍스트 포즈 지시만으로 진행(기존 동작 그대로).
-            const poseReferenceImage = getPoseReferenceImage(poseNumber);
-            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage, draftMode ? 'low' : 'medium');
+            // 커스텀 자세(poseNumber=null)는 프리셋 번호가 없으므로 건너뛴다.
+            const poseReferenceImage = poseNumber ? getPoseReferenceImage(poseNumber) : null;
+            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage, draftMode ? 'low' : 'medium', !!customPose);
             const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
             await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt: pose.poseInstruction });
           } catch (err: any) {

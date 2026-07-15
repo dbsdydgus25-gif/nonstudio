@@ -24,6 +24,8 @@ interface VariationSectionProps {
 export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsumeIncomingImage }: VariationSectionProps) {
   const [sourceImage, setSourceImage] = useState<string | null>(null);
   const [variationCount, setVariationCount] = useState(4);
+  // 사용자가 직접 자세를 지정 — 비워두면 기존처럼 프리셋 포즈 중 랜덤으로 뽑힘
+  const [customPoseText, setCustomPoseText] = useState('');
 
   const [isRunning, setIsRunning] = useState(false);
   const [stageMsg, setStageMsg] = useState('');
@@ -105,6 +107,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
           variationCount,
           openaiApiKey: openaiKey,
           draftMode,
+          customPoseText: customPoseText.trim() || undefined,
         }),
       });
 
@@ -195,7 +198,9 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
         <div className="bg-white border border-gray-200 rounded-2xl p-5 flex items-center justify-between">
           <div>
             <div className="text-[13px] font-semibold text-gray-900 tracking-tight">룩북 컷 수</div>
-            <div className="text-[11px] text-gray-400 mt-0.5">서로 다른 포즈로 몇 장 만들지 선택합니다</div>
+            <div className="text-[11px] text-gray-400 mt-0.5">
+              {customPoseText.trim() ? '아래 지정한 자세로 몇 장 만들지 선택합니다' : '서로 다른 포즈로 몇 장 만들지 선택합니다'}
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -212,6 +217,28 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
               +
             </button>
           </div>
+        </div>
+      </section>
+
+      {/* 자세 직접 지정 — 비워두면 기존처럼 프리셋 포즈 중 랜덤으로 다양하게 뽑힌다 */}
+      <section className="space-y-4">
+        <div className="flex items-baseline gap-3">
+          <span className="text-[11px] font-semibold text-gray-300 tabular-nums">03</span>
+          <h2 className="text-sm font-semibold text-gray-900 tracking-tight">자세 지시</h2>
+          <span className="text-[11px] text-gray-400">선택 — 비워두면 프리셋 포즈 중 랜덤</span>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
+          <textarea
+            value={customPoseText}
+            onChange={(e) => setCustomPoseText(e.target.value)}
+            placeholder="예: 오른쪽을 바라보며 몸을 살짝 돌린 자세, 정면 응시 아님"
+            rows={3}
+            className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
+          />
+          <p className="text-[11px] text-gray-400 leading-relaxed">
+            입력하면 이 자세로 {variationCount}장을 만듭니다(포즈만 다른 여러 장이 아님). 방향(왼쪽 · 오른쪽 · 뒤)을 지정하면 몸과
+            카메라 앵글이 실제로 그 방향을 보도록 반영됩니다.
+          </p>
         </div>
       </section>
 
