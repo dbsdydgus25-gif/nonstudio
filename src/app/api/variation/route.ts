@@ -96,8 +96,19 @@ function buildVariationPrompt(
     );
   }
 
+  // (2026-07-15) 실제 사용자 배치 테스트로 3가지 구조적 문제 확인:
+  // (1) "뒷주머니에 손" 같은 손 위치 지시가 "뒤돌아선 백뷰"로 잘못 해석됨 — 명시적 방향/턴 단어가
+  //     없는데도 카메라 앵글 자체를 바꿔버림.
+  // (2) "45도 돌려서" 같은 각도 지시가 살짝 몸만 트는 정도로 약하게만 반영됨.
+  // (3) 원본 사진에서 손으로 들고 있던 가방/소품이, 팔짱 낀 자세처럼 두 손이 다 막힌 포즈에서
+  //     쥘 손이 없어지자 허공에 붕 뜬 채로 렌더링됨(어느 손/팔에도 걸쳐있지 않음).
   const poseLine = isCustomPose
-    ? `MANDATORY POSE (user-specified — this is the actual pose to render, not a suggestion; overrides any default frontal/standing assumption. If it specifies a direction or turn — e.g. facing left/right, three-quarter turn, back view — the body orientation AND camera framing must clearly and unambiguously show that turn, not a front-facing pose with only a slight head tilt. Apply only to body parts that are visible in Image 1): ${poseInstruction} (STRICT: ONE person, ONE pose, ONE photograph — never render several people or a multi-pose lineup.)`
+    ? `MANDATORY POSE (user-specified — this is the actual pose to render, not a suggestion; overrides any default frontal/standing assumption): ${poseInstruction}
+- Direction/turn: only change the camera-facing angle (three-quarter turn, side profile, back view, etc.) if the instruction explicitly uses a direction/turn word (e.g. "돌아서", "측면", "뒤돌아", "왼쪽/오른쪽을 보고", "back view", "profile"). A phrase about hand placement alone (e.g. "뒷주머니에 손" / "hand in back pocket") describes the HAND only — keep the body's camera-facing angle as it already is in Image 1 unless a separate direction word says otherwise; do NOT turn the whole body away from the camera just because a pocket or hand position is mentioned.
+- If the instruction does give an explicit direction/turn, and especially if it specifies a numeric angle (e.g. "45도"), the body orientation AND camera framing must clearly and unambiguously show that amount of turn — a partial turn readable at a glance, not just a front-facing pose with a slight head tilt.
+- Apply only to body parts that are visible in Image 1.
+- Accessory/prop handling: if Image 1 shows a hand-held item (bag, phone, etc.) and the new pose does not leave a hand free to hold it the same way (e.g. arms crossed, both hands in pockets), do NOT render it floating disconnected in mid-air with no visible support. Instead keep it physically plausible: hang it from the crook of the elbow, drape the strap over the forearm or shoulder, or adjust which hand/arm holds it — it must always look like gravity and a real grip are acting on it.
+(STRICT: ONE person, ONE pose, ONE photograph — never render several people or a multi-pose lineup.)`
     : `New pose (apply only to body parts that are visible in Image 1): ${poseInstruction}`;
 
   return [
