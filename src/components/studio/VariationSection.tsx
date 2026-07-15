@@ -115,6 +115,9 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
       try {
         startData = await res.json();
       } catch {
+        if (res.status === 413) {
+          throw new Error('업로드한 이미지 용량이 너무 큽니다. 사진 수를 줄이거나 다시 시도해주세요.');
+        }
         throw new Error('서버 응답을 읽을 수 없습니다. 잠시 후 다시 시도해주세요.');
       }
       if (!res.ok || !startData.success) {
