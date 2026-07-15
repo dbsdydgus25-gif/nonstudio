@@ -130,10 +130,15 @@ The following must match the spec and the reference photo exactly, never randomi
 
 // (2026-07-09) 모델 정보 페이지에서 스펙을 편집할 수 있도록 상수 조립 대신 함수로 전환 —
 // bodySpec 미지정 시 기존 PERSONAL_BODY_SPEC이 그대로 쓰여서 동작이 변하지 않는다.
+// (2026-07-15) MODEL LOCK 문구를 앞에 두면 "reshape 필수" 지시가 뒤로 밀려서 희석되는 회귀가
+// 있었음(사용자 신고: "모델 정보에 안맞게 몸이 나온다") — AI 피팅은 입력 이미지(image #1)가
+// 사용자의 실제 몸을 담은 사진이라, "이 사진의 실제 체형을 그대로 베끼지 말고 스펙으로 바꿔라"는
+// 지시가 가장 먼저, 가장 강하게 와야 한다(이 코드베이스의 반복된 교훈: 지시문의 "위치"가 반영
+// 여부를 크게 좌우함). MODEL LOCK 블록은 그 뒤에 붙여 스펙 자체는 동일하게 유지한다.
 function buildRestyleBodySpec(bodySpec: string): string {
   return `
+- CRITICAL: the input photo shows this person's ACTUAL current real-life body. You MUST reshape the output body to match the spec below — do NOT literally copy or preserve the input photo's real body shape, proportions, or build. The spec is the ground truth for the output body, the input photo is not.
 ${buildModelLockLines(bodySpec)}
-- Reshape the body in the input photo toward this spec — do not literally copy the input photo's actual body shape.
 - Keep the same face and general identity recognizable — this is a refinement of the same person, not a different person.
 `.trim();
 }

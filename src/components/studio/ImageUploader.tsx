@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useRef } from 'react';
+import { fileToCompressedDataUrl } from '@/lib/client-image';
 
 interface ImageUploaderProps {
   label: string;
@@ -28,24 +29,14 @@ export function ImageUploader({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      onImageChange(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    fileToCompressedDataUrl(file).then(onImageChange);
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (!file || !file.type.startsWith('image/')) return;
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      onImageChange(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    fileToCompressedDataUrl(file).then(onImageChange);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {

@@ -5,6 +5,7 @@ import { FittingResultViewer, type HistoryItem } from './FittingResultViewer';
 import type { SourcedCategory } from '@/lib/fitting-prompts';
 import { pollGenerationStatuses } from '@/lib/poll-generations';
 import { downloadResultImage } from '@/lib/download-image';
+import { fileToCompressedDataUrl } from '@/lib/client-image';
 
 interface ProductFittingSectionProps {
   geminiKey: string;
@@ -34,16 +35,6 @@ interface ColorJobItem {
   status: 'pending' | 'completed' | 'failed';
   imageUrl?: string;
   errorMessage?: string | null;
-}
-
-/** 파일을 base64 data URL로 읽는다 */
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
 }
 
 export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSendToVariation }: ProductFittingSectionProps) {
@@ -109,14 +100,14 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
 
   const handleAddFiles = async (files: FileList | null) => {
     if (!files?.length) return;
-    const dataUrls = await Promise.all(Array.from(files).map(fileToDataUrl));
+    const dataUrls = await Promise.all(Array.from(files).map(fileToCompressedDataUrl));
     setProductImages((prev) => [...prev, ...dataUrls].slice(0, 6));
     setColorPlans(null); // 이미지가 바뀌면 이전 추출 결과는 무효
   };
 
   const handleAddMaterialFiles = async (files: FileList | null) => {
     if (!files?.length) return;
-    const dataUrls = await Promise.all(Array.from(files).map(fileToDataUrl));
+    const dataUrls = await Promise.all(Array.from(files).map(fileToCompressedDataUrl));
     setMaterialImages((prev) => [...prev, ...dataUrls].slice(0, 4));
   };
 

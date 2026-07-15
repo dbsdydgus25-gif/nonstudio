@@ -11,16 +11,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-
-/** 파일을 base64 data URL로 읽는다 */
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
+import { fileToCompressedDataUrl } from '@/lib/client-image';
 
 interface ModelProfile {
   name: string;
@@ -520,7 +511,7 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
             onChange={async (e) => {
               const files = Array.from(e.target.files || []).slice(0, 6 - photoImages.length);
               if (files.length) {
-                const dataUrls = await Promise.all(files.map(fileToDataUrl));
+                const dataUrls = await Promise.all(files.map(fileToCompressedDataUrl));
                 setPhotoImages([...photoImages, ...dataUrls]);
               }
               e.target.value = '';
@@ -772,7 +763,7 @@ export function ModelProfileSection({ openaiKey, onNeedKeys, onModelReady }: Pro
               className="hidden"
               onChange={async (e) => {
                 const file = e.target.files?.[0];
-                if (file) setReferenceImage(await fileToDataUrl(file));
+                if (file) setReferenceImage(await fileToCompressedDataUrl(file));
                 e.target.value = '';
               }}
             />
