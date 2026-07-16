@@ -50,7 +50,15 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   const [colorPlans, setColorPlans] = useState<Array<{ label: string; color: string; box?: [number, number, number, number]; styleHints: Partial<Record<SourcedCategory, string>> }> | null>(null);
   const [category, setCategory] = useState<SourcedCategory>('top');
   const [poseHint, setPoseHint] = useState('');
+  // (2026-07-17) 여러 포즈 컷을 한 번에 뽑을 때 — 컷별로 자세를 따로 지정, 비워두면 랜덤 프리셋 포즈
+  const [poseCount, setPoseCount] = useState(1);
+  const [customPoseTexts, setCustomPoseTexts] = useState<string[]>(['', '', '', '']);
   const [styleHints, setStyleHints] = useState<Partial<Record<SourcedCategory, string>>>({});
+  // (2026-07-17) 소싱 제품이 아닌 슬롯(예: 상의)을 말로 설명하기 어려울 때 첨부하는 "이렇게
+  // 입혀줘" 참고 사진 — 슬롯당 최대 3장, 화면엔 "첨부됨 N장"으로만 간단히 표시
+  const [styleReferenceImages, setStyleReferenceImages] = useState<Partial<Record<SourcedCategory, string[]>>>({});
+  const styleRefFileInputRef = useRef<HTMLInputElement>(null);
+  const [styleRefTargetSlot, setStyleRefTargetSlot] = useState<SourcedCategory | null>(null);
   // 제품 자체의 핏/디테일 지시 (예: 머슬핏, 크롭 기장감) — 사진만으로 안 보이는 정보 보강
   const [productNotes, setProductNotes] = useState('');
   // 초안 품질(low) — medium 대비 약 1/4 비용, 코디/색상 확인용
@@ -111,6 +119,13 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     setMaterialImages((prev) => [...prev, ...dataUrls].slice(0, 4));
   };
 
+  // (2026-07-17) 슬롯별 "이렇게 입혀줘" 참고 사진 첨부 — 최대 3장, 초과분은 버림
+  const handleAddStyleRefFiles = async (slot: SourcedCategory, files: FileList | null) => {
+    if (!files?.length) return;
+    const dataUrls = await Promise.all(Array.from(files).map(fileToCompressedDataUrl));
+    setStyleReferenceImages((prev) => ({ ...prev, [slot]: [...(prev[slot] || []), ...dataUrls].slice(0, 3) }));
+  };
+
   // 색상 샘플 시트에서 색상 옵션 추출 (생성 전 미리보기) — 추출 후 색상별 코디 입력 가능
   const handleExtractColors = async () => {
     if (productImages.length === 0) {
@@ -153,7 +168,10 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     setCurrentResult(null);
     setColorJobs([]);
 
-    const userAdditions = poseHint.trim() ? `자세 지시: ${poseHint.trim()}` : '';
+    // 포즈 1장이면 기존과 동일하게 "자세" 텍스트 하나만, 여러 장이면 컷별 지시 배열을 그대로 전달
+    // (비운 컷은 서버에서 프리셋 포즈 중 랜덤으로 채움)
+    const effectiveCustomPoseTexts =
+      poseCount === 1 ? [poseHint.trim()] : customPoseTexts.slice(0, poseCount).map((t) => t.trim());
 
     try {
       const res = await fetch('/api/product-fitting', {
@@ -165,10 +183,16 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           category,
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
-          userAdditions,
+          poseCount,
+          customPoseTexts: effectiveCustomPoseTexts,
           productNotes: productNotes.trim() || undefined,
           draftMode,
           extractColors,
+          // 색상별 계획 모드에선 슬롯별 참고 사진은 아직 지원하지 않음(공통 모드에서만 적용)
+          styleReferenceImagesBySlot:
+            extractColors && colorPlans?.length
+              ? undefined
+              : Object.fromEntries(Object.entries(styleReferenceImages).filter(([, imgs]) => imgs && imgs.length)),
           // 추출 미리보기를 거쳤으면 색상별 계획(색상별 코디 덮어쓰기 포함)을 그대로 전달
           colorPlans: extractColors && colorPlans?.length
             ? colorPlans.map((p) => ({
@@ -525,21 +549,68 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
-            <div className="text-[11px] font-semibold text-gray-900 tracking-wide">자세</div>
-            <textarea
-              value={poseHint}
-              onChange={(e) => setPoseHint(e.target.value)}
-              placeholder="예: 손 주머니에 넣고 살짝 옆으로 돌아선 포즈"
-              rows={3}
-              className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
-            />
+        {/* 포즈 컷 수 — 재질/코디 분석 정보를 유지한 채 포즈만 바꿔 여러 장 생성 */}
+        <div className="bg-white border border-gray-200 rounded-2xl p-5 flex items-center justify-between">
+          <div>
+            <div className="text-[13px] font-semibold text-gray-900 tracking-tight">포즈 컷 수</div>
+            <div className="text-[11px] text-gray-400 mt-0.5">
+              {poseCount > 1 ? '컷마다 아래에서 자세를 지정할 수 있습니다' : '1장 이상이면 컷마다 다른 포즈로 생성됩니다'}
+            </div>
           </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setPoseCount((c) => Math.max(1, c - 1))}
+              className="w-9 h-9 rounded-lg border border-gray-200 hover:border-gray-400 text-gray-600 hover:text-gray-900 font-medium flex items-center justify-center text-sm transition"
+            >
+              −
+            </button>
+            <span className="text-[15px] font-semibold text-gray-900 w-10 text-center tabular-nums">{poseCount}장</span>
+            <button
+              type="button"
+              onClick={() => setPoseCount((c) => Math.min(4, c + 1))}
+              className="w-9 h-9 rounded-lg border border-gray-200 hover:border-gray-400 text-gray-600 hover:text-gray-900 font-medium flex items-center justify-center text-sm transition"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {poseCount === 1 ? (
+            <div className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
+              <div className="text-[11px] font-semibold text-gray-900 tracking-wide">자세</div>
+              <textarea
+                value={poseHint}
+                onChange={(e) => setPoseHint(e.target.value)}
+                placeholder="예: 손 주머니에 넣고 살짝 옆으로 돌아선 포즈"
+                rows={3}
+                className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
+              />
+            </div>
+          ) : (
+            Array.from({ length: poseCount }, (_, i) => (
+              <div key={i} className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
+                <div className="text-[11px] font-semibold text-gray-900 tracking-wide">자세 지시 {i + 1}</div>
+                <textarea
+                  value={customPoseTexts[i] ?? ''}
+                  onChange={(e) => {
+                    const next = [...customPoseTexts];
+                    next[i] = e.target.value;
+                    setCustomPoseTexts(next);
+                  }}
+                  placeholder="예: 오른쪽을 바라보며 몸을 살짝 돌린 자세 (비워두면 랜덤 포즈)"
+                  rows={3}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
+                />
+              </div>
+            ))
+          )}
 
           {!(extractColors && colorPlans) &&
             otherSlots.map((slot) => {
               const meta = STYLE_SLOT_META[slot];
+              const refCount = styleReferenceImages[slot]?.length || 0;
               return (
                 <div key={slot} className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
                   <div className="text-[11px] font-semibold text-gray-900 tracking-wide">{meta.label}</div>
@@ -550,11 +621,54 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                     rows={3}
                     className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
                   />
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[11px] text-gray-400">
+                      말로 설명하기 어려우면 참고 사진으로 대신 첨부하세요 (최대 3장)
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {refCount > 0 && (
+                        <>
+                          <span className="text-[11px] font-medium text-gray-700">첨부됨 {refCount}장</span>
+                          <button
+                            type="button"
+                            onClick={() => setStyleReferenceImages((prev) => ({ ...prev, [slot]: [] }))}
+                            className="text-[11px] font-medium text-gray-400 hover:text-gray-900 transition"
+                          >
+                            지우기
+                          </button>
+                        </>
+                      )}
+                      {refCount < 3 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStyleRefTargetSlot(slot);
+                            styleRefFileInputRef.current?.click();
+                          }}
+                          className="text-[11px] font-medium text-gray-500 hover:text-gray-900 transition"
+                        >
+                          + 참고 이미지
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               );
             })}
         </div>
       </section>
+
+      <input
+        ref={styleRefFileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (styleRefTargetSlot) handleAddStyleRefFiles(styleRefTargetSlot, e.target.files);
+          e.target.value = '';
+        }}
+      />
 
       {/* 실행 버튼 */}
       <section className="space-y-3">
@@ -586,9 +700,9 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
               {stageMsg}
             </span>
           ) : extractColors ? (
-            'AI 제품 피팅 생성 — 색상 자동 추출'
+            `AI 제품 피팅 생성 — 색상 자동 추출${poseCount > 1 ? ` × 포즈 ${poseCount}장` : ''}`
           ) : (
-            `AI 제품 피팅 생성 — 전신 1장${productImages.length > 1 ? ` (참고 사진 ${productImages.length}장 종합)` : ''}`
+            `AI 제품 피팅 생성 — 전신 ${poseCount}장${productImages.length > 1 ? ` (참고 사진 ${productImages.length}장 종합)` : ''}`
           )}
         </button>
       </section>

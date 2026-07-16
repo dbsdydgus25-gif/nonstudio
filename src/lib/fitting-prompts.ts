@@ -230,6 +230,26 @@ export function buildRestylePrompt(
   ].join('\n');
 }
 
+/**
+ * 포즈 풀에서 매번 무작위로 count개를 뽑는다 (AI 바리에이션 / AI 제품 피팅 공통) — 배열 앞
+ * N개를 고정 순서로만 쓰면 항상 같은 포즈만 나오는 문제를 방지한다. poseNumber는
+ * FULLBODY_POSES 배열상의 1-based 순번으로, public/poses/pose_{poseNumber}.png 참고 사진과
+ * 매칭하기 위해 셔플 이후에도 유지한다.
+ */
+export function pickRandomPoses(count: number): Array<{ pose: PoseVariation; poseNumber: number }> {
+  const pool = FULLBODY_POSES.map((pose, i) => ({ pose, poseNumber: i + 1 }));
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  if (count <= pool.length) return pool.slice(0, count);
+  const result = [...pool];
+  while (result.length < count) {
+    result.push(pool[Math.floor(Math.random() * pool.length)]);
+  }
+  return result;
+}
+
 // ─────────────────────────────────────────────────────────────────
 // AI 제품 피팅 (신규, 2026-07-09) — 착용 사진 없이 "제품 단독 이미지"만으로
 // 윤용현 모델(PERSONAL_BODY_SPEC + 아이덴티티 참고 사진)이 그 제품을 입은 화보를 생성한다.
@@ -256,6 +276,9 @@ export function buildProductFittingPrompt(
   extraProductImageCount: number = 0,
   /** (2026-07-14) 재질/텍스처 클로즈업 참고 사진 개수 — 색상 아닌 원단/버튼/스티치 디테일 전용 */
   materialImageCount: number = 0,
+  /** (2026-07-17) 소싱 제품이 아닌 나머지 슬롯(예: 상의)을 말로 설명하기 어려울 때, 슬롯별로
+   * "이렇게 입혀줘" 참고 사진을 첨부할 수 있다(슬롯당 최대 3장) — 순서는 SLOT_ORDER 고정. */
+  styleReferenceImageCountsBySlot?: Partial<Record<'top' | 'bottom' | 'shoes' | 'accessory', number>>,
 ): string {
   const stylingLines: string[] = [];
   if (stylingSuggestion.top) stylingLines.push(`- 상의: ${stylingSuggestion.top}`);
@@ -279,7 +302,22 @@ export function buildProductFittingPrompt(
   const extraProductImageNumbers = Array.from({ length: extraProductImageCount }, (_, i) => productImageNumber + 1 + i);
   const materialImageStart = productImageNumber + 1 + extraProductImageCount;
   const materialImageNumbers = Array.from({ length: materialImageCount }, (_, i) => materialImageStart + i);
-  const backgroundImageNumber = materialImageStart + materialImageCount;
+
+  // (2026-07-17) 슬롯별 스타일 참고 사진 — SLOT_ORDER 고정 순서로 번호를 배정한다(프론트에서도
+  // 같은 순서로 이미지를 보내야 서로 어긋나지 않음. product-fitting/route.ts 참고).
+  const SLOT_ORDER = ['top', 'bottom', 'shoes', 'accessory'] as const;
+  const styleRefStart = materialImageStart + materialImageCount;
+  let cursor = styleRefStart;
+  const styleRefNumbersBySlot: Partial<Record<(typeof SLOT_ORDER)[number], number[]>> = {};
+  for (const slot of SLOT_ORDER) {
+    const n = styleReferenceImageCountsBySlot?.[slot] || 0;
+    if (n > 0) {
+      styleRefNumbersBySlot[slot] = Array.from({ length: n }, (_, i) => cursor + i);
+      cursor += n;
+    }
+  }
+  const totalStyleRefCount = cursor - styleRefStart;
+  const backgroundImageNumber = styleRefStart + totalStyleRefCount;
 
   const backgroundLine = hasBackgroundReferenceImage
     ? `- Background: Image ${backgroundImageNumber} shows the EXACT target studio backdrop and lighting setup (soft frontal light, gentle top-down falloff, seamless cyclorama floor curve). Reproduce this exact background, light direction, and shadow softness on the subject. (${stylingSuggestion.background})`
@@ -325,6 +363,15 @@ export function buildProductFittingPrompt(
     ? `\n- Image${materialImageNumbers.length > 1 ? 's' : ''} ${materialImageNumbers.join(', ')} ${materialImageNumbers.length > 1 ? 'are' : 'is'} CLOSE-UP MATERIAL REFERENCE photo${materialImageNumbers.length > 1 ? 's' : ''} of this exact product's fabric/hardware — use ${materialImageNumbers.length > 1 ? 'them' : 'it'} ONLY to get the surface texture, weave/knit structure, sheen, and button/stitching/zipper detail exactly right. Do NOT use ${materialImageNumbers.length > 1 ? 'them' : 'it'} as a color reference — Image ${productImageNumber} remains the source of truth for color. If any part of a person (skin, neck, jaw, hand, face, hair) is visible in ${materialImageNumbers.length > 1 ? 'these material images' : 'this material image'}, COMPLETELY IGNORE that person — their identity, skin tone, and face must have ZERO influence on the output. The model's face and identity come ONLY from Image 1.`
     : '';
 
+  // (2026-07-17) 소싱 제품이 아닌 슬롯(예: 하의 소싱 시 상의)을 말로 설명하기 어려울 때 쓰는
+  // "이렇게 입혀줘" 참고 사진 — 색상/재질 참고(materialLine)와 달리 이건 그 슬롯 전체의
+  // 디자인/실루엣 자체를 지정하는 것이므로, 있으면 텍스트 스타일링 제안보다 우선한다.
+  const styleReferenceLines = SLOT_ORDER.map((slot) => {
+    const nums = styleRefNumbersBySlot[slot];
+    if (!nums?.length) return null;
+    return `- Image${nums.length > 1 ? 's' : ''} ${nums.join(', ')} ${nums.length > 1 ? 'are' : 'is'} a STYLING REFERENCE for the ${SLOT_LABELS[slot]} slot (not the sourced product) — dress the model in a ${SLOT_LABELS[slot]} matching this exact garment's design, color, and fit. Completely ignore any person, body, or background shown in ${nums.length > 1 ? 'these images' : 'this image'}. This reference image takes priority over any text styling description for the ${SLOT_LABELS[slot]} slot below when they conflict.`;
+  }).filter((l): l is string => !!l);
+
   return [
     '=== TASK: DRESS THE MODEL IN THE PRODUCT ===',
     `${identityBlock}`,
@@ -345,6 +392,7 @@ export function buildProductFittingPrompt(
     '',
     '=== NEW STYLING TO GENERATE (everything except the product above) ===',
     (stylingLines.length > 0 ? stylingLines.join('\n') : '- Complete the outfit naturally with cohesive, stylish items that flatter the product.') + mandateBlock,
+    ...styleReferenceLines,
     backgroundLine,
     '- The model\'s face must be fully and clearly visible — bare face, no eyewear or headwear of any kind unless a USER MANDATE above explicitly asks for it.',
     '',

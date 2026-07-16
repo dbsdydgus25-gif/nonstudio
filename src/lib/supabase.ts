@@ -9,7 +9,7 @@ export interface Database {
       generations: {
         Row: {
           id: string;
-          pipeline: 'fitting' | 'restyle';
+          pipeline: 'fitting' | 'restyle' | 'detail-video';
           mode_or_category: string | null;
           prompt: string;
           pose_label: string | null;
@@ -23,7 +23,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
-          pipeline: 'fitting' | 'restyle';
+          pipeline: 'fitting' | 'restyle' | 'detail-video';
           mode_or_category?: string | null;
           prompt: string;
           pose_label?: string | null;
@@ -37,7 +37,7 @@ export interface Database {
         };
         Update: {
           id?: string;
-          pipeline?: 'fitting' | 'restyle';
+          pipeline?: 'fitting' | 'restyle' | 'detail-video';
           mode_or_category?: string | null;
           prompt?: string;
           pose_label?: string | null;
@@ -54,7 +54,7 @@ export interface Database {
       reference_images: {
         Row: {
           id: string;
-          pipeline: 'fitting' | 'restyle';
+          pipeline: 'fitting' | 'restyle' | 'detail-video';
           label: string | null;
           storage_path: string;
           is_active: boolean;
@@ -63,7 +63,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
-          pipeline: 'fitting' | 'restyle';
+          pipeline: 'fitting' | 'restyle' | 'detail-video';
           label?: string | null;
           storage_path: string;
           is_active?: boolean;
@@ -72,7 +72,7 @@ export interface Database {
         };
         Update: {
           id?: string;
-          pipeline?: 'fitting' | 'restyle';
+          pipeline?: 'fitting' | 'restyle' | 'detail-video';
           label?: string | null;
           storage_path?: string;
           is_active?: boolean;

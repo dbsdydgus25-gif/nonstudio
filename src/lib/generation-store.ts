@@ -7,7 +7,7 @@
 
 import { getSupabaseAdmin, GENERATIONS_BUCKET } from './supabase';
 
-export type Pipeline = 'fitting' | 'restyle';
+export type Pipeline = 'fitting' | 'restyle' | 'detail-video';
 
 interface SaveGenerationInput {
   pipeline: Pipeline;
@@ -22,6 +22,7 @@ interface SaveGenerationInput {
 function extFromMime(mime: string): string {
   if (mime.includes('png')) return 'png';
   if (mime.includes('webp')) return 'webp';
+  if (mime.includes('gif')) return 'gif';
   return 'jpg';
 }
 

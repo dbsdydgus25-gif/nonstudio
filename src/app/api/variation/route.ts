@@ -14,58 +14,20 @@
 import { NextResponse } from 'next/server';
 import { after } from 'next/server';
 import OpenAI, { toFile } from 'openai';
-import { FULLBODY_POSES } from '@/lib/fitting-prompts';
+import { FULLBODY_POSES, pickRandomPoses } from '@/lib/fitting-prompts';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { getPoseReferenceImage } from '@/lib/pose-reference';
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { downscaleImage, withImageRetry, runWithConcurrency } from '@/lib/image-utils';
+import { resultImageToBuffer } from '@/lib/image-source';
 
 export const runtime = 'nodejs';
 // Vercel Hobby+Fluid Compute는 함수당 최대 300초까지 허용한다 — 포즈 4개를 병렬로 생성해도
 // 개별 gpt-image-2 호출이 90~100초라 여유있게 잡는다.
 export const maxDuration = 280;
 
-function parseBase64Image(dataUrl: string): { buffer: Buffer; mimeType: string } {
-  if (dataUrl.startsWith('data:')) {
-    const [header, data] = dataUrl.split(',');
-    const mimeType = header.match(/data:([^;]+)/)?.[1] || 'image/jpeg';
-    return { buffer: Buffer.from(data, 'base64'), mimeType };
-  }
-  return { buffer: Buffer.from(dataUrl, 'base64'), mimeType: 'image/jpeg' };
-}
-
 async function toOpenAIFile(buffer: Buffer, mimeType: string, name: string) {
   return await toFile(buffer, name, { type: mimeType });
-}
-
-/**
- * 포즈 풀에서 매번 무작위로 count개를 뽑는다 (기존엔 배열 앞 N개를 고정 순서로만 써서 항상 같은
- * 포즈만 나오던 버그가 있었음). poseNumber는 FULLBODY_POSES 배열상의 1-based 순번으로,
- * public/poses/pose_{poseNumber}.png 참고 사진과 매칭하기 위해 셔플 이후에도 유지한다.
- */
-function pickRandomPoses(count: number): Array<{ pose: (typeof FULLBODY_POSES)[number]; poseNumber: number }> {
-  const pool = FULLBODY_POSES.map((pose, i) => ({ pose, poseNumber: i + 1 }));
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  if (count <= pool.length) return pool.slice(0, count);
-  const result = [...pool];
-  while (result.length < count) {
-    result.push(pool[Math.floor(Math.random() * pool.length)]);
-  }
-  return result;
-}
-
-/** OpenAI 응답 이미지(URL 또는 base64 data URL)를 Buffer로 통일 — Supabase 업로드용 */
-async function resultImageToBuffer(imageUrl: string): Promise<{ buffer: Buffer; mimeType: string }> {
-  if (imageUrl.startsWith('data:')) {
-    return parseBase64Image(imageUrl);
-  }
-  const res = await fetch(imageUrl);
-  const arrayBuffer = await res.arrayBuffer();
-  const mimeType = res.headers.get('content-type') || 'image/png';
-  return { buffer: Buffer.from(arrayBuffer), mimeType };
 }
 
 // (2026-07-09) 재질/색감이 미묘하게 계속 바뀌는 문제가 있었다 — 원인을 다시 보니, 이전
@@ -179,7 +141,7 @@ async function runSingleVariation(
 
 export async function POST(req: Request) {
   try {
-    const { sourceImageBase64, variationCount, openaiApiKey, draftMode, customPoseTexts } = await req.json();
+    const { sourceImageBase64, variationCount, openaiApiKey, draftMode, customPoseTexts, customBackgroundImageBase64 } = await req.json();
 
     if (!sourceImageBase64) {
       return NextResponse.json({ success: false, error: 'AI 피팅 결과 사진 또는 직접 업로드한 사진이 필요합니다.' }, { status: 400 });
@@ -237,8 +199,11 @@ export async function POST(req: Request) {
       // resultImageToBuffer는 URL/data: 둘 다 처리하므로 이걸로 통일한다.
       const { buffer: sourceBuf, mimeType: sourceMime } = await resultImageToBuffer(sourceImageBase64);
       const openai = new OpenAI({ apiKey: oKey });
-      // 배경은 예외 없이 고정 흰색 스튜디오 참고 사진을 사용한다 (AI 피팅과 동일 기준)
-      const backgroundReferenceImage = getDefaultBackgroundReferenceImage();
+      // (2026-07-17) 사용자가 원하는 배경/장소 사진을 올리면 그걸 배경 참고로 쓰고,
+      // 없으면 기존과 동일하게 고정 흰색 스튜디오 참고 사진을 기본값으로 사용한다.
+      const backgroundReferenceImage = customBackgroundImageBase64
+        ? await resultImageToBuffer(customBackgroundImageBase64)
+        : getDefaultBackgroundReferenceImage();
 
       // 전체 병렬 대신 3개씩 배치 — 이미지 API 분당 한도(429)로 일부 포즈만 성공하는 것 방지
       await runWithConcurrency(jobs, 3, async ({ generationId, pose, poseNumber }) => {

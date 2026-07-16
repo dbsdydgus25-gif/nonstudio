@@ -23,6 +23,8 @@ interface VariationSectionProps {
 
 export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsumeIncomingImage }: VariationSectionProps) {
   const [sourceImage, setSourceImage] = useState<string | null>(null);
+  // (2026-07-17) 비워두면 기존처럼 고정 흰 배경 스튜디오 사진이 기본으로 사용됨
+  const [customBackgroundImage, setCustomBackgroundImage] = useState<string | null>(null);
   const [variationCount, setVariationCount] = useState(4);
   // 컷마다 자세를 따로 지정 — 특정 컷을 비워두면 그 컷만 기존처럼 프리셋 포즈 중 랜덤으로 뽑힘.
   // 최대 컷 수(4)만큼 고정 슬롯을 두고, 실제로는 variationCount개만 화면에 노출/전송한다.
@@ -109,6 +111,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
           openaiApiKey: openaiKey,
           draftMode,
           customPoseTexts: customPoseTexts.slice(0, variationCount).map((t) => t.trim()),
+          customBackgroundImageBase64: customBackgroundImage || undefined,
         }),
       });
 
@@ -193,10 +196,26 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
         />
       </section>
 
-      {/* 바리에이션 수 */}
+      {/* 배경/장소 */}
       <section className="space-y-4">
         <div className="flex items-baseline gap-3">
           <span className="text-[11px] font-semibold text-gray-300 tabular-nums">02</span>
+          <h2 className="text-sm font-semibold text-gray-900 tracking-tight">배경/장소</h2>
+          <span className="text-[11px] text-gray-400">선택 — 비워두면 기본 흰 배경 스튜디오</span>
+        </div>
+        <ImageUploader
+          label="원하는 배경/장소 사진"
+          subLabel="이 사진의 배경과 조명만 참고해서 합성됩니다 — 인물·의상은 기준 사진 그대로 유지"
+          image={customBackgroundImage}
+          onImageChange={setCustomBackgroundImage}
+          badgeText="배경"
+        />
+      </section>
+
+      {/* 바리에이션 수 */}
+      <section className="space-y-4">
+        <div className="flex items-baseline gap-3">
+          <span className="text-[11px] font-semibold text-gray-300 tabular-nums">03</span>
           <h2 className="text-sm font-semibold text-gray-900 tracking-tight">컷 수</h2>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-5 flex items-center justify-between">
@@ -229,7 +248,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
       {/* 자세 직접 지정 — 컷마다 따로 지정 가능, 비워둔 컷은 프리셋 포즈 중 랜덤으로 뽑힌다 */}
       <section className="space-y-4">
         <div className="flex items-baseline gap-3">
-          <span className="text-[11px] font-semibold text-gray-300 tabular-nums">03</span>
+          <span className="text-[11px] font-semibold text-gray-300 tabular-nums">04</span>
           <h2 className="text-sm font-semibold text-gray-900 tracking-tight">자세 지시</h2>
           <span className="text-[11px] text-gray-400">선택 — 컷별로 지정, 비워두면 그 컷은 프리셋 포즈 중 랜덤</span>
         </div>

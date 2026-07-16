@@ -12,7 +12,7 @@ import { NextResponse } from 'next/server';
 import { after } from 'next/server';
 import OpenAI, { toFile } from 'openai';
 import { analyzeGarment, generateStylingSuggestion, type StyleHintsBySlot } from '@/lib/garment-agent';
-import { buildProductFittingPrompt, DEFAULT_STUDIO_BACKGROUND, type SourcedCategory } from '@/lib/fitting-prompts';
+import { buildProductFittingPrompt, DEFAULT_STUDIO_BACKGROUND, pickRandomPoses, type SourcedCategory } from '@/lib/fitting-prompts';
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { getModelProfile, getModelIdentityImage, buildBodySpecFromProfile } from '@/lib/model-profile';
@@ -56,6 +56,9 @@ async function runSingleProductFitting(
   otherProductImages: Array<{ buffer: Buffer; mimeType: string }> = [],
   /** (2026-07-14) 재질/텍스처 클로즈업 참고 사진 — 색상 아닌 원단/버튼/스티치 디테일 전용 */
   materialImages: Array<{ buffer: Buffer; mimeType: string }> = [],
+  /** (2026-07-17) 소싱 제품이 아닌 슬롯(예: 상의) "이렇게 입혀줘" 참고 사진 — SLOT_ORDER(top,bottom,shoes,accessory)
+   * 순서로 이미 정렬되어 들어온다. buildProductFittingPrompt의 styleReferenceImageCountsBySlot과 순서가 반드시 일치해야 함. */
+  styleReferenceImages: Array<{ buffer: Buffer; mimeType: string }> = [],
 ): Promise<string> {
   // 입력 이미지는 1024px로 다운스케일 — 업로드 페이로드/입력 토큰 절감 (출력 품질과 무관)
   const parsed = parseBase64Image(productImageBase64);
@@ -70,6 +73,11 @@ async function runSingleProductFitting(
   const materialFiles = await Promise.all(
     materialImages.map((img, i) =>
       toOpenAIFile(img.buffer, img.mimeType, `material-${i}.${img.mimeType.split('/')[1] || 'jpg'}`),
+    ),
+  );
+  const styleReferenceFiles = await Promise.all(
+    styleReferenceImages.map((img, i) =>
+      toOpenAIFile(img.buffer, img.mimeType, `style-ref-${i}.${img.mimeType.split('/')[1] || 'jpg'}`),
     ),
   );
 
@@ -91,6 +99,7 @@ async function runSingleProductFitting(
     productFile,
     ...otherProductFiles,
     ...materialFiles,
+    ...styleReferenceFiles,
     ...(backgroundFile ? [backgroundFile] : []),
   ];
 
@@ -128,6 +137,9 @@ export async function POST(req: Request) {
       colorPlans,
       productNotes,
       draftMode,
+      poseCount,
+      customPoseTexts,
+      styleReferenceImagesBySlot,
     }: {
       /** 제품 사진 — extractColors/colorPlans 없으면 전부 "같은 제품의 다른 각도" 참고 사진으로 함께 쓰인다 */
       productImagesBase64: string[];
@@ -156,6 +168,14 @@ export async function POST(req: Request) {
         /** 시트 안 해당 색상 위치 (0~1000 정규화, 추출 시 획득) — 있으면 그 영역만 잘라서 생성 */
         box?: [number, number, number, number];
       }>;
+      /** (2026-07-17) 색상(또는 기본 1건)당 뽑을 포즈 컷 수 — 1~4, 기본 1. AI 바리에이션과 달리
+       * 재질/코디 분석 정보가 이미 다 있는 상태로 포즈만 바꿔 여러 장 생성한다. */
+      poseCount?: number;
+      /** 컷별 자세 지시(비우면 그 컷은 프리셋 포즈 중 랜덤) — poseCount>1일 때만 의미 있음 */
+      customPoseTexts?: string[];
+      /** (2026-07-17) 소싱 제품이 아닌 슬롯(예: 상의)을 말로 설명하기 어려울 때 첨부하는
+       * "이렇게 입혀줘" 참고 사진 — 슬롯당 최대 3장 */
+      styleReferenceImagesBySlot?: Partial<Record<SourcedCategory, string[]>>;
     } = await req.json();
 
     if (!productImagesBase64?.length) {
@@ -218,18 +238,57 @@ export async function POST(req: Request) {
       ];
     }
 
-    // job마다 pending 행을 만들어 id 배열을 즉시 반환한다.
-    const jobs = await Promise.all(
-      jobPlans.map(async (plan) => ({
-        generationId: await createPendingGeneration({
-          pipeline: 'restyle',
-          modeOrCategory: 'product',
-          poseLabel: plan.label,
-          prompt: '',
+    // (2026-07-17) 색상(job)당 뽑을 포즈 컷 수 — AI 바리에이션과 달리 재질/코디 분석 정보가
+    // 이미 있는 상태에서 포즈만 바꿔 여러 장을 만든다(바리에이션은 그 정보가 없어 handoff 후
+    // 디테일이 흐려지는 문제가 있었음). 1장뿐이면 기존 동작과 완전히 동일하다.
+    const resolvedPoseCount = Math.min(4, Math.max(1, Number(poseCount) || 1));
+    const customPoseTextsArr: string[] = Array.isArray(customPoseTexts)
+      ? customPoseTexts.slice(0, resolvedPoseCount).map((t) => (typeof t === 'string' ? t.trim() : ''))
+      : [];
+    function resolvePoseTextsForOneColor(): string[] {
+      if (resolvedPoseCount <= 1) return [customPoseTextsArr[0] || userAdditions?.trim() || ''];
+      const emptySlotCount = Array.from({ length: resolvedPoseCount }, (_, i) => customPoseTextsArr[i] || '').filter(
+        (t) => !t,
+      ).length;
+      const randomPicks = pickRandomPoses(emptySlotCount);
+      let cursor = 0;
+      return Array.from({ length: resolvedPoseCount }, (_, i) => {
+        const custom = customPoseTextsArr[i];
+        if (custom) return custom;
+        const picked = randomPicks[cursor];
+        cursor += 1;
+        return picked.pose.poseInstruction;
+      });
+    }
+
+    // job마다(색상×포즈 조합마다) pending 행을 만들어 id 배열을 즉시 반환한다.
+    // planIdx로 같은 색상에서 나온 포즈 컷들을 묶어, after()에서 분석(재질/코디)은 색상당
+    // 한 번만 하고 이미지 생성만 포즈 수만큼 반복한다 — 안 그러면 Gemini 분석 호출이
+    // 포즈 수만큼 불필요하게 곱연산되어 비용이 새어나간다.
+    const jobs = (
+      await Promise.all(
+        jobPlans.map(async (plan, planIdx) => {
+          const poseTexts = resolvePoseTextsForOneColor();
+          return Promise.all(
+            poseTexts.map(async (poseInstruction, poseIdx) => {
+              const unitLabel = resolvedPoseCount > 1 ? `${plan.label} · 포즈 ${poseIdx + 1}` : plan.label;
+              return {
+                generationId: await createPendingGeneration({
+                  pipeline: 'restyle',
+                  modeOrCategory: 'product',
+                  poseLabel: unitLabel,
+                  prompt: '',
+                }),
+                ...plan,
+                label: unitLabel,
+                planIdx,
+                poseInstruction,
+              };
+            }),
+          );
         }),
-        ...plan,
-      })),
-    );
+      )
+    ).flat();
 
     after(async () => {
       const openai = new OpenAI({ apiKey: openaiApiKey });
@@ -252,82 +311,124 @@ export async function POST(req: Request) {
         }),
       );
 
-      // 전체 병렬 대신 3개씩 배치 실행 — OpenAI 이미지 분당 한도(429)로 일부 색상만
-      // 성공하던 문제 방지. 실패한 호출도 과금될 수 있어 성공률이 곧 비용 절감이다.
-      await runWithConcurrency(jobs, 3, async ({ generationId, imageBase64, colorVariant, styleHints, otherAngles }) => {
-          try {
-            // 색상 옵션마다 색/디테일이 다르므로 이미지별로 개별 분석한다 — 같은 제품의 다른
-            // 각도(otherAngles)는 색상/핏 분석에 함께 쓰고, 재질 사진은 텍스처 전용으로 분리한다.
-            const garmentAnalysis = await analyzeGarment(
-              [imageBase64, ...(otherAngles || [])],
-              geminiApiKey,
-              undefined,
-              undefined,
-              sourcedCategory,
-              openaiApiKey,
-              materialImagesBase64?.length ? materialImagesBase64 : undefined,
-            );
+      // (2026-07-17) 소싱 제품이 아닌 슬롯(예: 상의) "이렇게 입혀줘" 참고 사진 — 슬롯당 최대
+      // 3장, 색상/포즈와 무관하게 공통이라 한 번만 다운스케일한다. SLOT_ORDER 고정 순서로
+      // buildProductFittingPrompt의 번호 배정과 반드시 같은 순서를 유지해야 한다.
+      const SLOT_ORDER: SourcedCategory[] = ['top', 'bottom', 'shoes', 'accessory'];
+      const styleReferenceCountsBySlot: Partial<Record<SourcedCategory, number>> = {};
+      const styleReferenceImagesFlat: Array<{ buffer: Buffer; mimeType: string }> = [];
+      for (const slot of SLOT_ORDER) {
+        const imgs = (styleReferenceImagesBySlot?.[slot] || []).slice(0, 3);
+        if (imgs.length === 0) continue;
+        styleReferenceCountsBySlot[slot] = imgs.length;
+        const downs = await Promise.all(
+          imgs.map(async (b64) => {
+            const parsed = parseBase64Image(b64);
+            return downscaleImage(parsed.buffer, parsed.mimeType);
+          }),
+        );
+        styleReferenceImagesFlat.push(...downs);
+      }
 
-            // 색상마다 어울리는 코디가 다를 수 있음 — 색상별 지시(styleHints)가 있는 슬롯은
-            // 공통 지시(userPreferenceHints)를 덮어쓰고, 비어 있는 슬롯은 공통을 그대로 쓴다.
-            const mergedHints: StyleHintsBySlot = { ...userPreferenceHints };
-            for (const [slot, hint] of Object.entries(styleHints || {})) {
-              if (typeof hint === 'string' && hint.trim()) mergedHints[slot as keyof StyleHintsBySlot] = hint.trim();
-            }
+      // planIdx로 묶어서, 색상당 분석(재질/코디)은 한 번만 수행하고 그 결과를 포즈 컷마다 재사용한다.
+      const jobsByPlan = new Map<number, typeof jobs>();
+      for (const job of jobs) {
+        const arr = jobsByPlan.get(job.planIdx) || [];
+        arr.push(job);
+        jobsByPlan.set(job.planIdx, arr);
+      }
 
-            // 색상 시트 모드에서는 분석 결과의 color가 여러 색을 뭉뚱그려 설명함 —
-            // 코디 자동 제안과 프롬프트 스펙이 "이번에 생성할 색상" 기준으로 잡히도록 교체한다.
-            const analysisForThisColor = colorVariant ? { ...garmentAnalysis, color: colorVariant } : garmentAnalysis;
+      // 색상(플랜) 단위는 2개씩, 그 안에서 포즈 컷도 2개씩 병렬 — 이전(3개 동시)과 비슷한
+      // 총 동시 호출 수를 유지하면서 429로 인한 재시도(=비용 낭비)를 방지한다.
+      await runWithConcurrency(Array.from(jobsByPlan.values()), 2, async (unitsForThisPlan) => {
+        const first = unitsForThisPlan[0];
+        try {
+          // 색상 옵션마다 색/디테일이 다르므로 이미지별로 개별 분석한다 — 같은 제품의 다른
+          // 각도(otherAngles)는 색상/핏 분석에 함께 쓰고, 재질 사진은 텍스처 전용으로 분리한다.
+          const garmentAnalysis = await analyzeGarment(
+            [first.imageBase64, ...(first.otherAngles || [])],
+            geminiApiKey,
+            undefined,
+            undefined,
+            sourcedCategory,
+            openaiApiKey,
+            materialImagesBase64?.length ? materialImagesBase64 : undefined,
+          );
 
-            const stylingSuggestion = await generateStylingSuggestion(
-              sourcedCategory,
-              analysisForThisColor,
-              '제품 단독 사진 (착용자 없음) — 모델 포즈는 자유로운 커머셜 스탠딩 포즈로 새로 생성됨',
-              geminiApiKey,
-              openaiApiKey,
-              mergedHints,
-            );
-            // 배경은 예외 없이 고정 흰색 스튜디오 (요구사항)
-            stylingSuggestion.background = DEFAULT_STUDIO_BACKGROUND;
-
-            const otherAngleImagesDownscaled = await Promise.all(
-              (otherAngles || []).map(async (b64) => {
-                const parsed = parseBase64Image(b64);
-                return downscaleImage(parsed.buffer, parsed.mimeType);
-              }),
-            );
-
-            const prompt = buildProductFittingPrompt(
-              sourcedCategory,
-              analysisForThisColor,
-              stylingSuggestion,
-              userAdditions || '',
-              !!backgroundReferenceImage,
-              !!identityReferenceImage,
-              bodySpec,
-              colorVariant,
-              productNotes,
-              mergedHints,
-              otherAngleImagesDownscaled.length,
-              materialImagesDownscaled.length,
-            );
-
-            const imageUrl = await runSingleProductFitting(
-              openai,
-              imageBase64,
-              prompt,
-              identityReferenceImage,
-              backgroundReferenceImage,
-              draftMode ? 'low' : 'medium',
-              otherAngleImagesDownscaled,
-              materialImagesDownscaled,
-            );
-            const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
-            await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt });
-          } catch (err: any) {
-            console.error('[api/product-fitting][after] 생성 실패:', err);
-            await markGenerationFailed(generationId, err?.message || 'AI 제품 피팅 처리 중 오류가 발생했습니다.');
+          // 색상마다 어울리는 코디가 다를 수 있음 — 색상별 지시(styleHints)가 있는 슬롯은
+          // 공통 지시(userPreferenceHints)를 덮어쓰고, 비어 있는 슬롯은 공통을 그대로 쓴다.
+          const mergedHints: StyleHintsBySlot = { ...userPreferenceHints };
+          for (const [slot, hint] of Object.entries(first.styleHints || {})) {
+            if (typeof hint === 'string' && hint.trim()) mergedHints[slot as keyof StyleHintsBySlot] = hint.trim();
           }
+
+          // 색상 시트 모드에서는 분석 결과의 color가 여러 색을 뭉뚱그려 설명함 —
+          // 코디 자동 제안과 프롬프트 스펙이 "이번에 생성할 색상" 기준으로 잡히도록 교체한다.
+          const analysisForThisColor = first.colorVariant ? { ...garmentAnalysis, color: first.colorVariant } : garmentAnalysis;
+
+          const stylingSuggestion = await generateStylingSuggestion(
+            sourcedCategory,
+            analysisForThisColor,
+            '제품 단독 사진 (착용자 없음) — 모델 포즈는 자유로운 커머셜 스탠딩 포즈로 새로 생성됨',
+            geminiApiKey,
+            openaiApiKey,
+            mergedHints,
+          );
+          // 배경은 예외 없이 고정 흰색 스튜디오 (요구사항)
+          stylingSuggestion.background = DEFAULT_STUDIO_BACKGROUND;
+
+          const otherAngleImagesDownscaled = await Promise.all(
+            (first.otherAngles || []).map(async (b64) => {
+              const parsed = parseBase64Image(b64);
+              return downscaleImage(parsed.buffer, parsed.mimeType);
+            }),
+          );
+
+          // 분석/코디는 이 색상에서 한 번만 계산했고, 여기서부터는 포즈 컷마다 프롬프트의
+          // 포즈 지시만 바꿔서 이미지 생성만 반복한다.
+          await runWithConcurrency(unitsForThisPlan, 2, async ({ generationId, imageBase64, colorVariant, poseInstruction }) => {
+            try {
+              const prompt = buildProductFittingPrompt(
+                sourcedCategory,
+                analysisForThisColor,
+                stylingSuggestion,
+                poseInstruction || '',
+                !!backgroundReferenceImage,
+                !!identityReferenceImage,
+                bodySpec,
+                colorVariant,
+                productNotes,
+                mergedHints,
+                otherAngleImagesDownscaled.length,
+                materialImagesDownscaled.length,
+                styleReferenceCountsBySlot,
+              );
+
+              const imageUrl = await runSingleProductFitting(
+                openai,
+                imageBase64,
+                prompt,
+                identityReferenceImage,
+                backgroundReferenceImage,
+                draftMode ? 'low' : 'medium',
+                otherAngleImagesDownscaled,
+                materialImagesDownscaled,
+                styleReferenceImagesFlat,
+              );
+              const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
+              await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt });
+            } catch (err: any) {
+              console.error('[api/product-fitting][after] 포즈 생성 실패:', err);
+              await markGenerationFailed(generationId, err?.message || 'AI 제품 피팅 처리 중 오류가 발생했습니다.');
+            }
+          });
+        } catch (err: any) {
+          // 분석 자체가 실패하면 이 색상의 모든 포즈 컷을 실패 처리한다.
+          console.error('[api/product-fitting][after] 분석 실패:', err);
+          for (const unit of unitsForThisPlan) {
+            await markGenerationFailed(unit.generationId, err?.message || 'AI 제품 피팅 분석 중 오류가 발생했습니다.');
+          }
+        }
       });
     });
 
