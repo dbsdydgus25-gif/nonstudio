@@ -69,7 +69,15 @@ CRITICAL RULES:
 1. Describe ONLY the single physical garment itself.
 2. Do NOT describe the image layout, photo composition, multiple views, collages, split-screen, or models (e.g., do NOT write "The photo shows a front and back view of a model", "collage", or "diptych").
 3. Describe the item as a single individual garment (e.g., "A pair of washed blue denim jeans").
-4. For jeans/denim: Be extremely detailed about the washing texture, sandwashed fading on thighs/knees, vertical slub lines, whiskering lines at the crotch, and exact denim twill texture grain.
+4. MANDATORY STRUCTURAL SCAN — before writing "details", actually look at the garment piece by piece and identify EVERY one of the following if present, with its exact location (e.g. "left thigh", "back right pocket", "center chest", "outer side seam"):
+   - Seams and panel/paneling lines (where fabric pieces are joined — e.g. a contrast yoke, a side panel, a curved seam)
+   - Pockets: type (cargo flap pocket, welt pocket, patch pocket, coin pocket, slit pocket) and exact placement on the garment
+   - Any logo, brand patch, embroidery, print, or label — exact placement (e.g. "small woven patch on the left thigh cargo pocket flap", "embroidered logo on upper left chest")
+   - Closures: buttons (count + placement), zippers, drawstrings, toggles, snaps, velcro — exact placement and count
+   - Any topstitching, contrast stitching color, or decorative stitch lines
+   - Hem style (raw hem, cuffed/rolled, elastic, drawcord)
+   This structural scan applies to EVERY garment type, not only denim — cargo pants, shorts, jackets, and knitwear all have real construction details that must be found and reported; do not skip this because the item isn't denim.
+5. For jeans/denim specifically, ALSO be extremely detailed about the washing texture, sandwashed fading on thighs/knees, vertical slub lines, whiskering lines at the crotch, and exact denim twill texture grain — in addition to the structural scan above, not instead of it.
 
 Return ONLY valid JSON, no markdown, no explanation:
 
@@ -78,7 +86,7 @@ Return ONLY valid JSON, no markdown, no explanation:
   "material": "fabric composition (e.g., 'heavyweight rigid 100% cotton denim twill', 'linen-rayon blend')",
   "fitType": "ONE of: oversized, boxy, regular, slim, wide-leg, skinny, straight, unknown",
   "category": "ONE of: top, bottom, outer, dress, shoes, bag, accessory, unknown",
-  "details": "list all design details and texture marks. Emphasize: vintage washing effects, sandwashed thighs/knees, whiskering at crotch, pocket distressing, hem wear. DO NOT mention brand tags, hangers, or store price cards/strings.",
+  "details": "the full result of the MANDATORY STRUCTURAL SCAN above — every seam/panel line, every pocket (type + exact location), every logo/patch/print (exact location), every closure (type + count + location), stitching, hem style. For denim, also add: vintage washing effects, sandwashed thighs/knees, whiskering at crotch, pocket distressing, hem wear. DO NOT mention brand tags, hangers, or store price cards/strings — those are packaging, not garment construction.",
   "texture": "surface texture description (e.g., 'coarse diagonal rigid denim twill weave, high-contrast wash grain', 'smooth cotton knit')",
   "lightReaction": "how fabric reacts to light (e.g., 'matte finish, no sheen', 'subtle metallic sheen at highlights', 'slight luster, semi-matte')",
   "chestWidth": "estimated chest measurement if visible (e.g., '54cm', '58cm') or null",
@@ -195,7 +203,8 @@ CRITICAL RULES:
 1. Describe ONLY the single physical garment itself.
 2. Do NOT describe the image layout, photo composition, multiple views, collages, split-screen, or models (e.g., do NOT write "The photo shows a front and back view of a model", "collage", or "diptych").
 3. Describe the item as a single individual garment (e.g. "A pair of vintage washed jeans").
-4. For jeans/denim: Be extremely detailed about the washing texture, sandwashed fading on thighs/knees, vertical slub lines, whiskering lines at the crotch, and exact denim twill texture grain.
+4. MANDATORY STRUCTURAL SCAN — before writing "details", look at the garment piece by piece and identify every seam/panel line, every pocket (type: cargo/welt/patch/coin/slit + exact location), every logo/brand patch/embroidery/print (exact location, e.g. "left thigh cargo pocket flap"), every closure (buttons/zippers/drawstrings/toggles/snaps, count + location), topstitching/contrast stitching, and hem style. This applies to EVERY garment type (cargo pants, shorts, jackets, knitwear), not only denim.
+5. For jeans/denim specifically, ALSO be extremely detailed about the washing texture, sandwashed fading on thighs/knees, vertical slub lines, whiskering lines at the crotch, and exact denim twill texture grain — in addition to the structural scan, not instead of it.
 
 The JSON must follow this exact schema:
 {
@@ -203,7 +212,7 @@ The JSON must follow this exact schema:
   "material": "fabric description (e.g. heavyweight rigid 100% cotton denim twill, lightweight cotton blend)",
   "fitType": "slim" | "regular" | "oversized" | "loose" | "wide-leg",
   "category": "top" | "bottom" | "outer" | "dress" | "shoes" | "bag" | "accessory",
-  "details": "detailed list of design highlights: pocket locations, vintage washes, sandwashed thighs/knees, whiskering at crotch, pocket distressing, hem wear. DO NOT include hangers, strings, price cards, or store tags.",
+  "details": "the full result of the MANDATORY STRUCTURAL SCAN: every seam/panel line, every pocket (type + exact location), every logo/patch/print (exact location), every closure (type + count + location), stitching, hem style. For denim, also add vintage washes/sandwashed thighs/whiskering/pocket distressing/hem wear. DO NOT include hangers, strings, price cards, or store tags.",
   "texture": "fabric texture description (e.g. coarse diagonal rigid denim twill weave, high-contrast wash grain)",
   "lightReaction": "matte" | "subtle sheen" | "glossy"
 }
@@ -261,10 +270,10 @@ Output raw JSON ONLY. No markdown formatting, no \`\`\`json block. Just the raw 
       }
     }
 
-    // 최종 폴백 기본값
+    // 최종 폴백 기본값 (Gemini/OpenAI 둘 다 실패했을 때만 — 데님 단정 대신 일반적인 값으로)
     return {
       color: 'as shown in image',
-      material: 'rigid cotton denim fabric',
+      material: 'as shown in image',
       fitType: (userCategory === 'bottom' ? 'wide-leg' : 'regular') as any,
       category: (userCategory as any) || 'top',
       details: rawSpecs || 'as shown in the reference garment photo',

@@ -188,11 +188,11 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           productNotes: productNotes.trim() || undefined,
           draftMode,
           extractColors,
-          // 색상별 계획 모드에선 슬롯별 참고 사진은 아직 지원하지 않음(공통 모드에서만 적용)
-          styleReferenceImagesBySlot:
-            extractColors && colorPlans?.length
-              ? undefined
-              : Object.fromEntries(Object.entries(styleReferenceImages).filter(([, imgs]) => imgs && imgs.length)),
+          // (2026-07-17) 색상 옵션 모드여도 공통으로 적용 — 참고 이미지는 색상과 무관하게
+          // "이 슬롯은 이 옷으로 입혀줘"이므로 색상별로 다를 이유가 없다.
+          styleReferenceImagesBySlot: Object.fromEntries(
+            Object.entries(styleReferenceImages).filter(([, imgs]) => imgs && imgs.length),
+          ),
           // 추출 미리보기를 거쳤으면 색상별 계획(색상별 코디 덮어쓰기 포함)을 그대로 전달
           colorPlans: extractColors && colorPlans?.length
             ? colorPlans.map((p) => ({
@@ -607,20 +607,27 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             ))
           )}
 
-          {!(extractColors && colorPlans) &&
-            otherSlots.map((slot) => {
+          {otherSlots.map((slot) => {
               const meta = STYLE_SLOT_META[slot];
               const refCount = styleReferenceImages[slot]?.length || 0;
+              const isColorPlanMode = !!(extractColors && colorPlans);
               return (
                 <div key={slot} className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
                   <div className="text-[11px] font-semibold text-gray-900 tracking-wide">{meta.label}</div>
-                  <textarea
-                    value={styleHints[slot] || ''}
-                    onChange={(e) => setStyleHints((prev) => ({ ...prev, [slot]: e.target.value }))}
-                    placeholder={meta.placeholder}
-                    rows={3}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
-                  />
+                  {!isColorPlanMode && (
+                    <textarea
+                      value={styleHints[slot] || ''}
+                      onChange={(e) => setStyleHints((prev) => ({ ...prev, [slot]: e.target.value }))}
+                      placeholder={meta.placeholder}
+                      rows={3}
+                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
+                    />
+                  )}
+                  {isColorPlanMode && (
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      텍스트 코디 지시는 위 색상별 칸에서 입력하세요. 참고 이미지는 색상과 무관하게 공통 적용됩니다.
+                    </p>
+                  )}
                   <div className="flex items-center justify-between pt-1">
                     <span className="text-[11px] text-gray-400">
                       말로 설명하기 어려우면 참고 사진으로 대신 첨부하세요 (최대 3장)
