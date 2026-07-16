@@ -431,6 +431,53 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                       </div>
                     </div>
                   ))}
+
+                  {/* (2026-07-17) 색상별 코디 텍스트 바로 아래 — 말로 설명하기 어려운 슬롯은
+                      참고 이미지로 대신 첨부. 색상과 무관하게 공통 적용(styleReferenceImages 공유). */}
+                  <div className="border border-gray-200 rounded-xl p-4 space-y-2">
+                    <div className="text-[11px] font-semibold text-gray-900 tracking-wide">참고 이미지 (모든 색상 공통)</div>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      말로 설명하기 어려운 슬롯은 사진으로 첨부하세요 — 색상과 무관하게 모든 색상에 동일하게 적용됩니다.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {otherSlots.map((slot) => {
+                        const meta = STYLE_SLOT_META[slot];
+                        const refCount = styleReferenceImages[slot]?.length || 0;
+                        return (
+                          <div
+                            key={slot}
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50"
+                          >
+                            <span className="text-[11px] font-medium text-gray-700">{meta.label}</span>
+                            {refCount > 0 && (
+                              <>
+                                <span className="text-[11px] text-gray-500">첨부됨 {refCount}장</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setStyleReferenceImages((prev) => ({ ...prev, [slot]: [] }))}
+                                  className="text-[11px] font-medium text-gray-400 hover:text-gray-900 transition"
+                                >
+                                  지우기
+                                </button>
+                              </>
+                            )}
+                            {refCount < 3 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setStyleRefTargetSlot(slot);
+                                  styleRefFileInputRef.current?.click();
+                                }}
+                                className="text-[11px] font-medium text-gray-500 hover:text-gray-900 transition"
+                              >
+                                + 참고 이미지
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -607,27 +654,22 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             ))
           )}
 
-          {otherSlots.map((slot) => {
+          {/* 색상 옵션 모드에선 이 카드 대신 위(섹션 01, 색상별 코디 칸 바로 아래)의
+              "참고 이미지 (모든 색상 공통)"를 사용한다 — 중복 노출 방지. */}
+          {!(extractColors && colorPlans) &&
+            otherSlots.map((slot) => {
               const meta = STYLE_SLOT_META[slot];
               const refCount = styleReferenceImages[slot]?.length || 0;
-              const isColorPlanMode = !!(extractColors && colorPlans);
               return (
                 <div key={slot} className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
                   <div className="text-[11px] font-semibold text-gray-900 tracking-wide">{meta.label}</div>
-                  {!isColorPlanMode && (
-                    <textarea
-                      value={styleHints[slot] || ''}
-                      onChange={(e) => setStyleHints((prev) => ({ ...prev, [slot]: e.target.value }))}
-                      placeholder={meta.placeholder}
-                      rows={3}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
-                    />
-                  )}
-                  {isColorPlanMode && (
-                    <p className="text-[11px] text-gray-400 leading-relaxed">
-                      텍스트 코디 지시는 위 색상별 칸에서 입력하세요. 참고 이미지는 색상과 무관하게 공통 적용됩니다.
-                    </p>
-                  )}
+                  <textarea
+                    value={styleHints[slot] || ''}
+                    onChange={(e) => setStyleHints((prev) => ({ ...prev, [slot]: e.target.value }))}
+                    placeholder={meta.placeholder}
+                    rows={3}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
+                  />
                   <div className="flex items-center justify-between pt-1">
                     <span className="text-[11px] text-gray-400">
                       말로 설명하기 어려우면 참고 사진으로 대신 첨부하세요 (최대 3장)
