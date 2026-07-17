@@ -20,7 +20,7 @@ export const PERSONAL_BODY_SPEC = `
 - Build: a slim, long-limbed fashion-model physique — lean editorial proportions with a slim waist and a long clean silhouette. Shoulders moderately broad; arms and chest naturally toned and defined just enough to fill a fitted knit cleanly, but clearly on the slim side — NOT a gym-built or bulky body. Think lean Korean fashion model, not fitness model.
 - Arms and hands: smooth, even, ordinary skin. Veins may be at most faintly suggested near the hands, but forearms should read as smooth — no bulging, ropey, or sharply defined veins anywhere.
 - Body hair: a modest, natural amount of fine short vellus-like hair on the forearms and lower legs — subtle and realistic, the way arm hair looks on an ordinary Korean man in a photo. Not thick or dense, but NOT perfectly hairless either; completely smooth hairless arms look artificial.
-- One small identifying detail: a faint, barely-noticeable scar about 1cm long on the forearm — very subtle, like an old healed scratch. Do not make it dramatic or dark; it should only be visible on close inspection.
+- Skin marks: clean, even skin with NO moles, NO scars, NO birthmarks, and NO other distinctive skin marks anywhere — do not add any identifying mark. (2026-07-17: 이전 스펙의 팔뚝 흉터/점은 생성마다 좌우가 바뀌어 오히려 일관성을 해쳐서 제거함.)
 - This physique and skin tone are a fixed personal standard and should stay consistent across every generation.
 `.trim();
 
@@ -119,6 +119,14 @@ export interface StylingSuggestion {
   background: string;
 }
 
+// (2026-07-17) 착장 전체(상의/하의/신발/액세서리)에 적용되는 좌우 일관성 규칙 — 소싱 제품의
+// construction map과 별개로, 참고 사진이 있는 모든 슬롯의 비대칭 디테일(한쪽 가슴 로고,
+// 한쪽 다리 패치, 신발 옆면 마크 등)이 생성마다 좌우로 튀지 않도록 공통으로 강제한다.
+// 앞모습 사진의 거울 반전(화면 왼쪽=착용자 오른쪽)까지 명시해야 실제로 지켜진다.
+const GARMENT_SIDE_CONSISTENCY_RULE = `
+GARMENT LEFT/RIGHT CONSISTENCY (applies to EVERY worn item — top, bottom, shoes, accessories, and any reference-image garment): any asymmetric detail (a chest logo on one side, a patch or loop on one leg, a brand mark on the outer side of one shoe, a bag worn on one shoulder) must appear on the SAME wearer's side as shown in its reference image, exactly once — never mirrored to the other side, never duplicated onto both sides, never randomly flipped between generations. Remember the mirror rule when reading reference photos: in a FRONT-view photo the wearer's LEFT appears on the VIEWER'S RIGHT; in a BACK-view photo it does not mirror. Convert to the wearer's true side first, then keep that side in the output.
+`.trim();
+
 const RESTYLE_QUALITY_CONSTRAINTS = `
 CRITICAL NEGATIVE CONSTRAINTS (DO NOT GENERATE):
 cartoon, illustration, CGI, 3D render, digital art, video game graphics, airbrushed skin, plastic skin, mannequin texture, artificial doll look, low resolution, blurry, deformed body, incorrect anatomy, extra limbs, bad hands, overlapping fingers, unnatural pose, oversaturated colors, fake lighting, warped background, artifacts, logos, text, watermark, composite look, collage, split screen, multi-panel, grid of photos, side-by-side comparison, diptych, triptych, photo montage, layout of multiple images, soft puffy chest, sagging chest, love handles, flabby untoned body, out-of-shape physique, hunched posture, awkward stiff pose, invented fabric pattern, fake jacquard or paisley print, embossed decorative texture not present on the real garment, moire pattern on fabric, unintended textile print.
@@ -132,8 +140,8 @@ export function buildModelLockLines(bodySpec: string): string {
 MODEL LOCK — this brand uses ONE fixed model. Every generation must show the exact same person, as if the same model returned to the same white studio for another shot of the same campaign. A viewer comparing any two generations must believe they are photos of the same person taken the same day.
 Body & identity spec (ground truth — reproduce exactly; do not idealize, slim down, bulk up, or beautify):
 ${bodySpec}
-The following must match the spec and the reference photo exactly, never randomized between generations: facial features, skin tone, hairstyle, body-hair amount, moles and skin marks, faint scars, vein visibility, muscle definition, and overall body proportions.
-CRITICAL SKIN-MARK CHECK: the spec above may name a specific mole, freckle, or scar with a location (e.g. "right forearm, midway between elbow and wrist"). If it does, before finalizing, actually look at that exact body part in your generated image and confirm the mark is visibly there, in the right spot, at a size a viewer could actually notice — do not smooth it away, shrink it into invisibility, or skip it just because the shot is full-body. This is a specific real identifying feature of this model, not a generic detail.
+The following must match the spec and the reference photo exactly, never randomized between generations: facial features, skin tone, hairstyle, body-hair amount, vein visibility, muscle definition, and overall body proportions.
+SKIN RULE: render clean, even skin with NO moles, NO scars, NO birthmarks, and NO other distinctive skin marks anywhere on the body — even if the reference photo appears to show one, do not reproduce it. (Identifying marks flip sides between generations and break consistency, so this model is defined as mark-free.)
 `.trim();
 }
 
@@ -229,6 +237,7 @@ export function buildRestylePrompt(
     `Every item listed below REPLACES whatever the person is wearing in that slot in the input photo — the input photo's own bottom/shoes/accessories (other than the one protected sourced item above) are NOT the reference and must NOT be preserved, copied, or kept similar in silhouette/color/style. Generate exactly what is described below instead, even if it looks completely different from the input photo.`,
     stylingLines.length > 0 ? stylingLines.join('\n') : '- Complete the outfit naturally with cohesive, stylish items.',
     backgroundLine,
+    GARMENT_SIDE_CONSISTENCY_RULE,
     '',
     '=== NEGATIVE CONSTRAINTS (ABSOLUTE) ===',
     RESTYLE_QUALITY_CONSTRAINTS,
@@ -417,6 +426,7 @@ export function buildProductFittingPrompt(
     (stylingLines.length > 0 ? stylingLines.join('\n') : '- Complete the outfit naturally with cohesive, stylish items that flatter the product.') + mandateBlock,
     ...styleReferenceLines,
     backgroundLine,
+    GARMENT_SIDE_CONSISTENCY_RULE,
     '- The model\'s face must be fully and clearly visible — bare face, no eyewear or headwear of any kind unless a USER MANDATE above explicitly asks for it.',
     '',
     '=== NEGATIVE CONSTRAINTS (ABSOLUTE) ===',
