@@ -4,9 +4,68 @@
  * 항상 동일한 분석 스키마를 반환해 프롬프트 일관성 보장
  */
 
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 import OpenAI from 'openai';
-import type { GarmentAnalysis, StylingSuggestion, SourcedCategory } from './fitting-prompts';
+import type { GarmentAnalysis, GarmentConstructionMap, StylingSuggestion, SourcedCategory } from './fitting-prompts';
+
+// (2026-07-17) 존별 필드를 Gemini responseSchema로 강제 — 자유 텍스트 한 필드로는 Gemini가
+// 대충 쓰거나 통째로 빼먹어도 조용히 통과됐다(고리+패치가 한쪽 다리에 뭉쳐서 나오는 사고로
+// 실제 재현 확인). required로 걸어두면 필드 자체가 없는 응답은 나올 수 없다.
+const CONSTRUCTION_MAP_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    photoClassification: { type: Type.STRING, description: 'Per-photo FRONT/BACK/side/close-up classification with the anatomical cue used (e.g. "Photo 1: center fly visible → FRONT; Photo 2: patch pockets + elastic waistband, no fly → BACK")' },
+    frontWaistband: { type: Type.STRING, description: 'Front waistband construction: fly type, buttons/zip, belt loops, whether elastic is visible from front' },
+    frontLeftLeg: { type: Type.STRING, description: "Wearer's LEFT leg, front view: any pocket/patch/loop/seam or \"none\"" },
+    frontRightLeg: { type: Type.STRING, description: "Wearer's RIGHT leg, front view: any pocket/patch/loop/seam or \"none\"" },
+    backWaistband: { type: Type.STRING, description: 'Back waistband construction: elastic gathering, yoke, or none' },
+    backLeftLeg: { type: Type.STRING, description: "Wearer's LEFT leg, back view: any pocket/patch/loop/seam or \"none\"" },
+    backRightLeg: { type: Type.STRING, description: "Wearer's RIGHT leg, back view: any pocket/patch/loop/seam or \"none\"" },
+    backPockets: { type: Type.STRING, description: 'Back pocket count, shape, and placement, or "none"' },
+    sideSeams: { type: Type.STRING, description: 'Side seam construction, or "not visible in provided photos" if unseen' },
+  },
+  required: ['photoClassification', 'frontWaistband', 'frontLeftLeg', 'frontRightLeg', 'backWaistband', 'backLeftLeg', 'backRightLeg', 'backPockets', 'sideSeams'],
+};
+
+/** OpenAI 폴백은 responseSchema 강제가 안 되므로, 필드가 빠지거나 문자열째로 와도 안전하게 정규화한다. */
+function normalizeConstructionMap(cm: any): GarmentConstructionMap | undefined {
+  if (!cm) return undefined;
+  const fallback = 'not visible in provided photos — do not invent';
+  if (typeof cm === 'string') {
+    // 스키마 없이 자유 텍스트로 온 경우 — 그대로는 존별 렌더링 규칙과 안 맞아 못 씀
+    return undefined;
+  }
+  return {
+    photoClassification: cm.photoClassification || 'not provided',
+    frontWaistband: cm.frontWaistband || fallback,
+    frontLeftLeg: cm.frontLeftLeg || fallback,
+    frontRightLeg: cm.frontRightLeg || fallback,
+    backWaistband: cm.backWaistband || fallback,
+    backLeftLeg: cm.backLeftLeg || fallback,
+    backRightLeg: cm.backRightLeg || fallback,
+    backPockets: cm.backPockets || fallback,
+    sideSeams: cm.sideSeams || fallback,
+  };
+}
+
+// Gemini의 responseSchema는 응답 전체 형태를 강제한다 — constructionMap만 스키마를 걸고
+// 나머지 필드는 텍스트 지시로만 두면 모델이 다른 필드를 누락할 수 있어, 전체를 여기서 정의한다.
+const GARMENT_ANALYSIS_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    color: { type: Type.STRING },
+    material: { type: Type.STRING },
+    fitType: { type: Type.STRING, enum: ['oversized', 'boxy', 'regular', 'slim', 'wide-leg', 'skinny', 'straight', 'unknown'] },
+    category: { type: Type.STRING, enum: ['top', 'bottom', 'outer', 'dress', 'shoes', 'bag', 'accessory', 'unknown'] },
+    details: { type: Type.STRING },
+    texture: { type: Type.STRING },
+    lightReaction: { type: Type.STRING },
+    chestWidth: { type: Type.STRING, nullable: true },
+    length: { type: Type.STRING, nullable: true },
+    constructionMap: CONSTRUCTION_MAP_SCHEMA,
+  },
+  required: ['color', 'material', 'fitType', 'category', 'details', 'texture', 'lightReaction', 'constructionMap'],
+};
 
 function parseBase64(dataUrl: string): { data: string; mimeType: string } {
   if (dataUrl.startsWith('data:')) {
@@ -107,7 +166,7 @@ Return ONLY valid JSON, no markdown, no explanation:
   "lightReaction": "how fabric reacts to light (e.g., 'matte finish, no sheen', 'subtle metallic sheen at highlights', 'slight luster, semi-matte')",
   "chestWidth": "estimated chest measurement if visible (e.g., '54cm', '58cm') or null",
   "length": "garment length description (e.g., 'hip length', 'cropped above waist', 'ankle length', '28 inch inseam') or null",
-  "constructionMap": "the full result of the MANDATORY CONSTRUCTION MAP (rule 6): photo classification, then the labeled zone-by-zone lines (FRONT waistband / FRONT wearer-left leg / FRONT wearer-right leg / BACK waistband / BACK wearer-left leg / BACK wearer-right leg / BACK pockets / SIDE seams), using WEARER'S left/right with the mirror rule applied, marking empty zones as 'none' and unseen zones as 'not visible in provided photos — do not invent'"
+  "constructionMap": "an OBJECT (per rule 6) with 9 required string fields: photoClassification, frontWaistband, frontLeftLeg, frontRightLeg, backWaistband, backLeftLeg, backRightLeg, backPockets, sideSeams — every field filled using WEARER'S left/right with the mirror rule applied, 'none' for empty zones, 'not visible in provided photos — do not invent' for unseen zones. Every field is mandatory, never omit one."
 }
 `.trim();
 
@@ -190,6 +249,7 @@ export async function analyzeGarment(
         config: {
           temperature: 0.1,
           responseMimeType: 'application/json',
+          responseSchema: GARMENT_ANALYSIS_SCHEMA as any,
         },
       })
     );
@@ -206,7 +266,7 @@ export async function analyzeGarment(
       lightReaction: parsed.lightReaction || 'matte finish',
       chestWidth: parsed.chestWidth || undefined,
       length: parsed.length || undefined,
-      constructionMap: parsed.constructionMap || undefined,
+      constructionMap: normalizeConstructionMap(parsed.constructionMap),
     };
   } catch (geminiError) {
     if (openaiApiKey) {
@@ -284,7 +344,7 @@ Output raw JSON ONLY. No markdown formatting, no \`\`\`json block. Just the raw 
           details: parsed.details || 'no additional details',
           texture: parsed.texture || 'standard fabric texture',
           lightReaction: parsed.lightReaction || 'matte finish',
-          constructionMap: parsed.constructionMap || undefined,
+          constructionMap: normalizeConstructionMap(parsed.constructionMap),
         };
       } catch (openaiError) {
         console.error('[GarmentAgent] OpenAI 비전 대체 분석 실패:', openaiError);

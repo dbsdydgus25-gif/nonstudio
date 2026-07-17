@@ -47,8 +47,28 @@ export interface GarmentAnalysis {
    * 사고를 못 막아서, 위치를 좌표처럼 고정하는 필드를 분리했다. 착용자 기준(wearer's
    * left/right)으로 서술 — 앞면 사진에서는 거울 반전(화면 왼쪽=착용자 오른쪽)임을 분석
    * 단계에서 이미 보정한 결과여야 한다.
+   * (2026-07-17 2차) 느슨한 자유 텍스트 한 필드로는 Gemini가 대충 쓰거나 통째로 빼먹어도
+   * 조용히 통과됐다(실제 재현 확인 — 고리+패치가 한쪽 다리에 뭉쳐서 나옴). 존마다 별도
+   * 필수 필드로 쪼개고 Gemini responseSchema로 강제해서 빈 값이 나올 수 없게 한다.
    */
-  constructionMap?: string;
+  constructionMap?: GarmentConstructionMap;
+}
+
+export interface GarmentConstructionMap {
+  /** 입력 사진마다 앞/뒤/옆/클로즈업 판별 + 근거 (예: "Photo 1: 지퍼 보임 → 앞면") */
+  photoClassification: string;
+  frontWaistband: string;
+  /** 착용자 기준 왼쪽 다리 — 앞면 */
+  frontLeftLeg: string;
+  /** 착용자 기준 오른쪽 다리 — 앞면 */
+  frontRightLeg: string;
+  backWaistband: string;
+  /** 착용자 기준 왼쪽 다리 — 뒷면 */
+  backLeftLeg: string;
+  /** 착용자 기준 오른쪽 다리 — 뒷면 */
+  backRightLeg: string;
+  backPockets: string;
+  sideSeams: string;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -410,7 +430,19 @@ export function buildProductFittingPrompt(
     `- CRITICAL SEAM/POCKET/PATCH RULE: the "Details" spec above lists the exact seam/panel lines, pocket type+location, and logo/patch placement found by directly inspecting the real product photos. Treat this list as a checklist — reproduce each item at its stated location, in the stated quantity, and invent NOTHING beyond what is listed (no extra pocket, no extra patch, no seam line that isn't described). A single patch mentioned once must appear exactly once, at the location described — never mirrored onto both sides or duplicated. This is a common failure mode when the model isn't given a clear reference photo of the construction, so double-check the reference image(s) directly rather than defaulting to a generic version of this garment type.`,
     ...(garmentAnalysis.constructionMap
       ? [
-          `- CONSTRUCTION MAP (zone-by-zone ground truth, in the WEARER'S left/right — this is the authoritative placement checklist, it wins over any generic assumption about this garment type):\n${garmentAnalysis.constructionMap}\n  RENDERING RULE for this map: decide the pose's camera-facing side FIRST (front-facing pose → render only the FRONT zones; back-facing pose → render only the BACK zones), then place each mapped feature on the correct wearer's side in the final image. Remember the mirror rule: in a front-facing shot, the wearer's LEFT leg appears on the RIGHT side of the image; in a back-facing shot, the wearer's left leg appears on the left side of the image. An asymmetric feature (a patch on one leg, a loop on the other) must stay on its mapped leg — never mirrored, never duplicated onto both legs, never swapped. Zones marked "none" must be rendered EMPTY, and zones marked "not visible" must be rendered as the plainest reasonable continuation of the garment with no invented decoration.`,
+          [
+            `- CONSTRUCTION MAP (zone-by-zone ground truth, in the WEARER'S left/right — this is the authoritative placement checklist, it wins over any generic assumption about this garment type):`,
+            `  Photo classification: ${garmentAnalysis.constructionMap.photoClassification}`,
+            `  FRONT waistband: ${garmentAnalysis.constructionMap.frontWaistband}`,
+            `  FRONT wearer-LEFT leg: ${garmentAnalysis.constructionMap.frontLeftLeg}`,
+            `  FRONT wearer-RIGHT leg: ${garmentAnalysis.constructionMap.frontRightLeg}`,
+            `  BACK waistband: ${garmentAnalysis.constructionMap.backWaistband}`,
+            `  BACK wearer-LEFT leg: ${garmentAnalysis.constructionMap.backLeftLeg}`,
+            `  BACK wearer-RIGHT leg: ${garmentAnalysis.constructionMap.backRightLeg}`,
+            `  BACK pockets: ${garmentAnalysis.constructionMap.backPockets}`,
+            `  Side seams: ${garmentAnalysis.constructionMap.sideSeams}`,
+            `  RENDERING RULE for this map: decide the pose's camera-facing side FIRST (front-facing pose → render ONLY the FRONT waistband/left-leg/right-leg lines above; back-facing pose → render ONLY the BACK waistband/left-leg/right-leg/pockets lines above — never mix rows from both). A feature listed under "wearer-LEFT" must end up on the wearer's actual left leg and a feature under "wearer-RIGHT" on the wearer's actual right leg — these are two DIFFERENT features on two DIFFERENT legs, never merge them onto one leg and never put both on the same side. Remember the mirror rule when placing on the image: in a front-facing shot, the wearer's LEFT leg appears on the RIGHT side of the image; in a back-facing shot, the wearer's left leg appears on the left side of the image. A row that says "none" must be rendered with that zone plain/empty, and a row that says "not visible" must be rendered as the plainest reasonable continuation with no invented decoration.`,
+          ].join('\n'),
         ]
       : []),
     `- CRITICAL FRONT/BACK CONSISTENCY RULE: real garments look different from the front and back. Use garment anatomy to tell them apart in the reference photos — for BOTTOMS, the FRONT is the side with the center fly (button/zipper) and slanted side-entry pockets, and the BACK is the side with patch pockets/yoke/elastic gathering and NO fly; for TOPS, the front has the placket/graphic/forward-opening collar. Then render ONLY the side that matches the pose: a front-facing pose must show the fly and must NOT show back patch pockets wrapping around to the front; a back-facing pose must show the back construction and no fly. Never combine front details and back details into a single view, and never guess at an unseen side beyond a plain, undecorated continuation.`,
