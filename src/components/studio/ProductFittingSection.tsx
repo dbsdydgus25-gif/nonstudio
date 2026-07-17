@@ -59,6 +59,9 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   const [styleReferenceImages, setStyleReferenceImages] = useState<Partial<Record<SourcedCategory, string[]>>>({});
   const styleRefFileInputRef = useRef<HTMLInputElement>(null);
   const [styleRefTargetSlot, setStyleRefTargetSlot] = useState<SourcedCategory | null>(null);
+  // (2026-07-17) "사진 정리" — 지저분한 원본(배경/옷걸이/사람 등)을 흰 배경 단독 컷으로
+  // 정리해 다음 분석(절개선/포켓/패치 위치)의 정확도를 올린다. 사진별로 선택 실행(비용 절감).
+  const [cleaningIndex, setCleaningIndex] = useState<{ kind: 'product' | 'material'; index: number } | null>(null);
   // 제품 자체의 핏/디테일 지시 (예: 머슬핏, 크롭 기장감) — 사진만으로 안 보이는 정보 보강
   const [productNotes, setProductNotes] = useState('');
   // 초안 품질(low) — medium 대비 약 1/4 비용, 코디/색상 확인용
@@ -124,6 +127,36 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     if (!files?.length) return;
     const dataUrls = await Promise.all(Array.from(files).map(fileToCompressedDataUrl));
     setStyleReferenceImages((prev) => ({ ...prev, [slot]: [...(prev[slot] || []), ...dataUrls].slice(0, 3) }));
+  };
+
+  // (2026-07-17) 사진 정리 — 배경/옷걸이/사람 제거하고 흰 배경 단독 컷으로 정리(디자인은 그대로 유지).
+  // 신상마켓 등에서 캡처한 지저분한 원본일수록 다음 분석 정확도가 크게 올라간다.
+  const handleCleanPhoto = async (kind: 'product' | 'material', index: number) => {
+    if (!openaiKey) {
+      onNeedKeys();
+      return;
+    }
+    const img = (kind === 'product' ? productImages : materialImages)[index];
+    if (!img) return;
+    setCleaningIndex({ kind, index });
+    try {
+      const res = await fetch('/api/product-fitting/clean-photo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: img, openaiApiKey: openaiKey }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '사진 정리에 실패했습니다.');
+      if (kind === 'product') {
+        setProductImages((prev) => prev.map((im, idx) => (idx === index ? data.imageBase64 : im)));
+      } else {
+        setMaterialImages((prev) => prev.map((im, idx) => (idx === index ? data.imageBase64 : im)));
+      }
+    } catch (err: any) {
+      alert(err?.message || '사진 정리 중 오류가 발생했습니다.');
+    } finally {
+      setCleaningIndex(null);
+    }
   };
 
   // 색상 샘플 시트에서 색상 옵션 추출 (생성 전 미리보기) — 추출 후 색상별 코디 입력 가능
@@ -293,23 +326,43 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             제품 단독 컷(누끼 · 행거 · 상세페이지)이나 타사 착용샷 모두 가능합니다. 아래 <b className="text-gray-600">색상 옵션 자동 추출</b>을 켜지 않으면,
             여러 장을 올려도 전부 <b className="text-gray-600">같은 제품의 다른 각도/디테일</b> 참고 사진으로 함께 분석해 1장을 생성합니다 (색상이 실제로 다르면 추출 기능을 켜세요).
           </p>
+          <p className="text-xs text-gray-400 leading-relaxed">
+            사진에 배경·옷걸이·사람이 같이 나온다면, 사진에 마우스를 올리면 나오는 <b className="text-gray-600">정리하기</b>를 눌러보세요 —
+            배경만 지우고 디자인은 그대로 유지한 컷으로 바꿔서, 절개선·포켓·패치 위치를 다음 단계가 더 정확히 읽게 도와줍니다 (사진 1장당 별도 생성 1회 소요, 선택 사항).
+          </p>
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-            {productImages.map((img, i) => (
-              <div key={i} className="relative aspect-[3/4] rounded-lg overflow-hidden border border-gray-200 group bg-gray-50">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={img} alt={`제품 ${i + 1}`} className="w-full h-full object-contain" />
-                <button
-                  type="button"
-                  onClick={() => setProductImages((prev) => prev.filter((_, idx) => idx !== i))}
-                  className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white text-[11px] opacity-0 group-hover:opacity-100 transition"
-                >
-                  ✕
-                </button>
-                <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-medium tracking-wide">
-                  {i === 0 ? '대표' : extractColors ? `색상 ${i + 1}` : `각도 ${i + 1}`}
-                </span>
-              </div>
-            ))}
+            {productImages.map((img, i) => {
+              const isCleaning = cleaningIndex?.kind === 'product' && cleaningIndex.index === i;
+              return (
+                <div key={i} className="relative aspect-[3/4] rounded-lg overflow-hidden border border-gray-200 group bg-gray-50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={img} alt={`제품 ${i + 1}`} className="w-full h-full object-contain" />
+                  {isCleaning && (
+                    <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
+                      <span className="w-5 h-5 border-2 border-gray-200 border-t-gray-900 rounded-full animate-spin" />
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setProductImages((prev) => prev.filter((_, idx) => idx !== i))}
+                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white text-[11px] opacity-0 group-hover:opacity-100 transition"
+                  >
+                    ✕
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isCleaning}
+                    onClick={() => handleCleanPhoto('product', i)}
+                    className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-medium tracking-wide opacity-0 group-hover:opacity-100 transition disabled:opacity-40"
+                  >
+                    정리하기
+                  </button>
+                  <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-medium tracking-wide">
+                    {i === 0 ? '대표' : extractColors ? `색상 ${i + 1}` : `각도 ${i + 1}`}
+                  </span>
+                </div>
+              );
+            })}
             {productImages.length < 6 && (
               <button
                 type="button"
@@ -493,19 +546,35 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
               </p>
             </div>
             <div className="grid grid-cols-4 sm:grid-cols-6 gap-2.5">
-              {materialImages.map((img, i) => (
-                <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 group bg-gray-50">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img} alt={`재질 참고 ${i + 1}`} className="w-full h-full object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => setMaterialImages((prev) => prev.filter((_, idx) => idx !== i))}
-                    className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-[10px] opacity-0 group-hover:opacity-100 transition"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
+              {materialImages.map((img, i) => {
+                const isCleaning = cleaningIndex?.kind === 'material' && cleaningIndex.index === i;
+                return (
+                  <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 group bg-gray-50">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img} alt={`재질 참고 ${i + 1}`} className="w-full h-full object-cover" />
+                    {isCleaning && (
+                      <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
+                        <span className="w-4 h-4 border-2 border-gray-200 border-t-gray-900 rounded-full animate-spin" />
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setMaterialImages((prev) => prev.filter((_, idx) => idx !== i))}
+                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 text-white text-[10px] opacity-0 group-hover:opacity-100 transition"
+                    >
+                      ✕
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isCleaning}
+                      onClick={() => handleCleanPhoto('material', i)}
+                      className="absolute bottom-1 left-1 px-1 py-0.5 rounded bg-black/60 text-white text-[8px] font-medium tracking-wide opacity-0 group-hover:opacity-100 transition disabled:opacity-40"
+                    >
+                      정리
+                    </button>
+                  </div>
+                );
+              })}
               {materialImages.length < 4 && (
                 <button
                   type="button"
