@@ -303,12 +303,8 @@ export function buildProductFittingPrompt(
   if (stylingSuggestion.shoes) stylingLines.push(`- 신발: ${stylingSuggestion.shoes}`);
   if (stylingSuggestion.accessory) stylingLines.push(`- 액세서리: ${stylingSuggestion.accessory}`);
 
-  // (2026-07-14) 기존엔 "override" 문구가 없어서 바로 위 "confident standing pose"(정면 기본값)와
-  // 충돌 시 방향 지시(예: "오른쪽 보고 돌아선 자세")가 무시되고 정면으로 나오는 경우가 있었다 —
-  // buildRestylePrompt와 동일하게 명시적 override 문구 + 방향 지시 강조를 추가한다.
-  const poseHintBlock = userAdditions.trim()
-    ? ` MANDATORY POSE/PROP REQUIREMENT (overrides the generic "confident standing pose" direction above — must be included exactly as described): ${userAdditions.trim()} (If this specifies a direction or turn — e.g. facing left/right, three-quarter turn, back view — the body orientation AND camera framing must clearly and unambiguously show that turn; do not default to a front-facing pose with only a slight head tilt. STRICT: the output is ONE photograph of exactly ONE person in ONE pose. If the requirement above lists multiple different poses, pick only the single most suitable one — NEVER render several people, a multi-pose lineup, or the same person repeated side by side in one image.)`
-    : '';
+  // (2026-07-17) poseHintBlock(덧붙임 방식) 제거 — POSE & FRAMING 섹션에서 포즈 지시가 있으면
+  // 기본 스탠딩 문구를 통째로 교체하는 방식으로 전환 (포즈 3장이 전부 동일하게 나오던 원인).
 
   // (2026-07-09, 2차 강화) 이미지 순서를 [모델, 제품, (다른 각도), (재질), 배경]으로 구성한다 —
   // gpt-image-2의 edit는 첫 번째 이미지를 "편집할 대상"으로 취급하는 경향이 있어서, 제품 사진이
@@ -417,10 +413,18 @@ export function buildProductFittingPrompt(
           `- CONSTRUCTION MAP (zone-by-zone ground truth, in the WEARER'S left/right — this is the authoritative placement checklist, it wins over any generic assumption about this garment type):\n${garmentAnalysis.constructionMap}\n  RENDERING RULE for this map: decide the pose's camera-facing side FIRST (front-facing pose → render only the FRONT zones; back-facing pose → render only the BACK zones), then place each mapped feature on the correct wearer's side in the final image. Remember the mirror rule: in a front-facing shot, the wearer's LEFT leg appears on the RIGHT side of the image; in a back-facing shot, the wearer's left leg appears on the left side of the image. An asymmetric feature (a patch on one leg, a loop on the other) must stay on its mapped leg — never mirrored, never duplicated onto both legs, never swapped. Zones marked "none" must be rendered EMPTY, and zones marked "not visible" must be rendered as the plainest reasonable continuation of the garment with no invented decoration.`,
         ]
       : []),
-    `- CRITICAL FRONT/BACK CONSISTENCY RULE: real garments look different from the front and back (different pocket placement, different seams, patch usually only on one side). Determine which reference image shows the front and which shows the back before generating, then render ONLY the side that matches the pose specified below — never combine front details and back details into a single view, and never guess at the unseen side beyond what a plain, undecorated back would reasonably look like if no back reference photo was provided.`,
+    `- CRITICAL FRONT/BACK CONSISTENCY RULE: real garments look different from the front and back. Use garment anatomy to tell them apart in the reference photos — for BOTTOMS, the FRONT is the side with the center fly (button/zipper) and slanted side-entry pockets, and the BACK is the side with patch pockets/yoke/elastic gathering and NO fly; for TOPS, the front has the placket/graphic/forward-opening collar. Then render ONLY the side that matches the pose: a front-facing pose must show the fly and must NOT show back patch pockets wrapping around to the front; a back-facing pose must show the back construction and no fly. Never combine front details and back details into a single view, and never guess at an unseen side beyond a plain, undecorated continuation.`,
     '',
     '=== POSE & FRAMING (ABSOLUTE) ===',
-    `Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped. Clean, confident, polished commercial standing pose with natural hand placement. Default gaze/head direction: face and eyes toward or near the camera, in a natural relaxed way — do NOT habitually turn the head to one side (e.g. always to the right); only turn the head or gaze away from the camera if the pose instruction below explicitly calls for it.${poseHintBlock}`,
+    // (2026-07-17) 포즈 지시가 있는데도 "단정한 정면 스탠딩"이 고정 선두 문구로 있어서 지시가
+    // 뒤에 덧붙는 구조였음 — 포즈 3장을 뽑아도 전부 같은 정면 스탠딩으로 나오는 원인(이 코드
+    // 베이스의 반복 교훈: 지시문 위치가 반영을 좌우한다). 포즈 지시가 있으면 그게 유일한 포즈
+    // 문장이 되도록 교체하고, 기본 스탠딩 문구는 지시가 없을 때만 쓴다.
+    userAdditions.trim()
+      ? `Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped.
+THE POSE FOR THIS SHOT (mandatory — this IS the pose to render, not a suggestion; do NOT default to a generic frontal standing pose): ${userAdditions.trim()}
+(If this specifies a direction or turn — e.g. facing left/right, three-quarter turn, side profile, back view, walking — the body orientation AND camera framing must clearly and unambiguously show it; a back-view pose must actually show the model's back with the garment's BACK-zone construction. STRICT: the output is ONE photograph of exactly ONE person in ONE pose — if multiple poses are listed, pick only the single most suitable one, never render several people or a multi-pose lineup.)`
+      : `Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped. Clean, confident, polished commercial standing pose with natural hand placement. Default gaze/head direction: face and eyes toward or near the camera, in a natural relaxed way — do NOT habitually turn the head to one side (e.g. always to the right).`,
     '',
     '=== NEW STYLING TO GENERATE (everything except the product above) ===',
     (stylingLines.length > 0 ? stylingLines.join('\n') : '- Complete the outfit naturally with cohesive, stylish items that flatter the product.') + mandateBlock,
