@@ -334,8 +334,13 @@ export function buildProductFittingPrompt(
 
   // 사용자가 직접 적은 제품 핏/디테일 (머슬핏, 크롭 기장 등) — 사진만으로는 판단이 어려운
   // 실착 핏 정보를 판매자/사용자가 아는 대로 보강하는 것이라 시각 추정보다 우선한다.
+  // (2026-07-17) 대표님이 실제 치수(허리 35-43, 총장 62, 바지통 36.5 등)를 적어주시는 경우가
+  // 많은데, gpt-image-2는 실측 cm를 픽셀 단위로 계산해서 그리는 능력이 없다 — 숫자를 그대로
+  // "적용해라"라고만 하면 AI가 얼마나 헐렁한지/타이트한지를 알아서 추측하게 방치된다. 고정
+  // 모델 체형(마른 체형, 슬림한 허리) 대비 이 치수가 뜻하는 여유분을 직접 판단해서 그 "헐렁함/
+  // 핏의 정도"를 시각적으로 반영하라는 지시를 명시적으로 추가한다.
   const productNotesLine = productNotes?.trim()
-    ? `\n- MANDATORY PRODUCT FIT/DETAIL SPEC (provided by the seller — overrides visual guesses from the photo): ${productNotes.trim()}. Apply these fit, length, and detail characteristics exactly to how the garment fits on the model's body.`
+    ? `\n- MANDATORY PRODUCT FIT/DETAIL SPEC (provided by the seller — overrides visual guesses from the photo): ${productNotes.trim()}. If this includes numeric measurements (waist, hip, thigh, rise, hem width, chest, shoulder, sleeve length, etc.), reason about what those measurements mean relative to the fixed model's slim, lean build described above (do not just repeat the numbers) — e.g. a waist range far wider than a slim waist implies a banded/elastic waistband with visible loose gathering and drape, not a snug fit; a hem/thigh width much larger than the leg implies a clearly baggy wide silhouette with visible extra fabric volume and movement, not a tapered line skimming the leg. Render the ACTUAL visual looseness/tightness and drape that these measurements imply on this specific body, not just a generic version of the garment type.`
     : '';
 
   // 사용자 코디 지시 원문 — Gemini 코디 제안이 "와이드"를 "테일러드"로 순화하는 등 지시가
