@@ -316,6 +316,13 @@ export function buildProductFittingPrompt(
   /** (2026-07-17) 소싱 제품이 아닌 나머지 슬롯(예: 상의)을 말로 설명하기 어려울 때, 슬롯별로
    * "이렇게 입혀줘" 참고 사진을 첨부할 수 있다(슬롯당 최대 3장) — 순서는 SLOT_ORDER 고정. */
   styleReferenceImageCountsBySlot?: Partial<Record<'top' | 'bottom' | 'shoes' | 'accessory', number>>,
+  /**
+   * (2026-07-17) 같은 색상의 이전 포즈 컷(이미 확정된 정상 결과물) — 포즈 여러 장을 뽑을 때
+   * 두 번째 컷부터 이 사진을 "이 구조가 정답"인 기준으로 함께 참고시킨다. gpt-image-2는 seed가
+   * 없어 텍스트 스펙만으로는 절개선/포켓/패치 위치가 포즈마다 조금씩 달라지는 문제가 있었는데
+   * (실제 재현 확인), AI 바리에이션처럼 "이미 확정된 사진"을 기준 삼으면 훨씬 일관되게 나온다.
+   */
+  hasPoseAnchorImage: boolean = false,
 ): string {
   const stylingLines: string[] = [];
   if (stylingSuggestion.top) stylingLines.push(`- 상의: ${stylingSuggestion.top}`);
@@ -350,7 +357,12 @@ export function buildProductFittingPrompt(
     }
   }
   const totalStyleRefCount = cursor - styleRefStart;
-  const backgroundImageNumber = styleRefStart + totalStyleRefCount;
+  const poseAnchorImageNumber = styleRefStart + totalStyleRefCount;
+  const backgroundImageNumber = poseAnchorImageNumber + (hasPoseAnchorImage ? 1 : 0);
+
+  const poseAnchorLine = hasPoseAnchorImage
+    ? `\n- Image ${poseAnchorImageNumber} shows this EXACT same product already correctly rendered on this exact same model in a previous shot (same colorway, same construction). Treat Image ${poseAnchorImageNumber}'s garment construction (seam/panel lines, pocket shapes and placement, patch/logo placement, stitching) as the PRIMARY ground-truth reference for consistency — copy it exactly, do not reinterpret or redraw it differently. This shot only changes the POSE described below; the garment construction must look like the same physical item photographed again, not redesigned.`
+    : '';
 
   const backgroundLine = hasBackgroundReferenceImage
     ? `- Background: Image ${backgroundImageNumber} shows the EXACT target studio backdrop and lighting setup (soft frontal light, gentle top-down falloff, seamless cyclorama floor curve). Reproduce this exact background, light direction, and shadow softness on the subject. (${stylingSuggestion.background})`
@@ -423,7 +435,7 @@ export function buildProductFittingPrompt(
     '',
     `=== PRODUCT FIDELITY (Image ${productImageNumber} is the source of truth for color/fit) ===`,
     `- Reproduce the product in Image ${productImageNumber} with complete fidelity: exact same color and shade, same fabric texture, same details (buttons, stitching, pockets, prints, logos as shown), same overall silhouette — a customer must recognize it as the same product they saw in the shop listing. Do NOT add a button/detail that is not shown, and do NOT drop or omit a button/detail that IS shown — match the exact count and placement.`,
-    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}${productNotesLine}${extraAngleLine}${materialLine}`,
+    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}${productNotesLine}${extraAngleLine}${materialLine}${poseAnchorLine}`,
     `- CRITICAL COLOR RULE: ${colorVariant ? `the "${colorVariant}" colorway` : `the color shown in Image ${productImageNumber}`} is the actual product color being sold — match it precisely, do not shift the hue, saturation, or brightness.`,
     `- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image ${productImageNumber}${materialImageNumbers.length ? ` and the material reference image${materialImageNumbers.length > 1 ? 's' : ''}` : ''} — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.`,
     `- CRITICAL BUTTON/HARDWARE COUNT RULE: before finalizing, actually count the buttons, snaps, zippers, or other hardware visible in ${materialImageNumbers.length ? `the close-up material reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')}) — this is the clearest, most zoomed-in view and is the authoritative source for the exact count and spacing` : `Image ${productImageNumber}`}. The output must show that exact same count in the exact same positions — neither more nor fewer. This is a common failure mode: do not casually add an extra button or omit one out of habit. Every button must sit directly on the actual fabric placket opening with a real, visible buttonhole/gap beneath it — never place a button on a closed, seamless section of the knit/fabric where there is no opening, and never render two buttons stacked or duplicated at the same spot. The button placket must look structurally coherent, like a real garment construction photo.`,

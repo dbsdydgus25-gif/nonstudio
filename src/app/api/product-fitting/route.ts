@@ -59,6 +59,8 @@ async function runSingleProductFitting(
   /** (2026-07-17) 소싱 제품이 아닌 슬롯(예: 상의) "이렇게 입혀줘" 참고 사진 — SLOT_ORDER(top,bottom,shoes,accessory)
    * 순서로 이미 정렬되어 들어온다. buildProductFittingPrompt의 styleReferenceImageCountsBySlot과 순서가 반드시 일치해야 함. */
   styleReferenceImages: Array<{ buffer: Buffer; mimeType: string }> = [],
+  /** (2026-07-17) 같은 색상의 이미 확정된 이전 포즈 컷 — 두 번째 포즈부터 구조 일관성 기준으로 함께 참고 */
+  poseAnchorImage: { buffer: Buffer; mimeType: string } | null = null,
 ): Promise<string> {
   // 입력 이미지는 1024px로 다운스케일 — 업로드 페이로드/입력 토큰 절감 (출력 품질과 무관)
   const parsed = parseBase64Image(productImageBase64);
@@ -80,6 +82,9 @@ async function runSingleProductFitting(
       toOpenAIFile(img.buffer, img.mimeType, `style-ref-${i}.${img.mimeType.split('/')[1] || 'jpg'}`),
     ),
   );
+  const poseAnchorFile = poseAnchorImage
+    ? await toOpenAIFile(poseAnchorImage.buffer, poseAnchorImage.mimeType, 'pose-anchor.jpg')
+    : null;
 
   // (2026-07-09) 이미지 순서를 [모델, 제품, 배경]으로 변경 — gpt-image-2 edit는 첫 이미지를
   // 편집 대상으로 취급하는 경향이 있어, 모델 사진을 1번에 두면 "이 사람에게 제품을 입힌다"는
@@ -100,6 +105,7 @@ async function runSingleProductFitting(
     ...otherProductFiles,
     ...materialFiles,
     ...styleReferenceFiles,
+    ...(poseAnchorFile ? [poseAnchorFile] : []),
     ...(backgroundFile ? [backgroundFile] : []),
   ];
 
@@ -386,7 +392,15 @@ export async function POST(req: Request) {
 
           // 분석/코디는 이 색상에서 한 번만 계산했고, 여기서부터는 포즈 컷마다 프롬프트의
           // 포즈 지시만 바꿔서 이미지 생성만 반복한다.
-          await runWithConcurrency(unitsForThisPlan, 2, async ({ generationId, imageBase64, colorVariant, poseInstruction }) => {
+          // (2026-07-17) gpt-image-2는 seed가 없어 같은 텍스트 스펙을 줘도 포즈마다 절개선/
+          // 포켓/패치 위치를 조금씩 다르게 그리는 문제가 실제로 재현됨 — AI 바리에이션처럼
+          // "이미 확정된 사진"을 기준 삼아야 일관되므로, 첫 포즈를 먼저 만들고 그 결과물을
+          // 나머지 포즈들의 추가 참고 이미지(poseAnchorImage)로 재사용한다.
+          const generateOneUnit = async (
+            unit: (typeof unitsForThisPlan)[number],
+            poseAnchorImage: { buffer: Buffer; mimeType: string } | null,
+          ): Promise<{ buffer: Buffer; mimeType: string } | null> => {
+            const { generationId, imageBase64, colorVariant, poseInstruction } = unit;
             try {
               const prompt = buildProductFittingPrompt(
                 sourcedCategory,
@@ -402,6 +416,7 @@ export async function POST(req: Request) {
                 otherAngleImagesDownscaled.length,
                 materialImagesDownscaled.length,
                 styleReferenceCountsBySlot,
+                !!poseAnchorImage,
               );
 
               const imageUrl = await runSingleProductFitting(
@@ -414,14 +429,28 @@ export async function POST(req: Request) {
                 otherAngleImagesDownscaled,
                 materialImagesDownscaled,
                 styleReferenceImagesFlat,
+                poseAnchorImage,
               );
               const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
               await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt });
+              // 다음 포즈들의 기준 사진으로 재사용할 수 있도록 다운스케일해서 반환
+              return downscaleImage(outBuf, outMime);
             } catch (err: any) {
               console.error('[api/product-fitting][after] 포즈 생성 실패:', err);
               await markGenerationFailed(generationId, err?.message || 'AI 제품 피팅 처리 중 오류가 발생했습니다.');
+              return null;
             }
-          });
+          };
+
+          if (unitsForThisPlan.length <= 1) {
+            if (unitsForThisPlan[0]) await generateOneUnit(unitsForThisPlan[0], null);
+          } else {
+            const [firstUnit, ...restUnits] = unitsForThisPlan;
+            const anchorImage = await generateOneUnit(firstUnit, null);
+            await runWithConcurrency(restUnits, 2, async (unit) => {
+              await generateOneUnit(unit, anchorImage);
+            });
+          }
         } catch (err: any) {
           // 분석 자체가 실패하면 이 색상의 모든 포즈 컷을 실패 처리한다.
           console.error('[api/product-fitting][after] 분석 실패:', err);
