@@ -78,6 +78,19 @@ CRITICAL RULES:
    - Hem style (raw hem, cuffed/rolled, elastic, drawcord)
    This structural scan applies to EVERY garment type, not only denim — cargo pants, shorts, jackets, and knitwear all have real construction details that must be found and reported; do not skip this because the item isn't denim.
 5. For jeans/denim specifically, ALSO be extremely detailed about the washing texture, sandwashed fading on thighs/knees, vertical slub lines, whiskering lines at the crotch, and exact denim twill texture grain — in addition to the structural scan above, not instead of it.
+6. MANDATORY CONSTRUCTION MAP ("constructionMap" field) — this is the most important field. Build a systematic view-by-view, side-by-side map:
+   a. First classify EACH provided photo: is it the FRONT view, BACK view, side view, or a close-up? State your reasoning briefly (e.g. "fly/button visible → front", "yoke + back pockets visible → back").
+   b. MIRROR RULE (critical): always describe locations in the WEARER'S left/right, not the photo's left/right. In a FRONT view, the wearer's LEFT appears on the VIEWER'S RIGHT (mirrored). In a BACK view, the wearer's left appears on the viewer's left (not mirrored). Apply this conversion explicitly before writing any left/right location.
+   c. Then write the map as short labeled lines covering every zone, including "none" for empty zones — asymmetry matters (e.g. a patch on ONE leg only, a hammer loop on the OTHER leg only, elastic on the back waistband only):
+      FRONT waistband: (e.g. "flat waistband with center button + zip fly, belt loops, NO elastic visible from front")
+      FRONT wearer-left leg: ...
+      FRONT wearer-right leg: ...
+      BACK waistband: (e.g. "fully elasticated with gathering, no back closure")
+      BACK wearer-left leg: (e.g. "hammer loop at outer side seam, no patch")
+      BACK wearer-right leg: (e.g. "small woven brand patch near hem on outer side, no loop")
+      BACK pockets: (count, shape, placement)
+      SIDE seams / other: ...
+   d. If a zone is not visible in any provided photo, write "not visible in provided photos — do not invent" for that zone.
 
 Return ONLY valid JSON, no markdown, no explanation:
 
@@ -90,7 +103,8 @@ Return ONLY valid JSON, no markdown, no explanation:
   "texture": "surface texture description (e.g., 'coarse diagonal rigid denim twill weave, high-contrast wash grain', 'smooth cotton knit')",
   "lightReaction": "how fabric reacts to light (e.g., 'matte finish, no sheen', 'subtle metallic sheen at highlights', 'slight luster, semi-matte')",
   "chestWidth": "estimated chest measurement if visible (e.g., '54cm', '58cm') or null",
-  "length": "garment length description (e.g., 'hip length', 'cropped above waist', 'ankle length', '28 inch inseam') or null"
+  "length": "garment length description (e.g., 'hip length', 'cropped above waist', 'ankle length', '28 inch inseam') or null",
+  "constructionMap": "the full result of the MANDATORY CONSTRUCTION MAP (rule 6): photo classification, then the labeled zone-by-zone lines (FRONT waistband / FRONT wearer-left leg / FRONT wearer-right leg / BACK waistband / BACK wearer-left leg / BACK wearer-right leg / BACK pockets / SIDE seams), using WEARER'S left/right with the mirror rule applied, marking empty zones as 'none' and unseen zones as 'not visible in provided photos — do not invent'"
 }
 `.trim();
 
@@ -189,6 +203,7 @@ export async function analyzeGarment(
       lightReaction: parsed.lightReaction || 'matte finish',
       chestWidth: parsed.chestWidth || undefined,
       length: parsed.length || undefined,
+      constructionMap: parsed.constructionMap || undefined,
     };
   } catch (geminiError) {
     if (openaiApiKey) {
@@ -205,6 +220,7 @@ CRITICAL RULES:
 3. Describe the item as a single individual garment (e.g. "A pair of vintage washed jeans").
 4. MANDATORY STRUCTURAL SCAN — before writing "details", look at the garment piece by piece and identify every seam/panel line, every pocket (type: cargo/welt/patch/coin/slit + exact location), every logo/brand patch/embroidery/print (exact location, e.g. "left thigh cargo pocket flap"), every closure (buttons/zippers/drawstrings/toggles/snaps, count + location), topstitching/contrast stitching, and hem style. This applies to EVERY garment type (cargo pants, shorts, jackets, knitwear), not only denim.
 5. For jeans/denim specifically, ALSO be extremely detailed about the washing texture, sandwashed fading on thighs/knees, vertical slub lines, whiskering lines at the crotch, and exact denim twill texture grain — in addition to the structural scan, not instead of it.
+6. MANDATORY CONSTRUCTION MAP ("constructionMap" field) — classify each photo as FRONT/BACK/side/close-up (with brief reasoning), then map every zone in the WEARER'S left/right (mirror rule: in a FRONT view the wearer's left appears on the viewer's right; in a BACK view it does not mirror). Write labeled lines: FRONT waistband / FRONT wearer-left leg / FRONT wearer-right leg / BACK waistband / BACK wearer-left leg / BACK wearer-right leg / BACK pockets / SIDE seams. Mark empty zones "none" and unseen zones "not visible in provided photos — do not invent". Asymmetry matters (e.g. patch on one leg only, hammer loop on the other leg only, elastic on the back waistband only).
 
 The JSON must follow this exact schema:
 {
@@ -214,7 +230,8 @@ The JSON must follow this exact schema:
   "category": "top" | "bottom" | "outer" | "dress" | "shoes" | "bag" | "accessory",
   "details": "the full result of the MANDATORY STRUCTURAL SCAN: every seam/panel line, every pocket (type + exact location), every logo/patch/print (exact location), every closure (type + count + location), stitching, hem style. For denim, also add vintage washes/sandwashed thighs/whiskering/pocket distressing/hem wear. DO NOT include hangers, strings, price cards, or store tags.",
   "texture": "fabric texture description (e.g. coarse diagonal rigid denim twill weave, high-contrast wash grain)",
-  "lightReaction": "matte" | "subtle sheen" | "glossy"
+  "lightReaction": "matte" | "subtle sheen" | "glossy",
+  "constructionMap": "the full result of the MANDATORY CONSTRUCTION MAP (rule 6): photo classification with reasoning, then labeled zone-by-zone lines (FRONT waistband / FRONT wearer-left leg / FRONT wearer-right leg / BACK waistband / BACK wearer-left leg / BACK wearer-right leg / BACK pockets / SIDE seams), in WEARER'S left/right with the mirror rule applied, empty zones marked 'none', unseen zones marked 'not visible in provided photos — do not invent'"
 }
 Output raw JSON ONLY. No markdown formatting, no \`\`\`json block. Just the raw JSON string.`
           },
@@ -264,6 +281,7 @@ Output raw JSON ONLY. No markdown formatting, no \`\`\`json block. Just the raw 
           details: parsed.details || 'no additional details',
           texture: parsed.texture || 'standard fabric texture',
           lightReaction: parsed.lightReaction || 'matte finish',
+          constructionMap: parsed.constructionMap || undefined,
         };
       } catch (openaiError) {
         console.error('[GarmentAgent] OpenAI 비전 대체 분석 실패:', openaiError);

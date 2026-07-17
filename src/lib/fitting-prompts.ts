@@ -41,6 +41,14 @@ export interface GarmentAnalysis {
   lightReaction: string;    // 빛 받을 때 표현 (광택, 무광, 셔링 등)
   chestWidth?: string;      // 가슴 단면
   length?: string;          // 기장
+  /**
+   * (2026-07-17) 구조 지도 — 뷰(앞/뒤)별 × 착용자 기준 좌/우별로 뭐가 어디 붙어있는지의
+   * 체계적 목록. "디테일 나열"(details)만으로는 패치가 반대 다리에 붙거나 양쪽에 복제되는
+   * 사고를 못 막아서, 위치를 좌표처럼 고정하는 필드를 분리했다. 착용자 기준(wearer's
+   * left/right)으로 서술 — 앞면 사진에서는 거울 반전(화면 왼쪽=착용자 오른쪽)임을 분석
+   * 단계에서 이미 보정한 결과여야 한다.
+   */
+  constructionMap?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -395,6 +403,11 @@ export function buildProductFittingPrompt(
     `- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image ${productImageNumber}${materialImageNumbers.length ? ` and the material reference image${materialImageNumbers.length > 1 ? 's' : ''}` : ''} — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.`,
     `- CRITICAL BUTTON/HARDWARE COUNT RULE: before finalizing, actually count the buttons, snaps, zippers, or other hardware visible in ${materialImageNumbers.length ? `the close-up material reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')}) — this is the clearest, most zoomed-in view and is the authoritative source for the exact count and spacing` : `Image ${productImageNumber}`}. The output must show that exact same count in the exact same positions — neither more nor fewer. This is a common failure mode: do not casually add an extra button or omit one out of habit. Every button must sit directly on the actual fabric placket opening with a real, visible buttonhole/gap beneath it — never place a button on a closed, seamless section of the knit/fabric where there is no opening, and never render two buttons stacked or duplicated at the same spot. The button placket must look structurally coherent, like a real garment construction photo.`,
     `- CRITICAL SEAM/POCKET/PATCH RULE: the "Details" spec above lists the exact seam/panel lines, pocket type+location, and logo/patch placement found by directly inspecting the real product photos. Treat this list as a checklist — reproduce each item at its stated location, in the stated quantity, and invent NOTHING beyond what is listed (no extra pocket, no extra patch, no seam line that isn't described). A single patch mentioned once must appear exactly once, at the location described — never mirrored onto both sides or duplicated. This is a common failure mode when the model isn't given a clear reference photo of the construction, so double-check the reference image(s) directly rather than defaulting to a generic version of this garment type.`,
+    ...(garmentAnalysis.constructionMap
+      ? [
+          `- CONSTRUCTION MAP (zone-by-zone ground truth, in the WEARER'S left/right — this is the authoritative placement checklist, it wins over any generic assumption about this garment type):\n${garmentAnalysis.constructionMap}\n  RENDERING RULE for this map: decide the pose's camera-facing side FIRST (front-facing pose → render only the FRONT zones; back-facing pose → render only the BACK zones), then place each mapped feature on the correct wearer's side in the final image. Remember the mirror rule: in a front-facing shot, the wearer's LEFT leg appears on the RIGHT side of the image; in a back-facing shot, the wearer's left leg appears on the left side of the image. An asymmetric feature (a patch on one leg, a loop on the other) must stay on its mapped leg — never mirrored, never duplicated onto both legs, never swapped. Zones marked "none" must be rendered EMPTY, and zones marked "not visible" must be rendered as the plainest reasonable continuation of the garment with no invented decoration.`,
+        ]
+      : []),
     `- CRITICAL FRONT/BACK CONSISTENCY RULE: real garments look different from the front and back (different pocket placement, different seams, patch usually only on one side). Determine which reference image shows the front and which shows the back before generating, then render ONLY the side that matches the pose specified below — never combine front details and back details into a single view, and never guess at the unseen side beyond what a plain, undecorated back would reasonably look like if no back reference photo was provided.`,
     '',
     '=== POSE & FRAMING (ABSOLUTE) ===',
