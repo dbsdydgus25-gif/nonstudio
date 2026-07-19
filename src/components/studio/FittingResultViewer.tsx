@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import ReactCrop, { type Crop, type PercentCrop, centerCrop, makeAspectCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
 import { downloadResultImage } from '@/lib/download-image';
+import { ZoomableImage } from './ZoomableImage';
 
 export interface HistoryItem {
   id: string;
@@ -294,16 +295,13 @@ export function FittingResultViewer({
         >
           <button
             onClick={() => setIsZoomed(false)}
-            className="absolute top-6 right-6 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white font-medium text-sm transition"
+            className="absolute top-6 right-6 z-10 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white font-medium text-sm transition"
           >
             닫기
           </button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={currentResult.imageUrl}
-            alt="확대 보기"
-            className="max-w-full max-h-[90vh] object-contain rounded-lg"
-          />
+          <div className="w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+            <ZoomableImage src={currentResult.imageUrl} alt="확대 보기" />
+          </div>
         </div>
       )}
 

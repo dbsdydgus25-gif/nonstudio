@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { downloadResultImage } from '@/lib/download-image';
+import { ZoomableImage } from './ZoomableImage';
 
 interface HistoryEntry {
   id: string;
@@ -65,6 +66,7 @@ export function HistorySection() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [folderMenuOpen, setFolderMenuOpen] = useState(false);
   const [busyMsg, setBusyMsg] = useState<string | null>(null);
+  const [zoomOpen, setZoomOpen] = useState(false);
   const [hdPendingIds, setHdPendingIds] = useState<string[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -563,12 +565,20 @@ export function HistorySection() {
                 닫기
               </button>
             </div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={selected.imageUrl}
-              alt={selected.poseLabel || ''}
-              className="w-full rounded-xl max-h-[60vh] object-contain bg-gray-50"
-            />
+            <div
+              className="relative group cursor-zoom-in rounded-xl overflow-hidden bg-gray-50"
+              onClick={() => setZoomOpen(true)}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={selected.imageUrl}
+                alt={selected.poseLabel || ''}
+                className="w-full max-h-[60vh] object-contain"
+              />
+              <div className="absolute bottom-3 right-3 px-3 py-1.5 rounded-md bg-black/60 backdrop-blur-sm text-white text-[11px] font-medium tracking-wide opacity-0 group-hover:opacity-100 transition">
+                🔍 확대해서 재질 확인
+              </div>
+            </div>
             {selected.poseLabel && <div className="text-xs font-semibold text-gray-900">{selected.poseLabel}</div>}
 
             {/* 이 이미지가 담긴 폴더 표시 + 빼기 */}
@@ -645,6 +655,24 @@ export function HistorySection() {
                 {selected.prompt}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 재질 확인용 전체화면 줌 라이트박스 */}
+      {zoomOpen && selected && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/95 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setZoomOpen(false)}
+        >
+          <button
+            onClick={() => setZoomOpen(false)}
+            className="absolute top-6 right-6 z-10 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white font-medium text-sm transition"
+          >
+            닫기
+          </button>
+          <div className="w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+            <ZoomableImage src={selected.imageUrl} alt={selected.poseLabel || '확대 보기'} />
           </div>
         </div>
       )}
