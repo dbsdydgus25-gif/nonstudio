@@ -165,6 +165,42 @@ export async function getGenerationStatuses(ids: string[]): Promise<GenerationSt
   return results;
 }
 
+export interface GenerationSourceRow {
+  id: string;
+  outputStoragePath: string;
+  modeOrCategory: string | null;
+  poseLabel: string | null;
+}
+
+/** 여러 generation의 원본 행(고화질 리마스터 등에서 소스로 필요) 조회. completed 인 것만. */
+export async function getGenerationsByIds(ids: string[]): Promise<GenerationSourceRow[]> {
+  if (ids.length === 0) return [];
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from('generations')
+    .select('id, output_storage_path, mode_or_category, pose_label, status')
+    .in('id', ids);
+  if (error) throw error;
+  return (data || [])
+    .filter((r: any) => r.status === 'completed' && r.output_storage_path)
+    .map((r: any) => ({
+      id: r.id,
+      outputStoragePath: r.output_storage_path,
+      modeOrCategory: r.mode_or_category ?? null,
+      poseLabel: r.pose_label ?? null,
+    }));
+}
+
+/** Storage 경로의 결과 이미지를 바이트로 내려받는다(리마스터 입력용). */
+export async function downloadOutputImage(path: string): Promise<{ buffer: Buffer; mimeType: string }> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.storage.from(GENERATIONS_BUCKET).download(path);
+  if (error || !data) throw new Error('원본 이미지를 불러오지 못했습니다.');
+  const arrayBuffer = await data.arrayBuffer();
+  const mimeType = (data as any).type || (path.endsWith('.jpg') ? 'image/jpeg' : 'image/png');
+  return { buffer: Buffer.from(arrayBuffer), mimeType };
+}
+
 /** 좋아요/싫어요 평가 저장. */
 export async function rateGeneration(generationId: string, rating: 'good' | 'bad', note?: string) {
   const supabase = getSupabaseAdmin();
