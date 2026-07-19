@@ -11,8 +11,8 @@
 import { NextResponse } from 'next/server';
 import { after } from 'next/server';
 import OpenAI, { toFile } from 'openai';
-import { analyzeGarment, generateStylingSuggestion, type StyleHintsBySlot } from '@/lib/garment-agent';
-import { buildProductFittingPrompt, DEFAULT_STUDIO_BACKGROUND, pickRandomPoses, type SourcedCategory } from '@/lib/fitting-prompts';
+import { analyzeGarment, generateStylingSuggestion, verifyGarmentRender, type StyleHintsBySlot } from '@/lib/garment-agent';
+import { buildProductFittingPrompt, buildDefectCorrectionBlock, DEFAULT_STUDIO_BACKGROUND, pickRandomPoses, type SourcedCategory } from '@/lib/fitting-prompts';
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { getModelProfile, getModelIdentityImage, buildBodySpecFromProfile } from '@/lib/model-profile';
@@ -441,8 +441,48 @@ export async function POST(req: Request) {
                 styleRefForThisCall,
                 poseAnchorImage,
               );
-              const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
-              await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt });
+              let { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
+              let finalPrompt = prompt;
+
+              // (2026-07-19) 생성 후 자동 검증 — 비대칭 디테일(한쪽 다리 패치가 양쪽에 복제 등)과
+              // 좌우 턴 방향 무시는 프롬프트 지시만으로 못 막는 게 반복 확인됨. Gemini가 생성
+              // 결과를 구조맵·참고사진과 대조해 불합격이면, 발견된 결함을 교정 지시로 프롬프트
+              // 맨 앞에 붙여 딱 1회 재생성한다. (검증은 Flash라 저렴, 재생성은 불합격시에만)
+              if (analysisForThisColor.constructionMap) {
+                const verdict = await verifyGarmentRender(
+                  `data:${outMime};base64,${outBuf.toString('base64')}`,
+                  analysisForThisColor.constructionMap,
+                  analysisForThisColor,
+                  poseInstruction || '',
+                  geminiApiKey,
+                  [imageBase64, ...(first.otherAngles || [])],
+                );
+                if (!verdict.pass && verdict.defects.length > 0) {
+                  console.warn('[api/product-fitting][after] 자동 검증 불합격 — 교정 재생성 1회 시도:', verdict.defects);
+                  try {
+                    const retryPrompt = `${buildDefectCorrectionBlock(verdict.defects)}\n\n${prompt}`;
+                    const retryUrl = await runSingleProductFitting(
+                      openai,
+                      imageBase64,
+                      retryPrompt,
+                      identityReferenceImage,
+                      backgroundReferenceImage,
+                      draftMode ? 'low' : 'medium',
+                      otherAngleForThisCall,
+                      materialForThisCall,
+                      styleRefForThisCall,
+                      poseAnchorImage,
+                    );
+                    ({ buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(retryUrl));
+                    finalPrompt = retryPrompt;
+                  } catch (retryErr) {
+                    // 재생성 실패 시 원본 결과를 그대로 쓴다 — 검증 루프가 생성 자체를 망치면 안 됨
+                    console.error('[api/product-fitting][after] 교정 재생성 실패 — 원본 결과 사용:', retryErr);
+                  }
+                }
+              }
+
+              await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt: finalPrompt });
               // 다음 포즈들의 기준 사진으로 재사용할 수 있도록 다운스케일해서 반환
               return downscaleImage(outBuf, outMime);
             } catch (err: any) {

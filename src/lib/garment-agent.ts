@@ -11,20 +11,25 @@ import type { GarmentAnalysis, GarmentConstructionMap, StylingSuggestion, Source
 // (2026-07-17) 존별 필드를 Gemini responseSchema로 강제 — 자유 텍스트 한 필드로는 Gemini가
 // 대충 쓰거나 통째로 빼먹어도 조용히 통과됐다(고리+패치가 한쪽 다리에 뭉쳐서 나오는 사고로
 // 실제 재현 확인). required로 걸어두면 필드 자체가 없는 응답은 나올 수 없다.
+// (2026-07-19) 행 간 중복 금지 — 같은 디테일(예: 뒷주머니 한 쌍)이 왼다리 행/오른다리 행/
+// backPockets 행에 반복 등장하면 생성 모델이 "여러 개가 양쪽에 있다"로 읽는 사고가 실제
+// 프롬프트에서 재현됨. 대칭 쌍은 전용 행(backPockets 등)에만, 다리별 행에는 "그 다리에만
+// 있는" 비대칭 디테일만 적게 하고, 비대칭 디테일 전용 체크리스트 필드를 추가했다.
 const CONSTRUCTION_MAP_SCHEMA = {
   type: Type.OBJECT,
   properties: {
     photoClassification: { type: Type.STRING, description: 'Per-photo FRONT/BACK/side/close-up classification with the anatomical cue used (e.g. "Photo 1: center fly visible → FRONT; Photo 2: patch pockets + elastic waistband, no fly → BACK")' },
     frontWaistband: { type: Type.STRING, description: 'Front waistband construction: fly type, buttons/zip, belt loops, whether elastic is visible from front' },
-    frontLeftLeg: { type: Type.STRING, description: "Wearer's LEFT leg, front view: any pocket/patch/loop/seam or \"none\"" },
-    frontRightLeg: { type: Type.STRING, description: "Wearer's RIGHT leg, front view: any pocket/patch/loop/seam or \"none\"" },
+    frontLeftLeg: { type: Type.STRING, description: "Wearer's LEFT leg, front view — ONLY details that exist on this leg and NOT on the other leg (a symmetric pair present on both legs does NOT belong here). \"none\" if this leg has no unique detail" },
+    frontRightLeg: { type: Type.STRING, description: "Wearer's RIGHT leg, front view — ONLY details that exist on this leg and NOT on the other leg. \"none\" if this leg has no unique detail" },
     backWaistband: { type: Type.STRING, description: 'Back waistband construction: elastic gathering, yoke, or none' },
-    backLeftLeg: { type: Type.STRING, description: "Wearer's LEFT leg, back view: any pocket/patch/loop/seam or \"none\"" },
-    backRightLeg: { type: Type.STRING, description: "Wearer's RIGHT leg, back view: any pocket/patch/loop/seam or \"none\"" },
-    backPockets: { type: Type.STRING, description: 'Back pocket count, shape, and placement, or "none"' },
+    backLeftLeg: { type: Type.STRING, description: "Wearer's LEFT leg, back view — ONLY details that exist on this leg and NOT on the other leg (do NOT repeat the shared back-pocket pair here; that belongs in backPockets only). \"none\" if this leg has no unique detail" },
+    backRightLeg: { type: Type.STRING, description: "Wearer's RIGHT leg, back view — ONLY details that exist on this leg and NOT on the other leg (do NOT repeat the shared back-pocket pair here). \"none\" if this leg has no unique detail" },
+    backPockets: { type: Type.STRING, description: 'The symmetric back pocket pair ONLY: count, shape, placement (e.g. "two large rectangular patch pockets, one per side, upper back"), or "none". A pocket that exists on ONE side only goes in that leg\'s row instead, not here' },
     sideSeams: { type: Type.STRING, description: 'Side seam construction, or "not visible in provided photos" if unseen' },
+    asymmetryChecklist: { type: Type.STRING, description: 'EVERY one-side-only detail of this garment, each as "<detail> — wearer\'s <LEFT|RIGHT> <leg/side> ONLY, the opposite side has NO such detail", separated by "; ". Example: "hammer loop — wearer\'s LEFT leg ONLY, the opposite side has NO loop; cargo patch pocket with woven brand patch — wearer\'s RIGHT leg ONLY, the opposite side has NO cargo pocket and NO patch". Write "none — all details are symmetric" if truly nothing is one-sided' },
   },
-  required: ['photoClassification', 'frontWaistband', 'frontLeftLeg', 'frontRightLeg', 'backWaistband', 'backLeftLeg', 'backRightLeg', 'backPockets', 'sideSeams'],
+  required: ['photoClassification', 'frontWaistband', 'frontLeftLeg', 'frontRightLeg', 'backWaistband', 'backLeftLeg', 'backRightLeg', 'backPockets', 'sideSeams', 'asymmetryChecklist'],
 };
 
 /** OpenAI 폴백은 responseSchema 강제가 안 되므로, 필드가 빠지거나 문자열째로 와도 안전하게 정규화한다. */
@@ -45,6 +50,7 @@ function normalizeConstructionMap(cm: any): GarmentConstructionMap | undefined {
     backRightLeg: cm.backRightLeg || fallback,
     backPockets: cm.backPockets || fallback,
     sideSeams: cm.sideSeams || fallback,
+    asymmetryChecklist: cm.asymmetryChecklist || 'none — all details are symmetric',
   };
 }
 
@@ -153,6 +159,8 @@ CRITICAL RULES:
       BACK pockets: (count, shape, placement)
       SIDE seams / other: ...
    d. If a zone is not visible in any provided photo, write "not visible in provided photos — do not invent" for that zone.
+   e. NO DUPLICATION ACROSS ROWS (critical): each physical detail appears in EXACTLY ONE row of the map. A symmetric pair (e.g. the two standard back patch pockets) is described ONCE in its shared row ("backPockets": "two large rectangular patch pockets, one per side") and must NOT be repeated in the per-leg rows. The per-leg rows list ONLY details unique to that one leg. Repeating a detail in multiple rows makes the image generator render extra copies of it.
+   f. ASYMMETRY CHECKLIST ("asymmetryChecklist" field): after building the map, list every one-side-only detail as "<detail> — wearer's <LEFT|RIGHT> leg ONLY, the opposite side has NO such detail", joined by "; ". This is the ground truth used to catch mirrored/duplicated details in the generated output, so triple-check each side assignment against the mirror rule (b) before writing it.
 
 Return ONLY valid JSON, no markdown, no explanation:
 
@@ -166,7 +174,7 @@ Return ONLY valid JSON, no markdown, no explanation:
   "lightReaction": "how fabric reacts to light (e.g., 'matte finish, no sheen', 'subtle metallic sheen at highlights', 'slight luster, semi-matte')",
   "chestWidth": "estimated chest measurement if visible (e.g., '54cm', '58cm') or null",
   "length": "garment length description (e.g., 'hip length', 'cropped above waist', 'ankle length', '28 inch inseam') or null",
-  "constructionMap": "an OBJECT (per rule 6) with 9 required string fields: photoClassification, frontWaistband, frontLeftLeg, frontRightLeg, backWaistband, backLeftLeg, backRightLeg, backPockets, sideSeams — every field filled using WEARER'S left/right with the mirror rule applied, 'none' for empty zones, 'not visible in provided photos — do not invent' for unseen zones. Every field is mandatory, never omit one."
+  "constructionMap": "an OBJECT (per rule 6) with 10 required string fields: photoClassification, frontWaistband, frontLeftLeg, frontRightLeg, backWaistband, backLeftLeg, backRightLeg, backPockets, sideSeams, asymmetryChecklist — every field filled using WEARER'S left/right with the mirror rule applied, 'none' for empty zones, 'not visible in provided photos — do not invent' for unseen zones, no detail repeated across rows (rule 6e), and the asymmetry checklist per rule 6f. Every field is mandatory, never omit one."
 }
 `.trim();
 
@@ -283,7 +291,7 @@ CRITICAL RULES:
 3. Describe the item as a single individual garment (e.g. "A pair of vintage washed jeans").
 4. MANDATORY STRUCTURAL SCAN — before writing "details", look at the garment piece by piece and identify every seam/panel line, every pocket (type: cargo/welt/patch/coin/slit + exact location), every logo/brand patch/embroidery/print (exact location, e.g. "left thigh cargo pocket flap"), every closure (buttons/zippers/drawstrings/toggles/snaps, count + location), topstitching/contrast stitching, and hem style. This applies to EVERY garment type (cargo pants, shorts, jackets, knitwear), not only denim.
 5. For jeans/denim specifically, ALSO be extremely detailed about the washing texture, sandwashed fading on thighs/knees, vertical slub lines, whiskering lines at the crotch, and exact denim twill texture grain — in addition to the structural scan, not instead of it.
-6. MANDATORY CONSTRUCTION MAP ("constructionMap" field) — classify each photo as FRONT/BACK/side/close-up using garment anatomy (BOTTOMS: center fly/button+zip = FRONT; patch pockets/yoke/elastic gathering with no fly = BACK. TOPS: placket/graphic/forward collar = FRONT; plain yoke = BACK), stating the cue per photo, then map every zone in the WEARER'S left/right (mirror rule: in a FRONT view the wearer's left appears on the viewer's right; in a BACK view it does not mirror). Write labeled lines: FRONT waistband / FRONT wearer-left leg / FRONT wearer-right leg / BACK waistband / BACK wearer-left leg / BACK wearer-right leg / BACK pockets / SIDE seams. Mark empty zones "none" and unseen zones "not visible in provided photos — do not invent". Asymmetry matters (e.g. patch on one leg only, hammer loop on the other leg only, elastic on the back waistband only).
+6. MANDATORY CONSTRUCTION MAP ("constructionMap" field) — classify each photo as FRONT/BACK/side/close-up using garment anatomy (BOTTOMS: center fly/button+zip = FRONT; patch pockets/yoke/elastic gathering with no fly = BACK. TOPS: placket/graphic/forward collar = FRONT; plain yoke = BACK), stating the cue per photo, then map every zone in the WEARER'S left/right (mirror rule: in a FRONT view the wearer's left appears on the viewer's right; in a BACK view it does not mirror). Write labeled lines: FRONT waistband / FRONT wearer-left leg / FRONT wearer-right leg / BACK waistband / BACK wearer-left leg / BACK wearer-right leg / BACK pockets / SIDE seams. Mark empty zones "none" and unseen zones "not visible in provided photos — do not invent". Asymmetry matters (e.g. patch on one leg only, hammer loop on the other leg only, elastic on the back waistband only). NO DUPLICATION: each physical detail appears in exactly ONE line — symmetric pairs (the two back pockets) go only in the BACK pockets line, never repeated per-leg; per-leg lines list only one-leg-only details. End with an ASYMMETRY CHECKLIST line: every one-side-only detail as "<detail> — wearer's <LEFT|RIGHT> leg ONLY, the opposite side has NO such detail", joined by "; ".
 
 The JSON must follow this exact schema:
 {
@@ -697,5 +705,107 @@ Return ONLY valid JSON, no markdown:
     }
     // 추출 실패 시 단일 색상으로 폴백 — 기존 동작(이미지 그대로 1장 생성)과 동일해짐
     return [{ label: '기본 색상', color: 'the exact color shown in the product image' }];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 생성 결과 자동 검증 (2026-07-19)
+// 프롬프트 지시만으로는 비대칭 디테일(한쪽 다리에만 있는 패치/고리)이 양쪽에 복제되거나
+// 좌우 턴 방향이 무시되는 실패가 반복 재현됨 — 텍스트 지시의 한계. 생성된 사진을 Gemini가
+// 참고사진·구조맵과 대조해 합격/불합격 + 구체 결함 목록을 내고, 불합격이면 라우트에서
+// 결함 목록을 교정 지시로 붙여 1회 재생성한다. 검증 호출은 Gemini Flash라 생성비 대비 미미.
+// ─────────────────────────────────────────────────────────────────
+export interface GarmentRenderVerdict {
+  pass: boolean;
+  /** 재생성 프롬프트에 그대로 붙일 수 있는 영어 교정 지시 목록 (불합격 시에만 채워짐) */
+  defects: string[];
+}
+
+const RENDER_VERDICT_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    generatedView: { type: Type.STRING, description: 'Which side of the garment the GENERATED photo shows: "front", "back", "left side", "right side", or "three-quarter ..." — decided from garment anatomy (fly visible = front; back pockets/elastic gathering = back), not from a guess' },
+    pass: { type: Type.BOOLEAN, description: 'true only if EVERY check passed' },
+    defects: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: 'One entry per failed check, each written as a direct corrective instruction for the image generator (e.g. "The cargo patch pocket must appear ONLY on the wearer\'s RIGHT leg — remove the duplicate cargo pocket rendered on the wearer\'s left leg"). Empty array if pass=true',
+    },
+  },
+  required: ['generatedView', 'pass', 'defects'],
+};
+
+export async function verifyGarmentRender(
+  generatedImageBase64: string,
+  constructionMap: GarmentConstructionMap,
+  garmentAnalysis: GarmentAnalysis,
+  poseInstruction: string,
+  geminiApiKey: string,
+  referenceImagesBase64: string[] = [],
+): Promise<GarmentRenderVerdict> {
+  const parts: any[] = [];
+
+  referenceImagesBase64.slice(0, 2).forEach((img, i) => {
+    const { data, mimeType } = parseBase64(img);
+    parts.push({ text: `REFERENCE photo ${i + 1} — the real product being sold (ground truth for construction and fabric).` });
+    parts.push({ inlineData: { data, mimeType } });
+  });
+
+  {
+    const { data, mimeType } = parseBase64(generatedImageBase64);
+    parts.push({ text: 'GENERATED photo — an AI-generated model shot of the product. This is the photo you must inspect.' });
+    parts.push({ inlineData: { data, mimeType } });
+  }
+
+  parts.push({
+    text: `
+You are a strict QA inspector for AI-generated fashion lookbook photos. Inspect the GENERATED photo against the ground truth below and report every construction/placement defect.
+
+GROUND TRUTH CONSTRUCTION MAP (wearer's left/right):
+- FRONT waistband: ${constructionMap.frontWaistband}
+- FRONT wearer-LEFT leg: ${constructionMap.frontLeftLeg}
+- FRONT wearer-RIGHT leg: ${constructionMap.frontRightLeg}
+- BACK waistband: ${constructionMap.backWaistband}
+- BACK wearer-LEFT leg: ${constructionMap.backLeftLeg}
+- BACK wearer-RIGHT leg: ${constructionMap.backRightLeg}
+- BACK pockets: ${constructionMap.backPockets}
+- Side seams: ${constructionMap.sideSeams}
+- ASYMMETRY CHECKLIST (each item exists on EXACTLY ONE side): ${constructionMap.asymmetryChecklist}
+- Fabric: ${garmentAnalysis.material}; texture: ${garmentAnalysis.texture}; color: ${garmentAnalysis.color}
+
+POSE INSTRUCTION GIVEN TO THE GENERATOR (may be Korean): "${poseInstruction || '(default frontal standing pose)'}"
+
+INSPECTION PROCEDURE:
+1. Decide which side of the garment the GENERATED photo shows (front/back/side) using garment anatomy (fly = front; back pockets/elastic gathering = back).
+2. MIRROR RULE for reading the GENERATED photo: if it shows the FRONT, the wearer's LEFT is on the VIEWER'S RIGHT; if it shows the BACK, the wearer's left is on the viewer's left.
+3. For EVERY item in the ASYMMETRY CHECKLIST that should be visible from this view: (a) is it present? (b) is it on the correct wearer's side? (c) is the OPPOSITE side clean — no duplicate, echo, or mirrored copy? A checklist item rendered on BOTH legs is an automatic FAIL.
+4. Are there invented details not in the map (extra pockets, extra patches, extra seams/panel lines)? Compare against the REFERENCE photo(s) if provided.
+5. Does the garment's fabric/color in the GENERATED photo roughly match the ground truth (obvious mismatches only — e.g. smooth dress fabric instead of sturdy twill, clearly wrong color)? Ignore lighting differences.
+6. If the pose instruction specifies a turn/facing direction (e.g. 왼쪽 = model's left turn, 오른쪽 = model's right turn, 뒤 = back view): does the GENERATED body orientation actually match it? "왼쪽으로 돌아" means the model rotates toward the MODEL'S OWN left. If the direction is clearly opposite or ignored (e.g. frontal standing when a turn was required), that is a FAIL.
+
+Report pass=true ONLY if every applicable check passes. Each defect must be a self-contained corrective instruction the image generator can follow.
+`.trim(),
+  });
+
+  try {
+    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+    const response = await retryOn429(() =>
+      ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{ role: 'user', parts }],
+        config: {
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+          responseSchema: RENDER_VERDICT_SCHEMA as any,
+        },
+      }),
+    );
+    const parsed = JSON.parse(response.text?.trim() || '{}');
+    const defects = Array.isArray(parsed.defects) ? parsed.defects.filter((d: any) => typeof d === 'string' && d.trim()) : [];
+    return { pass: parsed.pass === true || defects.length === 0, defects };
+  } catch (err) {
+    // 검증 실패는 생성 자체를 막지 않는다 — 합격 처리하고 원본 결과를 그대로 쓴다 (fail-open)
+    console.warn('[VerifyAgent] 생성 결과 검증 호출 실패 — 검증 생략:', err);
+    return { pass: true, defects: [] };
   }
 }

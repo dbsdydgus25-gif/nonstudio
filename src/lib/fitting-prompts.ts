@@ -69,6 +69,13 @@ export interface GarmentConstructionMap {
   backRightLeg: string;
   backPockets: string;
   sideSeams: string;
+  /**
+   * (2026-07-19) 비대칭 체크리스트 — "한쪽에만 있는" 디테일만 골라 명시적으로 나열.
+   * 존별 행에 같은 디테일이 여러 번 등장하면(예: 뒷주머니가 왼다리 행/오른다리 행/
+   * backPockets 행에 3번) 생성 모델이 "양쪽에 다 있다"로 읽는 사고가 실제로 발생해서,
+   * "이 디테일은 정확히 이쪽 한 곳, 반대쪽엔 없음" 형태의 전용 필드를 분리했다.
+   */
+  asymmetryChecklist: string;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -453,7 +460,9 @@ export function buildProductFittingPrompt(
             `  BACK wearer-RIGHT leg: ${garmentAnalysis.constructionMap.backRightLeg}`,
             `  BACK pockets: ${garmentAnalysis.constructionMap.backPockets}`,
             `  Side seams: ${garmentAnalysis.constructionMap.sideSeams}`,
+            `  ASYMMETRY CHECKLIST (one-side-only details — the single most commonly failed part of this task): ${garmentAnalysis.constructionMap.asymmetryChecklist}`,
             `  RENDERING RULE for this map: decide the pose's camera-facing side FIRST (front-facing pose → render ONLY the FRONT waistband/left-leg/right-leg lines above; back-facing pose → render ONLY the BACK waistband/left-leg/right-leg/pockets lines above — never mix rows from both). A feature listed under "wearer-LEFT" must end up on the wearer's actual left leg and a feature under "wearer-RIGHT" on the wearer's actual right leg — these are two DIFFERENT features on two DIFFERENT legs, never merge them onto one leg and never put both on the same side. Remember the mirror rule when placing on the image: in a front-facing shot, the wearer's LEFT leg appears on the RIGHT side of the image; in a back-facing shot, the wearer's left leg appears on the left side of the image. A row that says "none" must be rendered with that zone plain/empty, and a row that says "not visible" must be rendered as the plainest reasonable continuation with no invented decoration.`,
+            `  ASYMMETRY RENDERING RULE: every item in the ASYMMETRY CHECKLIST exists on EXACTLY ONE leg/side of the garment. Rendering it on both legs is a FAILED output. For each checklist item: put it on the stated wearer's side, then actively verify the OPPOSITE leg is plain, with no copy, echo, or mirrored version of that detail. Symmetric pairs (e.g. "two back pockets, one per side") are listed outside the checklist and are the ONLY details allowed to appear on both sides.`,
           ].join('\n'),
         ]
       : []),
@@ -482,5 +491,19 @@ THE POSE FOR THIS SHOT (mandatory — this IS the pose to render, not a suggesti
     '',
     '=== OUTPUT QUALITY MANDATE ===',
     'Produce a single authentic commercial lookbook photograph — the kind a person would want to buy the product after seeing. Photorealistic, natural skin texture, natural fabric folds, professional photography lighting. No CGI, no collage, single subject only.',
+  ].join('\n');
+}
+
+/**
+ * (2026-07-19) 생성 후 자동 검증에서 결함이 발견됐을 때, 재생성 프롬프트 맨 앞에 붙이는
+ * 교정 블록. 맨 앞에 두는 이유: 이 코드베이스의 반복 교훈 — 지시문 위치가 반영을 좌우한다.
+ * 같은 프롬프트로 다시 돌리면 같은 실수를 반복하므로, "직전 시도가 정확히 어떤 검사에서
+ * 떨어졌는지"를 최우선 지시로 명시해야 교정된다.
+ */
+export function buildDefectCorrectionBlock(defects: string[]): string {
+  return [
+    '=== MANDATORY CORRECTIONS (a previous attempt at this exact shot FAILED automated inspection — fix every item below; these corrections override any conflicting habit) ===',
+    ...defects.map((d, i) => `${i + 1}. ${d}`),
+    'Re-render the shot with every correction applied. Everything else in the brief below stays the same.',
   ].join('\n');
 }
