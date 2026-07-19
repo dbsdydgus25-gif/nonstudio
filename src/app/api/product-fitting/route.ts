@@ -402,6 +402,16 @@ export async function POST(req: Request) {
           ): Promise<{ buffer: Buffer; mimeType: string } | null> => {
             const { generationId, imageBase64, colorVariant, poseInstruction } = unit;
             try {
+              // (2026-07-17) 기준 사진(poseAnchorImage)이 있으면 그 사진 자체가 이미 검증된
+              // "완성본"이라 재질/각도/스타일 참고 사진들은 중복 정보다 — 오히려 한 번에 너무
+              // 많은 이미지(제품4+재질4+스타일참고+기준+배경 10장 이상)를 넣으면 gpt-image-2가
+              // 헷갈려서 재질/구조를 뭉개는 문제가 실제로 재현됨. 기준 사진이 있을 땐 원본
+              // 참고 사진들을 비우고 [모델, 제품 대표컷, 기준사진, 배경]만 남겨 집중시킨다.
+              const otherAngleForThisCall = poseAnchorImage ? [] : otherAngleImagesDownscaled;
+              const materialForThisCall = poseAnchorImage ? [] : materialImagesDownscaled;
+              const styleRefForThisCall = poseAnchorImage ? [] : styleReferenceImagesFlat;
+              const styleRefCountsForThisCall = poseAnchorImage ? {} : styleReferenceCountsBySlot;
+
               const prompt = buildProductFittingPrompt(
                 sourcedCategory,
                 analysisForThisColor,
@@ -413,9 +423,9 @@ export async function POST(req: Request) {
                 colorVariant,
                 productNotes,
                 mergedHints,
-                otherAngleImagesDownscaled.length,
-                materialImagesDownscaled.length,
-                styleReferenceCountsBySlot,
+                otherAngleForThisCall.length,
+                materialForThisCall.length,
+                styleRefCountsForThisCall,
                 !!poseAnchorImage,
               );
 
@@ -426,9 +436,9 @@ export async function POST(req: Request) {
                 identityReferenceImage,
                 backgroundReferenceImage,
                 draftMode ? 'low' : 'medium',
-                otherAngleImagesDownscaled,
-                materialImagesDownscaled,
-                styleReferenceImagesFlat,
+                otherAngleForThisCall,
+                materialForThisCall,
+                styleRefForThisCall,
                 poseAnchorImage,
               );
               const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
