@@ -449,6 +449,18 @@ export async function POST(req: Request) {
               // 결과를 구조맵·참고사진과 대조해 불합격이면, 발견된 결함을 교정 지시로 프롬프트
               // 맨 앞에 붙여 딱 1회 재생성한다. (검증은 Flash라 저렴, 재생성은 불합격시에만)
               if (analysisForThisColor.constructionMap) {
+                // 스타일링 기대값(사용자 원문 우선) — 색/종류 무시(베이지 샌들→검정 등)를 검증에서 잡는다.
+                const VERIFY_SLOT_LABELS: Record<string, string> = { top: '상의', bottom: '하의', shoes: '신발', accessory: '액세서리' };
+                const styleChecklist = (['top', 'bottom', 'shoes', 'accessory'] as const)
+                  .filter((s) => s !== sourcedCategory)
+                  .map((slot) => {
+                    const raw = mergedHints[slot as keyof StyleHintsBySlot]?.trim();
+                    const gen = stylingSuggestion[slot as keyof typeof stylingSuggestion];
+                    const text = raw || (typeof gen === 'string' ? gen : '');
+                    return text ? { label: VERIFY_SLOT_LABELS[slot], text } : null;
+                  })
+                  .filter((x): x is { label: string; text: string } => !!x);
+
                 const verdict = await verifyGarmentRender(
                   `data:${outMime};base64,${outBuf.toString('base64')}`,
                   analysisForThisColor.constructionMap,
@@ -456,6 +468,8 @@ export async function POST(req: Request) {
                   poseInstruction || '',
                   geminiApiKey,
                   [imageBase64, ...(first.otherAngles || [])],
+                  styleChecklist,
+                  productNotes?.trim() || '',
                 );
                 if (!verdict.pass && verdict.defects.length > 0) {
                   console.warn('[api/product-fitting][after] 자동 검증 불합격 — 교정 재생성 1회 시도:', verdict.defects);

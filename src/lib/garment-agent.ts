@@ -742,6 +742,11 @@ export async function verifyGarmentRender(
   poseInstruction: string,
   geminiApiKey: string,
   referenceImagesBase64: string[] = [],
+  /** (2026-07-19) 스타일링 슬롯 기대값(사용자 원문 우선) — 베이지 샌들이 검정으로, 갈색 가방이
+   * 검정으로 나오는 등 색/종류 무시를 기계적으로 잡기 위해 검증에 함께 넘긴다. */
+  styleChecklist: Array<{ label: string; text: string }> = [],
+  /** 소싱 제품의 핵심 핏 지시(예: "목 꽉 맞음, 크롭, 머슬핏") — 목이 헐렁하게 나오는 등 핏 무시 검사용 */
+  keyFit: string = '',
 ): Promise<GarmentRenderVerdict> {
   const parts: any[] = [];
 
@@ -774,6 +779,8 @@ GROUND TRUTH CONSTRUCTION MAP (wearer's left/right):
 - Fabric: ${garmentAnalysis.material}; texture: ${garmentAnalysis.texture}; color: ${garmentAnalysis.color}
 
 POSE INSTRUCTION GIVEN TO THE GENERATOR (may be Korean): "${poseInstruction || '(default frontal standing pose)'}"
+${keyFit ? `\nSOURCED PRODUCT KEY FIT (may be Korean): "${keyFit}"` : ''}
+${styleChecklist.length ? `\nSTYLING THE MODEL WAS SUPPOSED TO WEAR (each line's COLOR and garment TYPE are mandatory; may be Korean):\n${styleChecklist.map((s) => `- ${s.label}: ${s.text}`).join('\n')}` : ''}
 
 INSPECTION PROCEDURE:
 1. Decide which side of the garment the GENERATED photo shows (front/back/side) using garment anatomy (fly = front; back pockets/elastic gathering = back).
@@ -782,6 +789,8 @@ INSPECTION PROCEDURE:
 4. Are there invented details not in the map (extra pockets, extra patches, extra seams/panel lines)? Compare against the REFERENCE photo(s) if provided.
 5. Does the garment's fabric/color in the GENERATED photo roughly match the ground truth (obvious mismatches only — e.g. smooth dress fabric instead of sturdy twill, clearly wrong color)? Ignore lighting differences.
 6. If the pose instruction specifies a turn/facing direction (e.g. 왼쪽 = model's left turn, 오른쪽 = model's right turn, 뒤 = back view): does the GENERATED body orientation actually match it? "왼쪽으로 돌아" means the model rotates toward the MODEL'S OWN left. If the direction is clearly opposite or ignored (e.g. frontal standing when a turn was required), that is a FAIL.
+${styleChecklist.length ? `7. STYLING CHECK — for EACH styling line above, look at the corresponding item in the GENERATED photo and verify BOTH its color and its garment type match the words. This is a common, high-priority failure: if the line says 베이지/beige and the item is black, or 갈색/brown and it is black, or 워싱 데님/washed denim and it is plain black slacks, that is a FAIL. Do NOT accept the outfit being recolored to a black/grey/monochrome look to match the product. Report each mismatch as a correction naming the item, the wrong color/type seen, and the required one.` : ''}
+${keyFit ? `8. FIT CHECK — verify the sourced product's fit matches the KEY FIT words. In particular a "tight/꽉 맞음/타이트" neckline must hug the neck high and close; a loose, wide, or dropped neckline that exposes the collarbone/trapezius is a FAIL. Report the required fit correction.` : ''}
 
 Report pass=true ONLY if every applicable check passes. Each defect must be a self-contained corrective instruction the image generator can follow.
 `.trim(),

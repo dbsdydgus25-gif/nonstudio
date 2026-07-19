@@ -432,11 +432,43 @@ export function buildProductFittingPrompt(
     return `- Image${nums.length > 1 ? 's' : ''} ${nums.join(', ')} ${nums.length > 1 ? 'are' : 'is'} a STYLING REFERENCE for the ${SLOT_LABELS[slot]} slot (not the sourced product) — dress the model in a ${SLOT_LABELS[slot]} matching this exact garment's design, color, and fit. Completely ignore any person, body, or background shown in ${nums.length > 1 ? 'these images' : 'this image'}. This reference image takes priority over any text styling description for the ${SLOT_LABELS[slot]} slot below when they conflict.`;
   }).filter((l): l is string => !!l);
 
+  // (2026-07-19) 최우선 체크리스트 — 이 코드베이스의 반복 교훈("지시문 위치가 반영을 좌우한다").
+  // 실제 실패 사례: 스타일링/포즈/핏 지시가 프롬프트 맨 끝에 있어, 앞쪽 제품 정밀재현 기계
+  // (CONSTRUCTION MAP 등 수천 단어)에 밀려 gpt-image-2가 색(베이지 샌들→검정, 갈색 가방→검정,
+  // 워싱 데님→검정 슬랙스)·핏(목 타이트→헐렁)을 통째로 무시함. 자주 놓치는 지시를 프롬프트 최상단에
+  // 사용자 "원문 그대로"로 끌어올리고, 회색 제품에 맞춰 전체를 모노톤으로 뭉개는 관성을 명시적으로 차단.
+  const CHECKLIST_SLOT_LABELS = { top: '상의', bottom: '하의', shoes: '신발', accessory: '액세서리' } as const;
+  const styledSlotOrder = (['top', 'bottom', 'shoes', 'accessory'] as const).filter((s) => s !== category);
+  const checklistStyleLines = styledSlotOrder
+    .map((slot) => {
+      const raw = userSlotMandates?.[slot]?.trim();
+      const gen = stylingSuggestion[slot as keyof StylingSuggestion];
+      const text = raw || (typeof gen === 'string' ? gen : '');
+      if (!text) return null;
+      return `  - ${CHECKLIST_SLOT_LABELS[slot]}: ${text}`;
+    })
+    .filter((l): l is string => !!l);
+
+  const priorityChecklistBlock = [
+    '=== OUTFIT & POSE — HIGHEST-PRIORITY CHECKLIST (read and obey this FIRST; these exact instructions are the ones most often missed, so they come before everything else) ===',
+    `SOURCED PRODUCT (this is the ${CATEGORY_PRESERVE_LABEL[category]} the model actually wears; full spec in PRODUCT FIDELITY below): ${garmentAnalysis.color}, ${garmentAnalysis.fitType} fit.${productNotes?.trim() ? ` KEY FIT — OBEY EXACTLY: ${productNotes.trim()} (e.g. a "tight/꽉 맞음" neckline hugs the neck high and close — do NOT render a loose, wide, or dropped neckline that exposes the collarbone/trapezius).` : ''}`,
+    ...(checklistStyleLines.length
+      ? [
+          'STYLE THE REMAINING ITEMS EXACTLY AS WRITTEN — each item\'s stated COLOR and garment TYPE are mandatory. They are usually DIFFERENT from the product; do NOT recolor them to match the product and do NOT collapse the outfit into a black/grey/monochrome look:',
+          ...checklistStyleLines,
+          'COLOR & TYPE ARE NON-NEGOTIABLE: read each item\'s exact words and match them literally — 베이지(beige) sandals are BEIGE not black; 갈색(brown) bag is BROWN not black; 워싱 와이드 데님(washed wide denim) is blue washed wide-leg denim, NOT black slacks and NOT a side-stripe trouser. Verify every styled item\'s color and type against the words above before finalizing.',
+        ]
+      : []),
+    `POSE (obey exactly): ${userAdditions.trim() || 'clean, confident commercial standing pose, facing camera'}`,
+    '',
+  ];
+
   return [
     '=== TASK: DRESS THE MODEL IN THE PRODUCT ===',
     `${identityBlock}`,
     `Image ${productImageNumber} is a shop listing photo of a ${CATEGORY_PRESERVE_LABEL[category]} — it may be laid flat, on a hanger, a catalog shot, or worn by some other shop model. ONLY the product itself is the reference from Image ${productImageNumber}: completely ignore any person, body, face, pose, other garments, and background shown there. Produce a photorealistic commercial lookbook photograph of the Image 1 model actually WEARING this exact product, fitted naturally on the body.`,
     '',
+    ...priorityChecklistBlock,
     '=== MODEL (fixed personal standard) ===',
     buildModelLockLines(bodySpec),
     '',
@@ -453,7 +485,10 @@ export function buildProductFittingPrompt(
     `- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image ${productImageNumber} — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.`,
     `- CRITICAL BUTTON/HARDWARE COUNT RULE: before finalizing, actually count the buttons, snaps, zippers, or other hardware visible in ${materialImageNumbers.length ? `the close-up material reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')}) — this is the clearest, most zoomed-in view and is the authoritative source for the exact count and spacing` : `Image ${productImageNumber}`}. The output must show that exact same count in the exact same positions — neither more nor fewer. This is a common failure mode: do not casually add an extra button or omit one out of habit. Every button must sit directly on the actual fabric placket opening with a real, visible buttonhole/gap beneath it — never place a button on a closed, seamless section of the knit/fabric where there is no opening, and never render two buttons stacked or duplicated at the same spot. The button placket must look structurally coherent, like a real garment construction photo.`,
     `- CRITICAL SEAM/POCKET/PATCH RULE: the "Details" spec above lists the exact seam/panel lines, pocket type+location, and logo/patch placement found by directly inspecting the real product photos. Treat this list as a checklist — reproduce each item at its stated location, in the stated quantity, and invent NOTHING beyond what is listed (no extra pocket, no extra patch, no seam line that isn't described). A single patch mentioned once must appear exactly once, at the location described — never mirrored onto both sides or duplicated. This is a common failure mode when the model isn't given a clear reference photo of the construction, so double-check the reference image(s) directly rather than defaulting to a generic version of this garment type.`,
-    ...(garmentAnalysis.constructionMap
+    // (2026-07-19) CONSTRUCTION MAP은 하의(다리/포켓 좌우 비대칭)용 도구다. 상의/신발/액세서리에
+    // 넣으면 "FRONT wearer-LEFT leg: not applicable for a top" 같은 무의미한 줄이 7개씩 깔려
+    // 정작 중요한 스타일링/핏 지시를 희석한다(실제 실패 확인). 하의일 때만 렌더한다.
+    ...(garmentAnalysis.constructionMap && category === 'bottom'
       ? [
           [
             `- CONSTRUCTION MAP (zone-by-zone ground truth, in the WEARER'S left/right — this is the authoritative placement checklist, it wins over any generic assumption about this garment type):`,
