@@ -309,13 +309,12 @@ export async function POST(req: Request) {
       const identityReferenceImage = rawIdentity ? await downscaleImage(rawIdentity.buffer, rawIdentity.mimeType) : null;
       const bodySpec = buildBodySpecFromProfile(modelProfile);
 
-      // 재질 참고 사진은 색상 옵션과 무관하게 모든 job에 공통으로 쓰인다 — 한 번만 다운스케일.
-      const materialImagesDownscaled = await Promise.all(
-        (materialImagesBase64 || []).slice(0, 4).map(async (b64) => {
-          const parsed = parseBase64Image(b64);
-          return downscaleImage(parsed.buffer, parsed.mimeType);
-        }),
-      );
+      // (2026-07-19) 재질 참고 사진은 이제 생성기(gpt-image-2)에 이미지로 넣지 않는다 —
+      // 대표님 지시: 제품 이미지가 색/디자인/기장/실루엣의 유일한 주(主) 기준이고, 재질 참고는
+      // "원단/질감을 분석해 설명(텍스트)으로 얹는" 보조 역할이다. 재질 클로즈업을 생성기에 직접
+      // 넣으면 확대된 짜임이 패턴으로, 다른 조명의 색이 색상으로 오염돼(혼용) 색·패턴이 틀어졌다.
+      // 그래서 재질 이미지는 analyzeGarment(Gemini)에만 넘겨 material/texture/lightReaction 텍스트로
+      // 뽑고, 그 텍스트만 프롬프트에 넣는다. 생성기 입력은 제품 이미지(+다른 각도)만 유지.
 
       // (2026-07-17) 소싱 제품이 아닌 슬롯(예: 상의) "이렇게 입혀줘" 참고 사진 — 슬롯당 최대
       // 3장, 색상/포즈와 무관하게 공통이라 한 번만 다운스케일한다. SLOT_ORDER 고정 순서로
@@ -408,7 +407,8 @@ export async function POST(req: Request) {
               // 헷갈려서 재질/구조를 뭉개는 문제가 실제로 재현됨. 기준 사진이 있을 땐 원본
               // 참고 사진들을 비우고 [모델, 제품 대표컷, 기준사진, 배경]만 남겨 집중시킨다.
               const otherAngleForThisCall = poseAnchorImage ? [] : otherAngleImagesDownscaled;
-              const materialForThisCall = poseAnchorImage ? [] : materialImagesDownscaled;
+              // 재질 참고 이미지는 생성기에 넣지 않는다(위 주석 참고) — 항상 빈 배열.
+              const materialForThisCall: Array<{ buffer: Buffer; mimeType: string }> = [];
               const styleRefForThisCall = poseAnchorImage ? [] : styleReferenceImagesFlat;
               const styleRefCountsForThisCall = poseAnchorImage ? {} : styleReferenceCountsBySlot;
 

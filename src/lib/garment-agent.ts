@@ -212,7 +212,7 @@ export async function analyzeGarment(
     materialImagesBase64!.forEach((imgBase64, i) => {
       const { data, mimeType } = parseBase64(imgBase64);
       parts.push({
-        text: `Material reference photo ${i + 1} — a close-up of the SAME product's fabric/hardware. Use this ONLY to refine "material", "texture", "lightReaction", and "details" (buttons, stitching, weave/knit structure). Do NOT use it to determine "color" — trust the PRIMARY product photo(s) above for color.`,
+        text: `Material reference photo ${i + 1} — a close-up of the SAME product's FABRIC. Use this ONLY to describe how the fabric feels and reflects light: the "material" (fiber/weave/knit type, thickness), "texture" (surface weave/knit structure, hand), and "lightReaction" (matte/sheen) fields. Do NOT let this photo influence "color", any pattern/print, the silhouette, the length, or the construction "details" (pockets, seams, logo/patch placement) — those come exclusively from the PRIMARY product photo(s) above. A zoomed-in weave here is the fabric's texture, NOT a decorative pattern.`,
       });
       parts.push({ inlineData: { data, mimeType } });
     });
@@ -311,7 +311,7 @@ Output raw JSON ONLY. No markdown formatting, no \`\`\`json block. Just the raw 
             content: [
               {
                 type: 'text',
-                text: `Analyze these garment photos. Category requested by user: ${userCategory || 'unknown'}. Additional specs: ${rawSpecs || ''}.${hasMaterialImages ? ' The additional images after the primary ones are CLOSE-UP MATERIAL REFERENCE photos of the same product — use them only to refine material/texture/details, NOT color.' : ''}`
+                text: `Analyze these garment photos. Category requested by user: ${userCategory || 'unknown'}. Additional specs: ${rawSpecs || ''}.${hasMaterialImages ? ' The additional images after the primary ones are CLOSE-UP FABRIC reference photos of the same product — use them ONLY to describe material/texture/lightReaction (fabric hand, weave/knit, sheen). Do NOT take color, pattern/print, silhouette, length, or construction details from them; those come only from the primary product photos. A zoomed weave is texture, not a pattern.' : ''}`
               },
               ...garmentImagesBase64.map(b64 => {
                 const { data, mimeType } = parseBase64(b64);
