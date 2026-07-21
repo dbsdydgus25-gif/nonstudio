@@ -1,17 +1,23 @@
 /**
  * /api/product-fitting/from-link/route.ts
- * "링크로 가져오기(보조)" — 경쟁사 상세페이지 URL에서 제품 이미지 + 텍스트를 best-effort로 추출.
+ * "링크로 가져오기(보조)" — 경쟁사/자사몰 상세페이지 URL에서 제품 이미지·재질(상세)컷·색상/사이즈
+ * 옵션을 best-effort로 추출해 기존 파이프라인의 각 파트(제품 이미지/재질 참고 사진/색상/사이즈)에
+ * 그대로 꽂는다.
  *
  * 정직한 한계(이번 세션 실측): 네이버 스마트스토어(HTTP 429, nfront)·신상마켓(Cloudflare)은
  * 서버에서 못 연다. 그런 사이트는 blocked=true로 돌려주고 프론트가 "이미지를 저장해 올려주세요"로
- * 안내한다. 열리는 사이트(예: 4910)만 og:image/갤러리 이미지를 내려받아 data URL로 반환한다.
- * 반환된 이미지는 그대로 productImagesBase64로 써서 기존 분석/생성 파이프라인에 태운다.
+ * 안내한다. 카페24 등 열리는 자사몰/일부 경쟁사는 아래처럼 이미지를 두 종류로 나눠 내려받는다.
+ *
+ * (2026-07-21 2차) 카페24 상세설명(에디봇) 영역은 이 제품과 무관한 브랜드 무드컷/타 상품 사진이
+ * 섞여 나올 수 있음이 실측 확인됨(예: 상품과 다른 색·다른 사람이 나온 거리 스냅). geminiApiKey가
+ * 있으면 다운로드한 후보들을 Gemini Flash로 한 번에 "이 상품을 실제로 보여주는가"만 검사해 걸러낸다.
  */
 
 import { NextResponse } from 'next/server';
+import { GoogleGenAI, Type } from '@google/genai';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
@@ -44,20 +50,23 @@ function extractMeta(html: string, prop: string): string {
   return m?.[1]?.trim() || '';
 }
 
-/** HTML에서 제품 이미지로 보이는 URL 후보들을 모은다(og:image + img src + JSON 안 이미지 URL). */
-function collectImageUrls(html: string, pageUrl: string): string[] {
-  const urls = new Set<string>();
-  const og = extractMeta(html, 'image');
-  if (og) urls.add(og);
+function resolveUrl(u: string, origin: string): string {
+  if (u.startsWith('//')) return `https:${u}`;
+  if (u.startsWith('/') && origin) return origin + u;
+  return u;
+}
 
-  // <img src>, data-src, srcset 첫 URL
-  for (const m of html.matchAll(/<img[^>]+(?:src|data-src)=["']([^"']+)["']/gi)) urls.add(m[1]);
-  // (2026-07-21) 카페24 등은 상세 설명 이미지(사이즈표·재질 텍스트가 박힌 긴 상세컷)를
-  // ec-data-src로 지연 로딩한다 — 이걸 빼면 정작 중요한 상세컷을 놓친다.
-  for (const m of html.matchAll(/ec-data-src=["']([^"']+)["']/gi)) urls.add(m[1]);
-  // __NEXT_DATA__/JSON 등에 박힌 이미지 URL
-  for (const m of html.matchAll(/https?:\/\/[^"'\\ )]+\.(?:jpe?g|png|webp)(?:\?[^"'\\ )]*)?/gi)) urls.add(m[0]);
+const isJunkUrl = (u: string) => /\.svg(\?|$)|sprite|icon|logo|favicon|blank|placeholder|1x1|pixel|badge|btn_/i.test(u);
 
+/**
+ * 이미지 후보를 두 갈래로 분리한다:
+ * - official: 쇼핑몰 "상품 목록/대표 이미지" 규약 경로(예: 카페24 /web/product/(big|extra/big)/,
+ *   cloudfront/cdn goods 경로) — 제품 자체를 보여주는 공식 컷일 확률이 높다 → "제품 이미지"로.
+ * - detail: 본문(상세설명·에디봇) 안에 자유 삽입된 이미지(카페24 ec-data-src 등) — 사이즈표·재질
+ *   클로즈업·상세 텍스트가 섞여 있지만, 브랜드 무드컷 등 무관한 사진도 섞일 수 있다 → "재질 참고
+ *   사진"으로 보내고, 실제 옷과 무관한지는 아래 비전 필터로 다시 거른다.
+ */
+function collectImageUrls(html: string, pageUrl: string): { official: string[]; detail: string[] } {
   const origin = (() => {
     try {
       return new URL(pageUrl).origin;
@@ -66,17 +75,34 @@ function collectImageUrls(html: string, pageUrl: string): string[] {
     }
   })();
 
-  const isJunk = (u: string) => /\.svg(\?|$)|sprite|icon|logo|favicon|blank|placeholder|1x1|pixel|badge|btn_/i.test(u);
+  const officialSet = new Set<string>();
+  const detailSet = new Set<string>();
 
-  return Array.from(urls)
-    .map((u) => (u.startsWith('//') ? `https:${u}` : u.startsWith('/') && origin ? origin + u : u))
-    .filter((u) => /^https?:\/\//.test(u) && !isJunk(u))
-    // 제품 이미지일 가능성이 큰 것 우선(cloudfront/cdn/goods/product), 그다음 나머지
-    .sort((a, b) => {
-      const score = (u: string) => (/cloudfront|cdn|goods|product|detail|image/i.test(u) ? 0 : 1);
-      return score(a) - score(b);
-    })
-    .slice(0, 12);
+  const og = extractMeta(html, 'image');
+  if (og) officialSet.add(og);
+
+  // 카페24 상품 목록/대표 이미지 규약: /web/product/big/, /web/product/extra/big/
+  for (const m of html.matchAll(/https?:\/\/[^"'\\ )]*\/web\/product\/(?:big|extra\/big)\/[^"'\\ )]+\.(?:jpe?g|png|webp)/gi))
+    officialSet.add(m[0]);
+  // 일반 <img src>/data-src — 카테고리 불명확하니 공식 후보로 취급(og:image류와 유사 위치가 많음)
+  for (const m of html.matchAll(/<img[^>]+(?:src|data-src)=["']([^"']+)["']/gi)) officialSet.add(m[1]);
+  // 그 외 cloudfront/cdn/goods 이미지 URL(경쟁사 자체 CDN)
+  for (const m of html.matchAll(/https?:\/\/[^"'\\ )]*(?:cloudfront|cdn)[^"'\\ )]*\.(?:jpe?g|png|webp)(?:\?[^"'\\ )]*)?/gi))
+    officialSet.add(m[0]);
+
+  // 카페24 상세설명(에디봇) 지연로딩 — 사이즈표·재질 클로즈업이 여기 있다
+  for (const m of html.matchAll(/ec-data-src=["']([^"']+)["']/gi)) detailSet.add(m[1]);
+
+  const clean = (set: Set<string>, cap: number) =>
+    Array.from(set)
+      .map((u) => resolveUrl(u, origin))
+      .filter((u) => /^https?:\/\//.test(u) && !isJunkUrl(u))
+      .filter((u, i, arr) => arr.indexOf(u) === i)
+      .slice(0, cap);
+
+  const official = clean(officialSet, 14);
+  const detailOnly = clean(detailSet, 20).filter((u) => !official.includes(u));
+  return { official, detail: detailOnly };
 }
 
 /** 상품 옵션 <select>(색상/사이즈)에서 실제 옵션 값을 뽑는다. 카페24 등 대부분 자사몰에 통함. */
@@ -126,9 +152,64 @@ async function downloadImage(url: string, referer: string): Promise<string | nul
   }
 }
 
+/**
+ * (2026-07-21) 상세페이지 본문에는 이 상품과 무관한 브랜드 무드컷/타 상품 사진이 섞여 나올 수
+ * 있음이 실측 확인됨. Gemini Flash로 한 번에 "이 제품(제목/색상 기준)을 실제로 보여주는가"만
+ * 검사해 무관한 이미지를 제거한다. geminiApiKey가 없으면 필터 없이 전부 통과(fail-open).
+ */
+async function filterRelevantImages(
+  images: string[],
+  title: string,
+  colorOptions: string[],
+  geminiApiKey?: string,
+): Promise<boolean[]> {
+  if (!geminiApiKey || images.length === 0) return images.map(() => true);
+  try {
+    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+    const parts: any[] = [
+      {
+        text: `These ${images.length} numbered photos (index 0 to ${images.length - 1}, in order) were scraped from a single product's detail page titled "${title || 'unknown'}"${colorOptions.length ? `, sold in these colorways: ${colorOptions.join(', ')}` : ''}. Some may be UNRELATED brand mood shots, a different product, banners/promos, or street photography that does not actually show this garment. For EACH image, decide if it should be KEPT (it clearly shows THIS garment — worn, laid flat, a construction/fabric close-up, or a size chart) or DROPPED (unrelated scenery/person, a clearly different garment/color-family, or a banner/promo graphic with no real garment view). Return keep=true/false per index, in the same order.`,
+      },
+    ];
+    images.forEach((img, i) => {
+      const [, data] = img.split(',');
+      const mimeType = img.match(/data:([^;]+)/)?.[1] || 'image/jpeg';
+      parts.push({ text: `Image index ${i}:` });
+      parts.push({ inlineData: { data, mimeType } });
+    });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts }],
+      config: {
+        temperature: 0.1,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            decisions: {
+              type: Type.ARRAY,
+              items: { type: Type.OBJECT, properties: { index: { type: Type.NUMBER }, keep: { type: Type.BOOLEAN } }, required: ['index', 'keep'] },
+            },
+          },
+          required: ['decisions'],
+        } as any,
+      },
+    });
+    const parsed = JSON.parse(response.text?.trim() || '{}');
+    const decisions: Array<{ index: number; keep: boolean }> = Array.isArray(parsed.decisions) ? parsed.decisions : [];
+    const keepMap = new Map(decisions.map((d) => [d.index, d.keep]));
+    // 판정이 없는 이미지는 안전하게 통과(fail-open) — 필터가 실수로 다 지우는 것보다 낫다
+    return images.map((_, i) => keepMap.get(i) ?? true);
+  } catch (err) {
+    console.warn('[from-link] 이미지 관련성 필터 호출 실패 — 필터 생략:', err);
+    return images.map(() => true);
+  }
+}
+
 export async function POST(req: Request) {
   try {
-    const { url } = (await req.json()) as { url: string };
+    const { url, geminiApiKey } = (await req.json()) as { url: string; geminiApiKey?: string };
     if (!url || !/^https?:\/\//i.test(url.trim())) {
       return NextResponse.json({ success: false, error: '올바른 상품 링크(http/https)를 입력해주세요.' }, { status: 400 });
     }
@@ -157,9 +238,9 @@ export async function POST(req: Request) {
 
     const title = extractMeta(html, 'title');
     const description = extractMeta(html, 'description');
-    const candidates = collectImageUrls(html, pageUrl);
+    const { official, detail } = collectImageUrls(html, pageUrl);
+    const options = extractOptions(html);
 
-    // 상위 후보 몇 장만 실제 다운로드(핫링크 차단은 자동 제외). 최대 6장.
     const referer = (() => {
       try {
         return new URL(pageUrl).origin + '/';
@@ -167,16 +248,27 @@ export async function POST(req: Request) {
         return pageUrl;
       }
     })();
-    const downloaded: string[] = [];
-    for (const c of candidates) {
-      if (downloaded.length >= 8) break;
-      const data = await downloadImage(c, referer);
-      if (data) downloaded.push(data);
-    }
 
-    const options = extractOptions(html);
+    const downloadBucket = async (urls: string[], cap: number) => {
+      const out: string[] = [];
+      for (const u of urls) {
+        if (out.length >= cap) break;
+        const data = await downloadImage(u, referer);
+        if (data) out.push(data);
+      }
+      return out;
+    };
 
-    if (downloaded.length === 0) {
+    const productImagesRaw = await downloadBucket(official, 8);
+    const materialImagesRaw = await downloadBucket(detail, 6);
+
+    // 무관 이미지 필터 — 두 버킷을 합쳐 한 번에 검사(호출 절약), keep[]을 원래 길이 기준으로 되나눈다.
+    const combined = [...productImagesRaw, ...materialImagesRaw];
+    const keep = await filterRelevantImages(combined, title, options.colors, geminiApiKey);
+    const productImages = productImagesRaw.filter((_, i) => keep[i]);
+    const materialImages = materialImagesRaw.filter((_, i) => keep[productImagesRaw.length + i]);
+
+    if (productImages.length === 0 && materialImages.length === 0) {
       return NextResponse.json({
         success: false,
         blocked: true,
@@ -188,7 +280,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      images: downloaded,
+      productImages,
+      materialImages,
       title,
       description,
       sourceUrl: pageUrl,

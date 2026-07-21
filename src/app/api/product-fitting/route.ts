@@ -143,6 +143,7 @@ export async function POST(req: Request) {
       colorPlans,
       productNotes,
       selectedSize,
+      colorOverride,
       draftMode,
       poseCount,
       customPoseTexts,
@@ -161,6 +162,9 @@ export async function POST(req: Request) {
       productNotes?: string;
       /** (2026-07-19) 사용자가 선택한 사이즈 — 라벨 + 있으면 실측치. 실측은 핏 참고로만 반영. */
       selectedSize?: { label: string; measurements?: string };
+      /** (2026-07-21) 링크로 가져온 판매 컬러웨이 중 참고 사진과 다른 색을 선택했을 때의 override
+       * (예: 사진은 BROWN인데 "NAVY" 선택) — 실제 판매 색상 중 의도적 선택이라 색상 규칙의 유일한 예외. */
+      colorOverride?: string;
       /** true면 초안 품질(low)로 생성 — medium 대비 약 1/4 비용 */
       draftMode?: boolean;
       /** true면 첫 이미지(색상 샘플 시트)에서 색상 옵션을 자동 추출해 색상별로 생성 */
@@ -441,6 +445,7 @@ export async function POST(req: Request) {
                 materialForThisCall.length,
                 styleRefCountsForThisCall,
                 !!poseAnchorImage,
+                colorOverride?.trim() || '',
               );
 
               const imageUrl = await runSingleProductFitting(

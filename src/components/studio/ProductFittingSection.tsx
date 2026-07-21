@@ -72,6 +72,10 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   const [sizeOptions, setSizeOptions] = useState<Array<{ label: string; measurements?: string }>>([]);
   const [selectedSize, setSelectedSize] = useState<{ label: string; measurements?: string } | null>(null);
   const [isLoadingSizes, setIsLoadingSizes] = useState(false);
+  // (2026-07-21) 링크에서 추출한 판매 색상 옵션(드롭다운 실값) — 참고 사진과 다른 색을 고르면
+  // colorOverride로 프롬프트에 명시 반영(사진 색이 곧 정답이라는 규칙의 유일한 예외)
+  const [linkColorOptions, setLinkColorOptions] = useState<string[]>([]);
+  const [colorOverride, setColorOverride] = useState<string | null>(null);
   // 초안 품질(low) — medium 대비 약 1/4 비용, 코디/색상 확인용
   const [draftMode, setDraftMode] = useState(false);
   const otherSlots = CATEGORY_OPTIONS.map((c) => c.id).filter((id) => id !== category);
@@ -204,7 +208,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       const res = await fetch('/api/product-fitting/from-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, geminiApiKey: geminiKey }),
       });
       const data = await res.json();
       if (data.blocked) {
@@ -212,21 +216,28 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         return;
       }
       if (!res.ok || !data.success) throw new Error(data.error || '링크에서 가져오지 못했습니다.');
-      const imgs: string[] = data.images || [];
-      setProductImages((prev) => [...prev, ...imgs].slice(0, 8));
+      // 공식 제품컷은 "제품 이미지"로, 상세설명 속 클로즈업/사이즈표는 "재질 참고 사진"으로 —
+      // 각 파트에 자동으로 꽂혀서 색/핏은 제품컷 기준, 질감/사이즈는 상세컷 기준으로 분석됨.
+      const productImgs: string[] = data.productImages || [];
+      const materialImgs: string[] = data.materialImages || [];
+      setProductImages((prev) => [...prev, ...productImgs].slice(0, 8));
+      setMaterialImages((prev) => [...prev, ...materialImgs].slice(0, 4));
       // <select>에서 뽑은 정확한 사이즈 옵션이 있으면 바로 채운다 (없으면 상세컷 분석으로 보완)
       const linkSizes: Array<{ label: string; measurements?: string }> = data.sizeOptions || [];
       if (linkSizes.length) setSizeOptions(linkSizes);
       const colorOpts: string[] = data.colorOptions || [];
+      setLinkColorOptions(colorOpts);
+      setColorOverride(null);
       const extra = [
         colorOpts.length ? `색상 ${colorOpts.length}개(${colorOpts.slice(0, 6).join(', ')})` : '',
+        materialImgs.length ? `재질 참고 ${materialImgs.length}장` : '',
         linkSizes.length ? `사이즈 ${linkSizes.length}개` : '',
       ]
         .filter(Boolean)
         .join(' · ');
       setImportMsg({
         kind: 'ok',
-        text: `${imgs.length}장을 가져왔습니다${data.title ? ` — ${data.title}` : ''}${extra ? ` / ${extra} 인식` : ''}. 아래에서 확인하고 필요 없는 건 지우세요.`,
+        text: `제품 이미지 ${productImgs.length}장을 가져왔습니다${data.title ? ` — ${data.title}` : ''}${extra ? ` / ${extra} 인식` : ''}. 아래에서 확인하고 필요 없는 건 지우세요.`,
       });
     } catch (err: any) {
       setImportMsg({ kind: 'blocked', text: err?.message || '링크 처리 중 오류가 발생했습니다.' });
@@ -304,6 +315,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           customPoseTexts: effectiveCustomPoseTexts,
           productNotes: productNotes.trim() || undefined,
           selectedSize: selectedSize || undefined,
+          colorOverride: colorOverride || undefined,
           draftMode,
           extractColors,
           // (2026-07-17) 색상 옵션 모드여도 공통으로 적용 — 참고 이미지는 색상과 무관하게
@@ -434,6 +446,28 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
               <p className={`text-[11px] leading-relaxed ${importMsg.kind === 'ok' ? 'text-emerald-600' : 'text-amber-600'}`}>
                 {importMsg.text}
               </p>
+            )}
+            {/* 링크에서 뽑은 판매 색상 옵션 — 참고 사진과 다른 색을 고르면 그 색으로 렌더링 지시 */}
+            {linkColorOptions.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[10px] font-semibold text-gray-500">판매 색상 (사진과 다른 색을 고르면 그 색으로 렌더링합니다)</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {linkColorOptions.map((c) => {
+                    const active = colorOverride === c;
+                    return (
+                      <button
+                        key={c}
+                        onClick={() => setColorOverride(active ? null : c)}
+                        className={`px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
+                          active ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400'
+                        }`}
+                      >
+                        {c}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             )}
             <p className="text-[10px] text-gray-400 leading-relaxed">
               ※ <b>네이버 스마트스토어·신상마켓은 봇 차단</b>으로 자동으로 못 엽니다 — 그 경우 상세페이지 이미지를 저장해 직접 올려주세요.

@@ -336,6 +336,13 @@ export function buildProductFittingPrompt(
    * (실제 재현 확인), AI 바리에이션처럼 "이미 확정된 사진"을 기준 삼으면 훨씬 일관되게 나온다.
    */
   hasPoseAnchorImage: boolean = false,
+  /**
+   * (2026-07-21) 링크로 가져온 상품의 판매 컬러웨이 중, 참고 사진과 다른 색을 명시적으로
+   * 선택했을 때의 override(예: 사진은 BROWN인데 "NAVY"를 선택). 사용자가 실제로 판매되는
+   * 색상 중 하나를 의도적으로 고른 것이므로, 아래 CRITICAL COLOR RULE의 "사진 색이 곧 정답"
+   * 원칙에 대한 유일한 예외로 취급한다 — 참고 사진 없는 텍스트 추측과는 다르다.
+   */
+  colorOverrideNote: string = '',
 ): string {
   const stylingLines: string[] = [];
   if (stylingSuggestion.top) stylingLines.push(`- 상의: ${stylingSuggestion.top}`);
@@ -457,7 +464,7 @@ export function buildProductFittingPrompt(
 
   const priorityChecklistBlock = [
     '=== OUTFIT & POSE — HIGHEST-PRIORITY CHECKLIST (read and obey this FIRST; these exact instructions are the ones most often missed, so they come before everything else) ===',
-    `SOURCED PRODUCT (this is the ${CATEGORY_PRESERVE_LABEL[category]} the model actually wears; full spec in PRODUCT FIDELITY below): ${garmentAnalysis.color}, ${garmentAnalysis.fitType} fit.${productNotes?.trim() ? ` KEY FIT — OBEY EXACTLY: ${productNotes.trim()} (e.g. a "tight/꽉 맞음" neckline hugs the neck high and close — do NOT render a loose, wide, or dropped neckline that exposes the collarbone/trapezius).` : ''}`,
+    `SOURCED PRODUCT (this is the ${CATEGORY_PRESERVE_LABEL[category]} the model actually wears; full spec in PRODUCT FIDELITY below): ${garmentAnalysis.color}, ${garmentAnalysis.fitType} fit.${productNotes?.trim() ? ` KEY FIT — OBEY EXACTLY: ${productNotes.trim()} (e.g. a "tight/꽉 맞음" neckline hugs the neck high and close — do NOT render a loose, wide, or dropped neckline that exposes the collarbone/trapezius).` : ''}${colorOverrideNote?.trim() ? ` MANDATORY SOLD COLORWAY OVERRIDE: ${colorOverrideNote.trim()} — this is a deliberate choice of a real colorway this product is sold in, not a guess; render the SAME garment (identical construction, texture, fit) recolored to this colorway instead of the reference photo's color. This is the ONE exception to the color rule below.` : ''}`,
     ...(checklistStyleLines.length
       ? [
           'STYLE THE REMAINING ITEMS EXACTLY AS WRITTEN — each item\'s stated COLOR and garment TYPE are mandatory. They are usually DIFFERENT from the product; do NOT recolor them to match the product and do NOT collapse the outfit into a black/grey/monochrome look:',
@@ -485,11 +492,17 @@ export function buildProductFittingPrompt(
     // (2026-07-19) 대표님 지시: 제품 이미지가 겉모습의 유일한 주(主) 기준, 재질은 "원단 느낌"
     // 텍스트로만 얹는 보조. 재질 참고 이미지는 아예 생성기에 안 들어오므로(=텍스트만), 여기서
     // "색·패턴·디자인·기장은 오직 제품 이미지에서만" 을 최우선으로 못박아 혼용을 원천 차단한다.
-    `- PRIMARY VISUAL SOURCE (highest priority, overrides every other reference): Image ${productImageNumber}${extraProductImageNumbers.length ? ` (and the other-angle product photo${extraProductImageNumbers.length > 1 ? 's' : ''} ${extraProductImageNumbers.join(', ')})` : ''} is the ONE AND ONLY source for the garment's COLOR, PATTERN/PRINT, overall DESIGN, LENGTH, and SILHOUETTE. These four things come exclusively from the product photo — no textual note and no other reference may change the color, invent a pattern, or alter the design/length. If the product photo shows a plain solid fabric, the output MUST be plain and solid.`,
+    `- PRIMARY VISUAL SOURCE (highest priority, overrides every other reference): Image ${productImageNumber}${extraProductImageNumbers.length ? ` (and the other-angle product photo${extraProductImageNumbers.length > 1 ? 's' : ''} ${extraProductImageNumbers.join(', ')})` : ''} is the ONE AND ONLY source for the garment's COLOR, PATTERN/PRINT, overall DESIGN, LENGTH, and SILHOUETTE${colorOverrideNote?.trim() ? ' (EXCEPT color, if a MANDATORY SOLD COLORWAY OVERRIDE is specified above — that wins for color only; pattern/design/length/silhouette still come from this photo)' : ''}. These four things come exclusively from the product photo — no textual note and no other reference may change the color, invent a pattern, or alter the design/length. If the product photo shows a plain solid fabric, the output MUST be plain and solid.`,
     `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}${productNotesLine}${extraAngleLine}${materialLine}${poseAnchorLine}`,
     // 재질/원단은 "만졌을 때의 표면 느낌"으로만 반영 — 그 자체가 색이나 무늬를 바꾸면 안 된다.
     `- MATERIAL/TEXTURE IS SURFACE-FEEL ONLY: the "Material / Surface texture / Light reaction" fields above describe how the fabric FEELS and reflects light (weave/knit hand, thickness, matte/sheen). Apply them ONLY as the surface finish on top of the product's actual look — they must NOT change the color, must NOT become a visible repeating pattern or print, and must NOT alter the design. A weave/knit structure is fabric texture, NOT a decorative motif — never render it as a printed pattern across the garment.`,
-    `- CRITICAL COLOR RULE: ${colorVariant ? `the "${colorVariant}" colorway` : `the color shown in Image ${productImageNumber}`} is the actual product color being sold — match it precisely, do not shift the hue, saturation, or brightness. Do NOT pull color from any other image or from the texture description.`,
+    `- CRITICAL COLOR RULE: ${
+      colorOverrideNote?.trim()
+        ? `render the MANDATORY SOLD COLORWAY OVERRIDE color specified above, NOT the color shown in Image ${productImageNumber} — the reference photo's own color is superseded by that explicit override.`
+        : colorVariant
+          ? `the "${colorVariant}" colorway`
+          : `the color shown in Image ${productImageNumber}`
+    }${colorOverrideNote?.trim() ? '' : ' is the actual product color being sold — match it precisely, do not shift the hue, saturation, or brightness. Do NOT pull color from any other image or from the texture description.'}`,
     `- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image ${productImageNumber} — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.`,
     `- CRITICAL BUTTON/HARDWARE COUNT RULE: before finalizing, actually count the buttons, snaps, zippers, or other hardware visible in ${materialImageNumbers.length ? `the close-up material reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')}) — this is the clearest, most zoomed-in view and is the authoritative source for the exact count and spacing` : `Image ${productImageNumber}`}. The output must show that exact same count in the exact same positions — neither more nor fewer. This is a common failure mode: do not casually add an extra button or omit one out of habit. Every button must sit directly on the actual fabric placket opening with a real, visible buttonhole/gap beneath it — never place a button on a closed, seamless section of the knit/fabric where there is no opening, and never render two buttons stacked or duplicated at the same spot. The button placket must look structurally coherent, like a real garment construction photo.`,
     `- CRITICAL SEAM/POCKET/PATCH RULE: the "Details" spec above lists the exact seam/panel lines, pocket type+location, and logo/patch placement found by directly inspecting the real product photos. Treat this list as a checklist — reproduce each item at its stated location, in the stated quantity, and invent NOTHING beyond what is listed (no extra pocket, no extra patch, no seam line that isn't described). A single patch mentioned once must appear exactly once, at the location described — never mirrored onto both sides or duplicated. This is a common failure mode when the model isn't given a clear reference photo of the construction, so double-check the reference image(s) directly rather than defaulting to a generic version of this garment type.`,
