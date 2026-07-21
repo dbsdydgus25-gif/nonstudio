@@ -214,7 +214,20 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       if (!res.ok || !data.success) throw new Error(data.error || '링크에서 가져오지 못했습니다.');
       const imgs: string[] = data.images || [];
       setProductImages((prev) => [...prev, ...imgs].slice(0, 8));
-      setImportMsg({ kind: 'ok', text: `${imgs.length}장을 가져왔습니다${data.title ? ` — ${data.title}` : ''}. 아래에서 확인하고 필요 없는 건 지우세요.` });
+      // <select>에서 뽑은 정확한 사이즈 옵션이 있으면 바로 채운다 (없으면 상세컷 분석으로 보완)
+      const linkSizes: Array<{ label: string; measurements?: string }> = data.sizeOptions || [];
+      if (linkSizes.length) setSizeOptions(linkSizes);
+      const colorOpts: string[] = data.colorOptions || [];
+      const extra = [
+        colorOpts.length ? `색상 ${colorOpts.length}개(${colorOpts.slice(0, 6).join(', ')})` : '',
+        linkSizes.length ? `사이즈 ${linkSizes.length}개` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      setImportMsg({
+        kind: 'ok',
+        text: `${imgs.length}장을 가져왔습니다${data.title ? ` — ${data.title}` : ''}${extra ? ` / ${extra} 인식` : ''}. 아래에서 확인하고 필요 없는 건 지우세요.`,
+      });
     } catch (err: any) {
       setImportMsg({ kind: 'blocked', text: err?.message || '링크 처리 중 오류가 발생했습니다.' });
     } finally {

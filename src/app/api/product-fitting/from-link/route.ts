@@ -52,6 +52,9 @@ function collectImageUrls(html: string, pageUrl: string): string[] {
 
   // <img src>, data-src, srcset 첫 URL
   for (const m of html.matchAll(/<img[^>]+(?:src|data-src)=["']([^"']+)["']/gi)) urls.add(m[1]);
+  // (2026-07-21) 카페24 등은 상세 설명 이미지(사이즈표·재질 텍스트가 박힌 긴 상세컷)를
+  // ec-data-src로 지연 로딩한다 — 이걸 빼면 정작 중요한 상세컷을 놓친다.
+  for (const m of html.matchAll(/ec-data-src=["']([^"']+)["']/gi)) urls.add(m[1]);
   // __NEXT_DATA__/JSON 등에 박힌 이미지 URL
   for (const m of html.matchAll(/https?:\/\/[^"'\\ )]+\.(?:jpe?g|png|webp)(?:\?[^"'\\ )]*)?/gi)) urls.add(m[0]);
 
@@ -74,6 +77,39 @@ function collectImageUrls(html: string, pageUrl: string): string[] {
       return score(a) - score(b);
     })
     .slice(0, 12);
+}
+
+/** 상품 옵션 <select>(색상/사이즈)에서 실제 옵션 값을 뽑는다. 카페24 등 대부분 자사몰에 통함. */
+function extractOptions(html: string): { colors: string[]; sizes: Array<{ label: string }> } {
+  const groups: string[][] = [];
+  for (const sel of html.matchAll(/<select[^>]*>([\s\S]*?)<\/select>/gi)) {
+    const body = sel[1];
+    const values = Array.from(body.matchAll(/<option[^>]*>([^<]+)<\/option>/gi))
+      .map((m) => m[1].trim())
+      .filter(
+        (v) =>
+          v &&
+          !/^-+$/.test(v) &&
+          !/선택|필수|옵션을|please|choose|^\s*$/i.test(v) &&
+          v.length <= 24,
+      );
+    if (values.length >= 1 && values.length <= 15) groups.push(values);
+  }
+
+  const SIZE_RE = /^(XXS|XS|S|M|L|XL|XXL|XXXL|F|FREE|\d{1,3}(?:호|inch|"|cm)?)$/i;
+  const colors = new Set<string>();
+  const sizes = new Set<string>();
+  for (const g of groups) {
+    const sizeLike = g.filter((v) => SIZE_RE.test(v)).length;
+    if (sizeLike >= Math.ceil(g.length * 0.6)) g.forEach((v) => sizes.add(v));
+    else g.forEach((v) => colors.add(v));
+  }
+  return {
+    colors: Array.from(colors).slice(0, 12),
+    sizes: Array.from(sizes)
+      .slice(0, 12)
+      .map((label) => ({ label })),
+  };
 }
 
 async function downloadImage(url: string, referer: string): Promise<string | null> {
@@ -133,10 +169,12 @@ export async function POST(req: Request) {
     })();
     const downloaded: string[] = [];
     for (const c of candidates) {
-      if (downloaded.length >= 6) break;
+      if (downloaded.length >= 8) break;
       const data = await downloadImage(c, referer);
       if (data) downloaded.push(data);
     }
+
+    const options = extractOptions(html);
 
     if (downloaded.length === 0) {
       return NextResponse.json({
@@ -154,6 +192,8 @@ export async function POST(req: Request) {
       title,
       description,
       sourceUrl: pageUrl,
+      colorOptions: options.colors, // <select>에서 뽑은 정확한 색상 옵션 (있으면)
+      sizeOptions: options.sizes, // <select>에서 뽑은 사이즈 옵션 (없으면 상세컷에서 비전이 읽음)
     });
   } catch (err: any) {
     console.error('[api/product-fitting/from-link] 처리 실패:', err);
