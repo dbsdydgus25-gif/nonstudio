@@ -54,6 +54,22 @@ function normalizeConstructionMap(cm: any): GarmentConstructionMap | undefined {
   };
 }
 
+/** 사이즈 옵션 정규화 — 라벨 없는/중복 항목 제거, 최대 12개. */
+function normalizeSizeOptions(raw: any): Array<{ label: string; measurements?: string }> | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const seen = new Set<string>();
+  const out: Array<{ label: string; measurements?: string }> = [];
+  for (const item of raw) {
+    const label = typeof item?.label === 'string' ? item.label.trim() : '';
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    const measurements = typeof item?.measurements === 'string' && item.measurements.trim() ? item.measurements.trim() : undefined;
+    out.push({ label, measurements });
+    if (out.length >= 12) break;
+  }
+  return out.length ? out : undefined;
+}
+
 // Gemini의 responseSchema는 응답 전체 형태를 강제한다 — constructionMap만 스키마를 걸고
 // 나머지 필드는 텍스트 지시로만 두면 모델이 다른 필드를 누락할 수 있어, 전체를 여기서 정의한다.
 const GARMENT_ANALYSIS_SCHEMA = {
@@ -68,6 +84,18 @@ const GARMENT_ANALYSIS_SCHEMA = {
     lightReaction: { type: Type.STRING },
     chestWidth: { type: Type.STRING, nullable: true },
     length: { type: Type.STRING, nullable: true },
+    sizeOptions: {
+      type: Type.ARRAY,
+      description: 'All sale size options found by READING any size chart / spec text embedded inside the provided images (Korean 상세페이지 이미지 속 텍스트 포함) or in the accompanying spec text. Empty array if no size info is present.',
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          label: { type: Type.STRING, description: 'Size label as shown, e.g. "S", "M", "L", "FREE", "1", "30"' },
+          measurements: { type: Type.STRING, nullable: true, description: 'Verbatim measurements for this size if a size chart is present, e.g. "허리 35 총장 62 밑위 30 허벅지 36.5" — else null. Do NOT invent numbers.' },
+        },
+        required: ['label'],
+      },
+    },
     constructionMap: CONSTRUCTION_MAP_SCHEMA,
   },
   required: ['color', 'material', 'fitType', 'category', 'details', 'texture', 'lightReaction', 'constructionMap'],
@@ -161,6 +189,9 @@ CRITICAL RULES:
    d. If a zone is not visible in any provided photo, write "not visible in provided photos — do not invent" for that zone.
    e. NO DUPLICATION ACROSS ROWS (critical): each physical detail appears in EXACTLY ONE row of the map. A symmetric pair (e.g. the two standard back patch pockets) is described ONCE in its shared row ("backPockets": "two large rectangular patch pockets, one per side") and must NOT be repeated in the per-leg rows. The per-leg rows list ONLY details unique to that one leg. Repeating a detail in multiple rows makes the image generator render extra copies of it.
    f. ASYMMETRY CHECKLIST ("asymmetryChecklist" field): after building the map, list every one-side-only detail as "<detail> — wearer's <LEFT|RIGHT> leg ONLY, the opposite side has NO such detail", joined by "; ". This is the ground truth used to catch mirrored/duplicated details in the generated output, so triple-check each side assignment against the mirror rule (b) before writing it.
+7. READ TEXT INSIDE THE IMAGES (critical for Korean 상세페이지). Some provided photos are not clean product shots but long detail-page cuts (상세컷) that contain TEXT baked into the image — fabric composition/혼용률, 소재, care, features/특징, and especially a SIZE CHART (사이즈표: 허리/총장/밑위/허벅지/가슴/어깨/소매 등). You MUST read that embedded Korean/English text and use it: fold material/care/feature text into "material" and "details", and extract every listed size into "sizeOptions". Text printed inside an image is real product data — never skip it because it is "in an image".
+8. SIZE OPTIONS ("sizeOptions" field) — list every sale size you can find, from a size chart in the images OR from the accompanying spec text. Each entry: {label, measurements}. label = the size name shown (S/M/L/FREE/1/30 등). measurements = the verbatim numbers for that size if a chart gives them (e.g. "허리 35 총장 62 밑위 30 허벅지 36.5"), else null. Do NOT invent sizes or numbers — empty array if none is shown. These numbers are used only as a FIT reference later, not printed on the garment.
+6.5 (structural scan caveat) When you report topstitching/seam lines in "details", report ONLY lines that are actually visible in the photos. Do NOT pad the description with generic seams a garment of this type "usually" has — an invented seam line becomes an invented stitch line in the generated image.
 
 Return ONLY valid JSON, no markdown, no explanation:
 
@@ -174,6 +205,7 @@ Return ONLY valid JSON, no markdown, no explanation:
   "lightReaction": "how fabric reacts to light (e.g., 'matte finish, no sheen', 'subtle metallic sheen at highlights', 'slight luster, semi-matte')",
   "chestWidth": "estimated chest measurement if visible (e.g., '54cm', '58cm') or null",
   "length": "garment length description (e.g., 'hip length', 'cropped above waist', 'ankle length', '28 inch inseam') or null",
+  "sizeOptions": "an ARRAY (per rules 7-8) of {label, measurements} read from size charts/spec text in the images or accompanying text — [] if none. Never invent.",
   "constructionMap": "an OBJECT (per rule 6) with 10 required string fields: photoClassification, frontWaistband, frontLeftLeg, frontRightLeg, backWaistband, backLeftLeg, backRightLeg, backPockets, sideSeams, asymmetryChecklist — every field filled using WEARER'S left/right with the mirror rule applied, 'none' for empty zones, 'not visible in provided photos — do not invent' for unseen zones, no detail repeated across rows (rule 6e), and the asymmetry checklist per rule 6f. Every field is mandatory, never omit one."
 }
 `.trim();
@@ -274,6 +306,7 @@ export async function analyzeGarment(
       lightReaction: parsed.lightReaction || 'matte finish',
       chestWidth: parsed.chestWidth || undefined,
       length: parsed.length || undefined,
+      sizeOptions: normalizeSizeOptions(parsed.sizeOptions),
       constructionMap: normalizeConstructionMap(parsed.constructionMap),
     };
   } catch (geminiError) {
@@ -291,6 +324,8 @@ CRITICAL RULES:
 3. Describe the item as a single individual garment (e.g. "A pair of vintage washed jeans").
 4. MANDATORY STRUCTURAL SCAN — before writing "details", look at the garment piece by piece and identify every seam/panel line, every pocket (type: cargo/welt/patch/coin/slit + exact location), every logo/brand patch/embroidery/print (exact location, e.g. "left thigh cargo pocket flap"), every closure (buttons/zippers/drawstrings/toggles/snaps, count + location), topstitching/contrast stitching, and hem style. This applies to EVERY garment type (cargo pants, shorts, jackets, knitwear), not only denim.
 5. For jeans/denim specifically, ALSO be extremely detailed about the washing texture, sandwashed fading on thighs/knees, vertical slub lines, whiskering lines at the crotch, and exact denim twill texture grain — in addition to the structural scan, not instead of it.
+5.5 ONLY report seam/topstitch lines that are actually visible in the photos — never add generic seams the garment "usually" has, because an invented seam becomes an invented stitch line in the output.
+7. READ TEXT INSIDE THE IMAGES: some photos are Korean 상세페이지 detail cuts with TEXT baked in (소재/혼용률, 특징, care, and a SIZE CHART 사이즈표). Read that embedded text and fold it into "material"/"details", and extract every listed size into "sizeOptions" ({label, measurements}); measurements = verbatim numbers if a chart gives them (e.g. "허리 35 총장 62"), else null. Never invent sizes/numbers; [] if none.
 6. MANDATORY CONSTRUCTION MAP ("constructionMap" field) — classify each photo as FRONT/BACK/side/close-up using garment anatomy (BOTTOMS: center fly/button+zip = FRONT; patch pockets/yoke/elastic gathering with no fly = BACK. TOPS: placket/graphic/forward collar = FRONT; plain yoke = BACK), stating the cue per photo, then map every zone in the WEARER'S left/right (mirror rule: in a FRONT view the wearer's left appears on the viewer's right; in a BACK view it does not mirror). Write labeled lines: FRONT waistband / FRONT wearer-left leg / FRONT wearer-right leg / BACK waistband / BACK wearer-left leg / BACK wearer-right leg / BACK pockets / SIDE seams. Mark empty zones "none" and unseen zones "not visible in provided photos — do not invent". Asymmetry matters (e.g. patch on one leg only, hammer loop on the other leg only, elastic on the back waistband only). NO DUPLICATION: each physical detail appears in exactly ONE line — symmetric pairs (the two back pockets) go only in the BACK pockets line, never repeated per-leg; per-leg lines list only one-leg-only details. End with an ASYMMETRY CHECKLIST line: every one-side-only detail as "<detail> — wearer's <LEFT|RIGHT> leg ONLY, the opposite side has NO such detail", joined by "; ".
 
 The JSON must follow this exact schema:
@@ -302,6 +337,7 @@ The JSON must follow this exact schema:
   "details": "the full result of the MANDATORY STRUCTURAL SCAN: every seam/panel line, every pocket (type + exact location), every logo/patch/print (exact location), every closure (type + count + location), stitching, hem style. For denim, also add vintage washes/sandwashed thighs/whiskering/pocket distressing/hem wear. DO NOT include hangers, strings, price cards, or store tags.",
   "texture": "fabric texture description (e.g. coarse diagonal rigid denim twill weave, high-contrast wash grain)",
   "lightReaction": "matte" | "subtle sheen" | "glossy",
+  "sizeOptions": "array of {label, measurements} read from size charts/spec text in the images (rule 7); [] if none; never invent",
   "constructionMap": "the full result of the MANDATORY CONSTRUCTION MAP (rule 6): photo classification with reasoning, then labeled zone-by-zone lines (FRONT waistband / FRONT wearer-left leg / FRONT wearer-right leg / BACK waistband / BACK wearer-left leg / BACK wearer-right leg / BACK pockets / SIDE seams), in WEARER'S left/right with the mirror rule applied, empty zones marked 'none', unseen zones marked 'not visible in provided photos — do not invent'"
 }
 Output raw JSON ONLY. No markdown formatting, no \`\`\`json block. Just the raw JSON string.`
@@ -352,6 +388,7 @@ Output raw JSON ONLY. No markdown formatting, no \`\`\`json block. Just the raw 
           details: parsed.details || 'no additional details',
           texture: parsed.texture || 'standard fabric texture',
           lightReaction: parsed.lightReaction || 'matte finish',
+          sizeOptions: normalizeSizeOptions(parsed.sizeOptions),
           constructionMap: normalizeConstructionMap(parsed.constructionMap),
         };
       } catch (openaiError) {
@@ -786,7 +823,7 @@ INSPECTION PROCEDURE:
 1. Decide which side of the garment the GENERATED photo shows (front/back/side) using garment anatomy (fly = front; back pockets/elastic gathering = back).
 2. MIRROR RULE for reading the GENERATED photo: if it shows the FRONT, the wearer's LEFT is on the VIEWER'S RIGHT; if it shows the BACK, the wearer's left is on the viewer's left.
 3. For EVERY item in the ASYMMETRY CHECKLIST that should be visible from this view: (a) is it present? (b) is it on the correct wearer's side? (c) is the OPPOSITE side clean — no duplicate, echo, or mirrored copy? A checklist item rendered on BOTH legs is an automatic FAIL.
-4. Are there invented details not in the map (extra pockets, extra patches, extra seams/panel lines)? Compare against the REFERENCE photo(s) if provided.
+4. Are there invented details NOT on the real product — extra pockets, extra patches, extra seams/panel lines, or extra topstitch/stitch lines (especially added near the hem, side seam, or chest of an otherwise plain garment)? Compare against the REFERENCE photo(s). Any stitch/seam line the reference does not show is a FAIL — report it as "remove the invented <where> stitch/seam line; the real product has no such line there".
 5. Does the garment's fabric/color in the GENERATED photo roughly match the ground truth (obvious mismatches only — e.g. smooth dress fabric instead of sturdy twill, clearly wrong color)? Ignore lighting differences.
 6. If the pose instruction specifies a turn/facing direction (e.g. 왼쪽 = model's left turn, 오른쪽 = model's right turn, 뒤 = back view): does the GENERATED body orientation actually match it? "왼쪽으로 돌아" means the model rotates toward the MODEL'S OWN left. If the direction is clearly opposite or ignored (e.g. frontal standing when a turn was required), that is a FAIL.
 ${styleChecklist.length ? `7. STYLING CHECK — for EACH styling line above, look at the corresponding item in the GENERATED photo and verify BOTH its color and its garment type match the words. This is a common, high-priority failure: if the line says 베이지/beige and the item is black, or 갈색/brown and it is black, or 워싱 데님/washed denim and it is plain black slacks, that is a FAIL. Do NOT accept the outfit being recolored to a black/grey/monochrome look to match the product. Report each mismatch as a correction naming the item, the wrong color/type seen, and the required one.` : ''}

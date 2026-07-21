@@ -142,6 +142,7 @@ export async function POST(req: Request) {
       extractColors,
       colorPlans,
       productNotes,
+      selectedSize,
       draftMode,
       poseCount,
       customPoseTexts,
@@ -158,6 +159,8 @@ export async function POST(req: Request) {
       userPreferenceHints?: StyleHintsBySlot;
       /** 제품 핏/디테일 지시 (예: '머슬핏, 크롭 기장감') — 사진만으로 안 보이는 정보 보강 */
       productNotes?: string;
+      /** (2026-07-19) 사용자가 선택한 사이즈 — 라벨 + 있으면 실측치. 실측은 핏 참고로만 반영. */
+      selectedSize?: { label: string; measurements?: string };
       /** true면 초안 품질(low)로 생성 — medium 대비 약 1/4 비용 */
       draftMode?: boolean;
       /** true면 첫 이미지(색상 샘플 시트)에서 색상 옵션을 자동 추출해 색상별로 생성 */
@@ -196,6 +199,17 @@ export async function POST(req: Request) {
     }
 
     const sourcedCategory = category as SourcedCategory;
+
+    // (2026-07-19) 선택 사이즈를 productNotes에 접붙여 기존 "치수→여유분 추론" 로직(productNotesLine)을
+    // 그대로 재사용한다. 실측치가 있으면 그 숫자를 근거로, 없으면 라벨만 참고로 넘어간다.
+    const effectiveProductNotes = [
+      productNotes?.trim(),
+      selectedSize?.label
+        ? `착용 사이즈: ${selectedSize.label}${selectedSize.measurements ? ` (실측 ${selectedSize.measurements})` : ''}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' / ');
     const images = productImagesBase64.slice(0, 6); // 색상 옵션 과다 등록 방지
 
     // 로그인 계정의 모델 정보를 쓰기 위해 uid를 응답 전에 확보한다 (after() 안에서는 쿠키 접근 불가).
@@ -421,7 +435,7 @@ export async function POST(req: Request) {
                 !!identityReferenceImage,
                 bodySpec,
                 colorVariant,
-                productNotes,
+                effectiveProductNotes,
                 mergedHints,
                 otherAngleForThisCall.length,
                 materialForThisCall.length,
@@ -469,7 +483,7 @@ export async function POST(req: Request) {
                   geminiApiKey,
                   [imageBase64, ...(first.otherAngles || [])],
                   styleChecklist,
-                  productNotes?.trim() || '',
+                  effectiveProductNotes,
                 );
                 if (!verdict.pass && verdict.defects.length > 0) {
                   console.warn('[api/product-fitting][after] 자동 검증 불합격 — 교정 재생성 1회 시도:', verdict.defects);

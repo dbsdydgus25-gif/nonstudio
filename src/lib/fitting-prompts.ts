@@ -42,6 +42,12 @@ export interface GarmentAnalysis {
   chestWidth?: string;      // 가슴 단면
   length?: string;          // 기장
   /**
+   * (2026-07-19) 사이즈 옵션 — 상세페이지형 이미지 속 사이즈표(한글, 이미지 안 텍스트)나
+   * 링크 텍스트에서 읽어낸 판매 사이즈들. label은 표시용(S/M/L/FREE 등), measurements는
+   * 있으면 실측(허리/총장/밑위/허벅지/가슴 등) 원문. 실측은 피팅 시 핏 참고로만 쓴다.
+   */
+  sizeOptions?: Array<{ label: string; measurements?: string }>;
+  /**
    * (2026-07-17) 구조 지도 — 뷰(앞/뒤)별 × 착용자 기준 좌/우별로 뭐가 어디 붙어있는지의
    * 체계적 목록. "디테일 나열"(details)만으로는 패치가 반대 다리에 붙거나 양쪽에 복제되는
    * 사고를 못 막아서, 위치를 좌표처럼 고정하는 필드를 분리했다. 착용자 기준(wearer's
@@ -156,7 +162,7 @@ GARMENT LEFT/RIGHT CONSISTENCY (applies to EVERY worn item — top, bottom, shoe
 
 const RESTYLE_QUALITY_CONSTRAINTS = `
 CRITICAL NEGATIVE CONSTRAINTS (DO NOT GENERATE):
-cartoon, illustration, CGI, 3D render, digital art, video game graphics, airbrushed skin, plastic skin, mannequin texture, artificial doll look, low resolution, blurry, deformed body, incorrect anatomy, extra limbs, bad hands, overlapping fingers, unnatural pose, oversaturated colors, fake lighting, warped background, artifacts, logos, text, watermark, composite look, collage, split screen, multi-panel, grid of photos, side-by-side comparison, diptych, triptych, photo montage, layout of multiple images, soft puffy chest, sagging chest, love handles, flabby untoned body, out-of-shape physique, hunched posture, awkward stiff pose, invented fabric pattern, fake jacquard or paisley print, embossed decorative texture not present on the real garment, moire pattern on fabric, unintended textile print.
+cartoon, illustration, CGI, 3D render, digital art, video game graphics, airbrushed skin, plastic skin, mannequin texture, artificial doll look, low resolution, blurry, deformed body, incorrect anatomy, extra limbs, bad hands, overlapping fingers, unnatural pose, oversaturated colors, fake lighting, warped background, artifacts, logos, text, watermark, composite look, collage, split screen, multi-panel, grid of photos, side-by-side comparison, diptych, triptych, photo montage, layout of multiple images, soft puffy chest, sagging chest, love handles, flabby untoned body, out-of-shape physique, hunched posture, awkward stiff pose, invented fabric pattern, fake jacquard or paisley print, embossed decorative texture not present on the real garment, moire pattern on fabric, unintended textile print, invented seam line, invented panel line, extra topstitching not on the real garment, fake stitch line near the hem or side, decorative seams added to a plain garment.
 `.trim();
 
 // (2026-07-14) MODEL LOCK — AI 피팅과 AI 제품 피팅이 완전히 동일한 문구로 모델을 규정한다.
@@ -460,6 +466,8 @@ export function buildProductFittingPrompt(
         ]
       : []),
     `POSE (obey exactly): ${userAdditions.trim() || 'clean, confident commercial standing pose, facing camera'}`,
+    // (2026-07-19) "AI가 없는 실밥선/절개선을 밑단·측면에 지어내는" 품질 문제 — 최우선으로 못박음.
+    `PRODUCT SURFACE — ADD NOTHING: reproduce ONLY the seams, topstitching, panel lines, pockets, and details that are actually visible on the sourced product in its reference photo. Do NOT add any extra stitch line, seam, panel line, or topstitching that is not on the real product — especially do NOT invent decorative stitch/seam lines near the hem, side, or chest. If the product is a plain simple garment, keep it plain: fewer lines, not more.`,
     '',
   ];
 

@@ -64,6 +64,14 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   const [cleaningIndex, setCleaningIndex] = useState<{ kind: 'product' | 'material'; index: number } | null>(null);
   // 제품 자체의 핏/디테일 지시 (예: 머슬핏, 크롭 기장감) — 사진만으로 안 보이는 정보 보강
   const [productNotes, setProductNotes] = useState('');
+  // (2026-07-19) 링크로 가져오기(보조) — 열리는 사이트만 자동, 네이버/신상마켓은 차단 안내 후 수동
+  const [productLink, setProductLink] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<{ kind: 'ok' | 'blocked'; text: string } | null>(null);
+  // (2026-07-19) 사이즈 옵션 — 상세이미지/링크 분석에서 추출해 선택하면 핏 참고로 반영
+  const [sizeOptions, setSizeOptions] = useState<Array<{ label: string; measurements?: string }>>([]);
+  const [selectedSize, setSelectedSize] = useState<{ label: string; measurements?: string } | null>(null);
+  const [isLoadingSizes, setIsLoadingSizes] = useState(false);
   // 초안 품질(low) — medium 대비 약 1/4 비용, 코디/색상 확인용
   const [draftMode, setDraftMode] = useState(false);
   const otherSlots = CATEGORY_OPTIONS.map((c) => c.id).filter((id) => id !== category);
@@ -186,6 +194,69 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     }
   };
 
+  // (2026-07-19) 링크로 가져오기 — 열리는 사이트면 이미지 자동 추가, 막히면(네이버/신상마켓) 안내.
+  const handleImportLink = async () => {
+    const url = productLink.trim();
+    if (!url) return;
+    setIsImporting(true);
+    setImportMsg(null);
+    try {
+      const res = await fetch('/api/product-fitting/from-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+      if (data.blocked) {
+        setImportMsg({ kind: 'blocked', text: data.reason || '이 링크는 자동으로 못 읽어요. 상세 이미지를 저장해 올려주세요.' });
+        return;
+      }
+      if (!res.ok || !data.success) throw new Error(data.error || '링크에서 가져오지 못했습니다.');
+      const imgs: string[] = data.images || [];
+      setProductImages((prev) => [...prev, ...imgs].slice(0, 8));
+      setImportMsg({ kind: 'ok', text: `${imgs.length}장을 가져왔습니다${data.title ? ` — ${data.title}` : ''}. 아래에서 확인하고 필요 없는 건 지우세요.` });
+    } catch (err: any) {
+      setImportMsg({ kind: 'blocked', text: err?.message || '링크 처리 중 오류가 발생했습니다.' });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  // (2026-07-19) 사이즈 옵션 불러오기 — 상세이미지 속 사이즈표까지 읽어 선택지로 제시
+  const handleLoadSizes = async () => {
+    if (productImages.length === 0) {
+      alert('먼저 제품/상세 이미지를 올려주세요.');
+      return;
+    }
+    if (!geminiKey || !openaiKey) {
+      onNeedKeys();
+      return;
+    }
+    setIsLoadingSizes(true);
+    try {
+      const res = await fetch('/api/product-fitting/analyze-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productImagesBase64: productImages,
+          materialImagesBase64: materialImages.length ? materialImages : undefined,
+          category,
+          geminiApiKey: geminiKey,
+          openaiApiKey: openaiKey,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || '사이즈 분석에 실패했습니다.');
+      const opts: Array<{ label: string; measurements?: string }> = data.sizeOptions || [];
+      setSizeOptions(opts);
+      if (opts.length === 0) alert('상세 이미지에서 사이즈 정보를 찾지 못했습니다. 사이즈표가 있는 상세컷을 올리면 인식됩니다.');
+    } catch (err: any) {
+      alert(err?.message || '사이즈 분석 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoadingSizes(false);
+    }
+  };
+
   const handleRun = async () => {
     if (productImages.length === 0) {
       alert('제품 이미지를 먼저 업로드해주세요.');
@@ -219,6 +290,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           poseCount,
           customPoseTexts: effectiveCustomPoseTexts,
           productNotes: productNotes.trim() || undefined,
+          selectedSize: selectedSize || undefined,
           draftMode,
           extractColors,
           // (2026-07-17) 색상 옵션 모드여도 공통으로 적용 — 참고 이미지는 색상과 무관하게
@@ -322,6 +394,39 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           <span className="text-[11px] text-gray-400">같은 제품 여러 각도 · 색상 옵션 모두 가능</span>
         </div>
         <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
+          {/* 링크로 가져오기(보조) — 열리는 사이트만 자동, 네이버/신상마켓은 차단 안내 */}
+          <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold text-gray-700">링크로 가져오기</span>
+              <span className="text-[10px] text-gray-400">경쟁사 상세페이지 URL — 되는 사이트면 이미지 자동 추가</span>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="url"
+                value={productLink}
+                onChange={(e) => setProductLink(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleImportLink()}
+                placeholder="https://... 상품 링크 붙여넣기"
+                className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-xs focus:border-gray-400 outline-none"
+              />
+              <button
+                onClick={handleImportLink}
+                disabled={isImporting || !productLink.trim()}
+                className="px-4 py-2 rounded-lg bg-gray-900 hover:bg-black text-white text-xs font-medium disabled:opacity-40 whitespace-nowrap"
+              >
+                {isImporting ? '가져오는 중...' : '가져오기'}
+              </button>
+            </div>
+            {importMsg && (
+              <p className={`text-[11px] leading-relaxed ${importMsg.kind === 'ok' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                {importMsg.text}
+              </p>
+            )}
+            <p className="text-[10px] text-gray-400 leading-relaxed">
+              ※ <b>네이버 스마트스토어·신상마켓은 봇 차단</b>으로 자동으로 못 엽니다 — 그 경우 상세페이지 이미지를 저장해 직접 올려주세요.
+              한국 상세페이지는 재질·사이즈 텍스트가 이미지 안에 있어, 그 <b>상세컷을 올리면 텍스트까지 함께 분석</b>됩니다.
+            </p>
+          </div>
           <p className="text-xs text-gray-400 leading-relaxed">
             제품 단독 컷(누끼 · 행거 · 상세페이지)이나 타사 착용샷 모두 가능합니다. 아래 <b className="text-gray-600">색상 옵션 자동 추출</b>을 켜지 않으면,
             여러 장을 올려도 전부 <b className="text-gray-600">같은 제품의 다른 각도/디테일</b> 참고 사진으로 함께 분석해 1장을 생성합니다 (색상이 실제로 다르면 추출 기능을 켜세요).
@@ -618,6 +723,43 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           <p className="text-[11px] text-gray-400 leading-relaxed">
             사진만으로는 판단이 어려운 실착 핏 · 기장 · 원단 정보를 적어주세요. 사진에서 보이는 것보다 이 지시가 우선합니다.
           </p>
+
+          {/* 사이즈 옵션 — 상세이미지 속 사이즈표를 읽어 선택하면 핏 참고로 반영 */}
+          <div className="pt-2 border-t border-gray-100 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-gray-700">사이즈 선택 <span className="font-normal text-gray-400">(선택)</span></span>
+              <button
+                onClick={handleLoadSizes}
+                disabled={isLoadingSizes}
+                className="text-[11px] px-3 py-1.5 rounded-lg border border-gray-200 hover:border-gray-400 text-gray-600 disabled:opacity-40"
+              >
+                {isLoadingSizes ? '분석 중...' : sizeOptions.length ? '사이즈 다시 분석' : '상세이미지에서 사이즈 불러오기'}
+              </button>
+            </div>
+            {sizeOptions.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {sizeOptions.map((s) => {
+                  const active = selectedSize?.label === s.label;
+                  return (
+                    <button
+                      key={s.label}
+                      onClick={() => setSelectedSize(active ? null : s)}
+                      title={s.measurements || undefined}
+                      className={`px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
+                        active ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400'
+                      }`}
+                    >
+                      {s.label}
+                      {s.measurements ? <span className="opacity-60 ml-1">실측</span> : ''}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {selectedSize?.measurements && (
+              <p className="text-[10px] text-gray-400">선택 사이즈 실측: {selectedSize.measurements} — 이 치수를 핏 참고로 반영합니다.</p>
+            )}
+          </div>
         </div>
       </section>
 
