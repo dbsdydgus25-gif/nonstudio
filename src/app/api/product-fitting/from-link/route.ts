@@ -15,6 +15,7 @@
 
 import { NextResponse } from 'next/server';
 import { GoogleGenAI, Type } from '@google/genai';
+import { downscaleImage } from '@/lib/image-utils';
 
 export const runtime = 'nodejs';
 export const maxDuration = 90;
@@ -144,9 +145,12 @@ async function downloadImage(url: string, referer: string): Promise<string | nul
     if (!res.ok) return null;
     const ct = res.headers.get('content-type') || '';
     if (!ct.startsWith('image/')) return null; // 핫링크 차단 시 HTML이 돌아옴 → 버림
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length < 4000) return null; // 아이콘/1x1 등 너무 작은 건 제외
-    return `data:${ct};base64,${buf.toString('base64')}`;
+    const rawBuf = Buffer.from(await res.arrayBuffer());
+    if (rawBuf.length < 4000) return null; // 아이콘/1x1 등 너무 작은 건 제외
+    // (2026-07-21) 링크 이미지는 원본(최대 1MB+)이라 8~14장 합치면 Vercel 요청 한도(413)를 넘는다.
+    // 직접 업로드는 클라이언트에서 압축되는데 링크는 그 과정이 없어 서버에서 다운스케일해준다.
+    const { buffer, mimeType } = await downscaleImage(rawBuf, ct);
+    return `data:${mimeType};base64,${buffer.toString('base64')}`;
   } catch {
     return null;
   }
