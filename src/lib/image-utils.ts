@@ -103,6 +103,62 @@ export async function cropToBox(
   }
 }
 
+/**
+ * 소스 이미지를 목표 화면비로 센터 크롭한다 (2026-07-22, 영상 생성용).
+ *
+ * 실측으로 확인한 문제: Veo는 입력 이미지의 비율을 따라가지 않고 **항상 자기 캔버스
+ * (16:9 또는 9:16)에 검은 여백을 채워 넣는다.** 우리 파이프라인 결과물은 1024x1536(2:3)이라
+ * 그대로 넣으면 aspectRatio '9:16' 지정 시 위아래에, 생략 시(16:9) 좌우에 검은 띠가 생겼다.
+ * 그래서 영상에 보내기 전에 정확히 9:16으로 잘라서 여백이 생길 여지 자체를 없앤다.
+ *
+ * 세로 크롭이 필요한 경우엔 위쪽을 기준으로 자른다 — 전신 컷에서 머리가 잘리는 게
+ * 발밑이 잘리는 것보다 훨씬 치명적이기 때문.
+ */
+export async function cropToAspectRatio(
+  buffer: Buffer,
+  mimeType: string,
+  targetRatio: number, // width / height (9:16 = 0.5625)
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  try {
+    const meta = await sharp(buffer).metadata();
+    const W = meta.width || 0;
+    const H = meta.height || 0;
+    if (!W || !H) return { buffer, mimeType };
+
+    const currentRatio = W / H;
+    // 이미 목표 비율이면(반올림 오차 범위) 건드리지 않는다
+    if (Math.abs(currentRatio - targetRatio) < 0.01) return { buffer, mimeType };
+
+    let cropW: number;
+    let cropH: number;
+    let left: number;
+    let top: number;
+
+    if (currentRatio > targetRatio) {
+      // 원본이 더 넓다 → 높이는 그대로, 폭만 잘라낸다 (가로 중앙)
+      cropH = H;
+      cropW = Math.round(H * targetRatio);
+      left = Math.round((W - cropW) / 2);
+      top = 0;
+    } else {
+      // 원본이 더 길쭉하다 → 폭은 그대로, 높이를 잘라낸다 (위쪽 기준 = 머리 보존)
+      cropW = W;
+      cropH = Math.round(W / targetRatio);
+      left = 0;
+      top = 0;
+    }
+
+    const out = sharp(buffer).extract({ left, top, width: cropW, height: cropH });
+    if (mimeType.includes('png')) {
+      return { buffer: await out.png({ compressionLevel: 9 }).toBuffer(), mimeType: 'image/png' };
+    }
+    return { buffer: await out.jpeg({ quality: 92 }).toBuffer(), mimeType: 'image/jpeg' };
+  } catch {
+    // 크롭 실패는 치명적이지 않음 — 원본으로 진행 (검은 여백이 생길 뿐)
+    return { buffer, mimeType };
+  }
+}
+
 /** 배열을 동시성 제한으로 순차 배치 처리 — 전체 병렬 대신 batchSize개씩 나눠 실행 */
 export async function runWithConcurrency<T>(
   items: T[],

@@ -3,8 +3,8 @@
 import React from 'react';
 
 interface SidebarProps {
-  activePage: 'fitting' | 'restyle' | 'product' | 'model' | 'history';
-  onPageChange: (page: 'fitting' | 'restyle' | 'product' | 'model' | 'history') => void;
+  activePage: 'fitting' | 'restyle' | 'product' | 'video' | 'model' | 'history';
+  onPageChange: (page: 'fitting' | 'restyle' | 'product' | 'video' | 'model' | 'history') => void;
   onOpenApiKeys: () => void;
   geminiKey: string;
   openaiKey: string;
@@ -55,17 +55,31 @@ const Icon = {
       <path d="M12 14v3" />
     </svg>
   ),
+  video: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-[18px] h-[18px]">
+      <rect x="3" y="6" width="12" height="12" rx="2" />
+      <path d="m15 11 5-3v8l-5-3z" />
+    </svg>
+  ),
 };
 
-const NAV_ITEMS: Array<{
-  id: 'restyle' | 'product' | 'fitting' | 'model' | 'history';
+type NavItem = {
+  id: 'restyle' | 'product' | 'fitting' | 'video' | 'model' | 'history';
   label: string;
   desc: string;
   icon: React.ReactNode;
-}> = [
+};
+
+// (2026-07-22) 예전엔 하나의 NAV_ITEMS를 slice(0,3)/slice(3,5)로 잘라 썼는데, 메뉴를 추가할 때
+// 인덱스를 같이 안 고치면 메뉴가 조용히 사라진다. 그룹별 배열로 분리해서 그 실수를 원천 차단.
+const STUDIO_ITEMS: NavItem[] = [
   { id: 'restyle', label: 'AI 피팅', desc: '실사 사진 한 장으로 확정 룩 제작', icon: Icon.fitting },
   { id: 'product', label: 'AI 제품 피팅', desc: '제품 사진만으로 착용 화보 제작', icon: Icon.product },
   { id: 'fitting', label: 'AI 바리에이션', desc: '확정 룩 유지, 포즈 다양화', icon: Icon.variation },
+  { id: 'video', label: 'AI 영상', desc: '착용 컷을 움직이는 GIF로', icon: Icon.video },
+];
+
+const LIBRARY_ITEMS: NavItem[] = [
   { id: 'model', label: '모델 정보', desc: '참고 이미지 · 체형 스펙 관리', icon: Icon.model },
   { id: 'history', label: '히스토리', desc: '전체 생성 기록', icon: Icon.history },
 ];
@@ -101,7 +115,7 @@ export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, op
             Studio
           </div>
           <div className="space-y-0.5">
-            {NAV_ITEMS.slice(0, 3).map((item) => (
+            {STUDIO_ITEMS.map((item) => (
               <button
                 key={item.id}
                 onClick={() => onPageChange(item.id)}
@@ -136,7 +150,7 @@ export function Sidebar({ activePage, onPageChange, onOpenApiKeys, geminiKey, op
             Library
           </div>
           <div className="space-y-0.5">
-            {NAV_ITEMS.slice(3, 5).map((item) => (
+            {LIBRARY_ITEMS.map((item) => (
               <button
                 key={item.id}
                 onClick={() => onPageChange(item.id)}

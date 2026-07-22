@@ -1,67 +1,96 @@
 /**
  * /api/detail-video/route.ts
- * "디테일컷" 짧은 영상(3초 안팎) — 원단 촉감/신축성/핏 특성을 동작으로 보여주는 세로형 숏폼
- * 영상을 Gemini(Veo)로 생성한다. gpt-image-2 기반 바리에이션과 달리 영상 생성은 보통 수십 초~
- * 수 분이 걸려서, 여기서도 동일하게 "pending 행 즉시 반환 → after()에서 폴링하며 백그라운드
- * 완료 → 프론트가 /api/generations/status로 폴링" 구조를 그대로 따른다.
+ * "AI 영상" — 제품 착용 컷을 짧은 세로형 영상으로 만들어 GIF로 저장한다.
+ * 원단 촉감/신축성 같은 디테일 모션과, 실제로 걷는 듯한 전신 모션 두 갈래를 지원한다.
+ * gpt-image-2 기반 바리에이션과 달리 영상 생성은 수십 초~수 분이 걸려서, 여기서도 동일하게
+ * "pending 행 즉시 반환 → after()에서 폴링하며 백그라운드 완료 → 프론트가
+ * /api/generations/status로 폴링" 구조를 그대로 따른다.
  *
  * 가장 중요한 제약: 원본 사진의 얼굴/체형/원단 재질은 절대 바뀌면 안 된다 — 프롬프트
  * 설계는 detail-video-prompts.ts에서 담당.
+ *
+ * (2026-07-22) Veo 3.1 마이그레이션. 실측으로 확인한 것들:
+ * - 기존 `veo-2.0-generate-001`은 **완전히 퇴역(404)** 해서 이 기능은 그동안 무조건 실패 상태였다.
+ * - `negativePrompt` 파라미터는 veo-3.1-lite에서 **미지원(400)** — 부정 제약은 프롬프트 본문에 둔다.
+ * - `durationSeconds`는 4/6/8만 허용 (기존 코드의 3은 무효값이었다).
+ * - Veo는 입력 이미지 비율을 따라가지 않고 자기 캔버스에 검은 여백을 채운다 →
+ *   보내기 전에 9:16으로 크롭해야 한다 (cropToAspectRatio).
+ * - 오디오는 항상 켜져 있어 끌 수 없다. GIF 변환 시 어차피 버려진다.
  */
 
 import { NextResponse } from 'next/server';
 import { after } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
-import { buildDetailVideoPrompt } from '@/lib/detail-video-prompts';
+import { buildDetailVideoPrompt, type MotionKind } from '@/lib/detail-video-prompts';
 import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
 import { resultImageToBuffer } from '@/lib/image-source';
+import { cropToAspectRatio } from '@/lib/image-utils';
 import { convertMp4ToGif } from '@/lib/video-to-gif';
 
 export const runtime = 'nodejs';
 export const maxDuration = 280;
 
-// 저화질/저비용 우선 — 3초 안팎, 720p, 오디오 없음, 1개만 생성
-const VIDEO_MODEL = 'veo-2.0-generate-001';
+// 비용: Lite 720p $0.05/초, Fast 720p $0.10/초 → 4초 기준 각각 약 $0.20 / $0.40.
+// 기본은 Lite, 사용자가 화질 토글을 켜면 Fast.
+const VIDEO_MODELS = {
+  lite: 'veo-3.1-lite-generate-preview',
+  fast: 'veo-3.1-fast-generate-preview',
+} as const;
+type VideoQuality = keyof typeof VIDEO_MODELS;
+
+const DURATION_SECONDS = 4; // Veo 3.1은 4/6/8만 허용 — 최소값이 가장 저렴
+const PORTRAIT_RATIO = 9 / 16;
 const POLL_INTERVAL_MS = 8000;
 const MAX_POLL_ATTEMPTS = 30; // 8s * 30 = 240s, maxDuration(280s) 안에 여유있게 마무리
 
 export async function POST(req: Request) {
   try {
-    const { sourceImageBase64, detailInstruction, geminiApiKey } = await req.json();
+    const { sourceImageBase64, detailInstruction, geminiApiKey, motionKind, quality } = await req.json();
 
     if (!sourceImageBase64) {
-      return NextResponse.json({ success: false, error: '원단/디테일을 보여줄 기준 사진이 필요합니다.' }, { status: 400 });
+      return NextResponse.json({ success: false, error: '영상으로 만들 기준 사진이 필요합니다.' }, { status: 400 });
     }
     if (!detailInstruction || typeof detailInstruction !== 'string' || !detailInstruction.trim()) {
-      return NextResponse.json({ success: false, error: '어떤 디테일을 보여줄지 설명이 필요합니다.' }, { status: 400 });
+      return NextResponse.json({ success: false, error: '어떤 움직임을 보여줄지 설명이 필요합니다.' }, { status: 400 });
     }
     const apiKey = geminiApiKey || process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json({ success: false, error: 'Gemini API 키가 필요합니다.' }, { status: 400 });
     }
 
-    const prompt = buildDetailVideoPrompt(detailInstruction.trim());
+    const kind: MotionKind = motionKind === 'motion' ? 'motion' : 'detail';
+    const videoQuality: VideoQuality = quality === 'fast' ? 'fast' : 'lite';
+    const prompt = buildDetailVideoPrompt(detailInstruction.trim(), kind);
 
     const generationId = await createPendingGeneration({
       pipeline: 'detail-video',
       modeOrCategory: 'detail-video',
+      // 히스토리에서 어떤 종류의 영상인지 한눈에 보이도록 라벨을 남긴다
+      poseLabel: `${kind === 'motion' ? '모션' : '디테일'} · ${videoQuality === 'fast' ? '고화질' : '기본'}`,
       prompt: detailInstruction.trim(),
     });
 
     after(async () => {
       try {
-        const { buffer: sourceBuf, mimeType: sourceMime } = await resultImageToBuffer(sourceImageBase64);
+        const raw = await resultImageToBuffer(sourceImageBase64);
+        // Veo가 검은 여백을 채우지 않도록 9:16으로 미리 맞춰서 보낸다 (위 주석 참고)
+        const { buffer: sourceBuf, mimeType: sourceMime } = await cropToAspectRatio(
+          raw.buffer,
+          raw.mimeType,
+          PORTRAIT_RATIO,
+        );
         const ai = new GoogleGenAI({ apiKey });
 
         let operation = await ai.models.generateVideos({
-          model: VIDEO_MODEL,
+          model: VIDEO_MODELS[videoQuality],
           prompt,
           image: { imageBytes: sourceBuf.toString('base64'), mimeType: sourceMime },
           config: {
             numberOfVideos: 1,
-            durationSeconds: 3,
+            durationSeconds: DURATION_SECONDS,
             resolution: '720p',
-            generateAudio: false,
+            aspectRatio: '9:16',
+            personGeneration: 'allow_adult',
           },
         });
 

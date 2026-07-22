@@ -24,6 +24,8 @@ interface FittingResultViewerProps {
   onRate?: (generationId: string, rating: 'good' | 'bad') => void;
   /** 지정하면 "바리에이션으로 보내기" 버튼이 표시됨 */
   onSendToVariation?: (imageUrl: string) => void;
+  /** 지정하면 "AI 영상 만들기" 버튼이 표시됨 */
+  onSendToVideo?: (imageUrl: string) => void;
 }
 
 export function FittingResultViewer({
@@ -34,6 +36,7 @@ export function FittingResultViewer({
   loadingStage,
   onRate,
   onSendToVariation,
+  onSendToVideo,
 }: FittingResultViewerProps) {
   const [isZoomed, setIsZoomed] = useState(false);
   const [ratedAs, setRatedAs] = useState<'good' | 'bad' | null>(null);
@@ -202,6 +205,14 @@ export function FittingResultViewer({
               >
                 {isDownloadingOriginal ? '다운로드 중...' : '원본 다운로드'}
               </button>
+              {onSendToVideo && (
+                <button
+                  onClick={() => onSendToVideo(currentResult.imageUrl)}
+                  className={toolButtonClass}
+                >
+                  AI 영상 만들기
+                </button>
+              )}
               {onSendToVariation && (
                 <button
                   onClick={() => onSendToVariation(currentResult.imageUrl)}

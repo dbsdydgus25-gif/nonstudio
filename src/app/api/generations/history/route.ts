@@ -12,7 +12,8 @@ export const runtime = 'nodejs';
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const raw = searchParams.get('source');
-  const source = raw === 'variation' ? 'variation' : raw === 'product' ? 'product' : 'fitting';
+  const source =
+    raw === 'variation' ? 'variation' : raw === 'product' ? 'product' : raw === 'video' ? 'video' : 'fitting';
   const items = await listRecentGenerations(source);
   return NextResponse.json({ success: true, items });
 }

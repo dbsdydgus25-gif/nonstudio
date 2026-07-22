@@ -13,6 +13,8 @@ interface ProductFittingSectionProps {
   onNeedKeys: () => void;
   /** 확정된 결과를 AI 바리에이션 쪽으로 넘길 때 호출 */
   onSendToVariation?: (imageUrl: string) => void;
+  /** 확정된 결과를 AI 영상 쪽으로 넘길 때 호출 */
+  onSendToVideo?: (imageUrl: string) => void;
 }
 
 const CATEGORY_OPTIONS: { id: SourcedCategory; label: string; desc: string }[] = [
@@ -37,7 +39,7 @@ interface ColorJobItem {
   errorMessage?: string | null;
 }
 
-export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSendToVariation }: ProductFittingSectionProps) {
+export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSendToVariation, onSendToVideo }: ProductFittingSectionProps) {
   // 제품 이미지 (1장 이상) — extractColors를 안 쓰면 전부 "같은 제품의 다른 각도" 참고 사진으로 함께 쓰인다
   const [productImages, setProductImages] = useState<string[]>([]);
   // 재질/텍스처 클로즈업 참고 사진 — 색상 아닌 원단/버튼/스티치 디테일 전용 (별도 슬롯)
@@ -1147,6 +1149,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             loadingStage={stageMsg}
             onRate={handleRate}
             onSendToVariation={onSendToVariation}
+            onSendToVideo={onSendToVideo}
           />
 
           {colorJobs.length > 1 && (

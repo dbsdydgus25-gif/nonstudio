@@ -19,9 +19,11 @@ interface VariationSectionProps {
   /** AI 피팅에서 "보내기"로 넘어온 이미지 — 도착하면 자동으로 입력창에 채워짐 */
   incomingImage?: string | null;
   onConsumeIncomingImage?: () => void;
+  /** 확정된 결과를 AI 영상 쪽으로 넘길 때 호출 */
+  onSendToVideo?: (imageUrl: string) => void;
 }
 
-export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsumeIncomingImage }: VariationSectionProps) {
+export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsumeIncomingImage, onSendToVideo }: VariationSectionProps) {
   const [sourceImage, setSourceImage] = useState<string | null>(null);
   // (2026-07-17) 비워두면 기존처럼 고정 흰 배경 스튜디오 사진이 기본으로 사용됨
   const [customBackgroundImage, setCustomBackgroundImage] = useState<string | null>(null);
@@ -205,7 +207,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
         </div>
         <ImageUploader
           label="원하는 배경/장소 사진"
-          subLabel="이 사진의 배경과 조명만 참고해서 합성됩니다 — 인물·의상은 기준 사진 그대로 유지"
+          subLabel="이 장소의 분위기를 참고해 자연스러운 장면을 새로 만듭니다 (사진 그대로 복사 아님) — 인물·의상은 그대로, 조명만 그 장소에 맞게 조정"
           image={customBackgroundImage}
           onImageChange={setCustomBackgroundImage}
           badgeText="배경"
@@ -321,6 +323,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
             isGenerating={isRunning && !currentResult}
             loadingStage={stageMsg}
             onRate={handleRate}
+            onSendToVideo={onSendToVideo}
           />
 
           {batchImages.length > 1 && (

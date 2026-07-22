@@ -223,19 +223,24 @@ export interface GenerationHistoryItem {
  * 최근 생성 기록 조회 (히스토리 화면용) — 페이지를 나갔다 들어와도 이전 결과를 볼 수 있도록
  * React state 대신 Supabase에서 직접 불러온다. 이미지는 비공개 버킷이라 서명된 URL로 반환.
  */
-export async function listRecentGenerations(source: 'fitting' | 'variation' | 'product', limit = 24): Promise<GenerationHistoryItem[]> {
+export async function listRecentGenerations(
+  source: 'fitting' | 'variation' | 'product' | 'video',
+  limit = 24,
+): Promise<GenerationHistoryItem[]> {
   try {
     const supabase = getSupabaseAdmin();
+    // (2026-07-22) 'video'는 pipeline 자체가 다르다 — 기존엔 pipeline='restyle'로 하드코딩돼
+    // 있어서 AI 영상(detail-video) 결과가 히스토리에 영원히 안 나왔다.
     let query = supabase
       .from('generations')
       .select('id, output_storage_path, prompt, pose_label, mode_or_category, created_at')
-      .eq('pipeline', 'restyle')
+      .eq('pipeline', source === 'video' ? 'detail-video' : 'restyle')
       .eq('status', 'completed')
       .order('created_at', { ascending: false })
       .limit(limit);
     if (source === 'variation') query = query.eq('mode_or_category', 'variation');
     else if (source === 'product') query = query.eq('mode_or_category', 'product');
-    else query = query.not('mode_or_category', 'in', '("variation","product")');
+    else if (source === 'fitting') query = query.not('mode_or_category', 'in', '("variation","product")');
 
     const { data, error } = await query;
     if (error) throw error;

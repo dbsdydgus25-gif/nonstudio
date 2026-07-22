@@ -5,6 +5,7 @@ import { Sidebar } from '@/components/studio/Sidebar';
 import { RestyleSection } from '@/components/studio/RestyleSection';
 import { ProductFittingSection } from '@/components/studio/ProductFittingSection';
 import { VariationSection } from '@/components/studio/VariationSection';
+import { VideoSection } from '@/components/studio/VideoSection';
 import { ModelProfileSection } from '@/components/studio/ModelProfileSection';
 import { HistorySection } from '@/components/studio/HistorySection';
 import { ApiKeyModal } from '@/components/studio/ApiKeyModal';
@@ -20,14 +21,16 @@ export default function StudioPage() {
   const [openaiKey, setOpenaiKey] = useState('');
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
 
-  // Navigation — 'restyle' = AI 피팅, 'product' = AI 제품 피팅, 'fitting' = AI 바리에이션
-  const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'product' | 'model' | 'history'>('restyle');
+  // Navigation — 'restyle' = AI 피팅, 'product' = AI 제품 피팅, 'fitting' = AI 바리에이션, 'video' = AI 영상
+  const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'product' | 'video' | 'model' | 'history'>('restyle');
 
   // 가상 모델 확정 여부 — 모델이 없으면 생성 서비스(피팅/제품 피팅/바리에이션)는 잠금
   const [modelReady, setModelReady] = useState(false);
 
   // AI 피팅 → AI 바리에이션으로 넘기는 이미지
   const [variationSourceImage, setVariationSourceImage] = useState<string | null>(null);
+  // AI 제품 피팅 / 바리에이션 → AI 영상으로 넘기는 이미지
+  const [videoSourceImage, setVideoSourceImage] = useState<string | null>(null);
 
   /** 모델 준비 여부 확인 — 기준 이미지가 있고 빌더가 생성 중이 아니면 사용 가능 */
   const checkModelReady = async (): Promise<boolean> => {
@@ -131,6 +134,11 @@ export default function StudioPage() {
     setActivePage('fitting');
   };
 
+  const handleSendToVideo = (imageUrl: string) => {
+    setVideoSourceImage(imageUrl);
+    setActivePage('video');
+  };
+
   if (authState === 'loading') {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
@@ -219,6 +227,7 @@ export default function StudioPage() {
             openaiKey={openaiKey}
             onNeedKeys={() => setIsKeyModalOpen(true)}
             onSendToVariation={handleSendToVariation}
+            onSendToVideo={handleSendToVideo}
           />
         ) : activePage === 'fitting' ? (
           <VariationSection
@@ -226,6 +235,14 @@ export default function StudioPage() {
             onNeedKeys={() => setIsKeyModalOpen(true)}
             incomingImage={variationSourceImage}
             onConsumeIncomingImage={() => setVariationSourceImage(null)}
+            onSendToVideo={handleSendToVideo}
+          />
+        ) : activePage === 'video' ? (
+          <VideoSection
+            geminiKey={geminiKey}
+            onNeedKeys={() => setIsKeyModalOpen(true)}
+            incomingImage={videoSourceImage}
+            onConsumeIncomingImage={() => setVideoSourceImage(null)}
           />
         ) : activePage === 'model' ? (
           <ModelProfileSection

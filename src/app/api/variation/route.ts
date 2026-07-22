@@ -37,19 +37,32 @@ async function toOpenAIFile(buffer: Buffer, mimeType: string, name: string) {
 // 반복하면 모델이 그 텍스처 자체에 과도하게 주의를 기울여 오히려 원단 결을 새로 그려내거나
 // 과장하는 것으로 보인다. 이번엔 텍스처 언급을 단 한 번으로 줄이고, "이건 같은 사진이다 —
 // 포즈만 바뀐다"는 단순하고 명확한 프레이밍으로 대체한다.
+// (2026-07-22) "카페 배경을 넣었더니 카페에 모델만 오려 붙인 것처럼 나온다" — 원인은 3가지였다.
+// (1) 배경 참고 이미지에 "reproduce this exact backdrop"이라고 지시해서 배경판을 그대로 복사했고,
+// (2) 마지막 줄의 "professional studio lighting"이 배경과 무관하게 항상 붙어서 인물만 스튜디오
+//     조명을 받고 있었으며(합성 티의 진짜 주범), (3) "keep everything else pixel-faithful"이
+//     인물 조명까지 묶어버려서 새 환경에 맞춘 재조명 자체를 막고 있었다.
+// 해결: 배경 참고를 두 모드로 분리한다.
+//   - 기본 흰 스튜디오(고정 참고 사진) → 지금처럼 정확히 복제 (컷마다 배경이 흔들리면 안 됨)
+//   - 사용자가 올린 장소 사진 → "장소/무드 참고"로 격하. 같은 장소의 새 앵글을 자연스럽게
+//     만들고, 인물을 그 장면의 빛에 맞춰 재조명한다.
 function buildVariationPrompt(
   poseInstruction: string,
   hasBackgroundReferenceImage: boolean,
   hasPoseReferenceImage: boolean,
   /** (2026-07-14) 사용자가 직접 자세를 지정했는지 — true면 프리셋보다 우선한다는 문구를 강조한다 */
   isCustomPose: boolean = false,
+  /** true면 배경 참고가 사용자가 올린 "장소 사진" — 복제가 아니라 장면 재구성 + 인물 재조명 */
+  isCustomLocation: boolean = false,
 ): string {
   const imageNotes: string[] = [
     'Image 1 (the base photo): the exact person and exact outfit to reproduce — the single source of truth for face, skin tone, body, and every garment/accessory.',
   ];
   if (hasBackgroundReferenceImage) {
     imageNotes.push(
-      `Image ${imageNotes.length + 1}: background/lighting reference only — reproduce this exact backdrop and lighting, ignore everything else about this image.`,
+      isCustomLocation
+        ? `Image ${imageNotes.length + 1}: LOCATION reference — this is a mood/scene reference, NOT a backdrop to copy. Keep the same kind of place, same time of day, same overall mood and color palette, but compose a NEW, believable view of that place: a camera angle and framing that suit the pose, with real spatial depth (natural foreground, mid-ground, and background layers) rather than a flat wall behind the subject. Ignore any person shown in this image.`
+        : `Image ${imageNotes.length + 1}: background/lighting reference only — reproduce this exact backdrop and lighting, ignore everything else about this image.`,
     );
   }
   if (hasPoseReferenceImage) {
@@ -73,9 +86,27 @@ function buildVariationPrompt(
 (STRICT: ONE person, ONE pose, ONE photograph — never render several people or a multi-pose lineup.)`
     : `New pose (apply only to body parts that are visible in Image 1): ${poseInstruction}`;
 
+  // 커스텀 장소일 때만 붙는 "실제로 거기서 찍은 사진" 블록.
+  // 주의: 위 주석(2026-07-09)의 교훈대로 같은 개념을 반복하면 역효과가 나므로,
+  // 각 항목을 한 번씩만 언급하고 블록을 짧게 유지한다.
+  const locationIntegrationBlock = isCustomLocation
+    ? [
+        '',
+        '=== THE PERSON MUST LOOK GENUINELY PHOTOGRAPHED IN THIS PLACE (not pasted onto it) ===',
+        'This is the single most important quality bar for this image. The subject and the scene must have been lit by the same light:',
+        '- Relight the person to match the scene: same light direction, colour temperature, intensity, and softness as the location. This is the ONE thing about the person that is allowed — and required — to change.',
+        '- Ground the person physically: a correct contact shadow under the feet (and under any part touching a surface), falling in the direction the scene\'s light dictates.',
+        '- Let the environment touch the subject: subtle bounce light and colour spill from nearby surfaces, and natural occlusion where the body meets the scene.',
+        '- Match the optics: consistent lens perspective and eye level, with the background falling off in natural depth of field while the subject stays in focus.',
+        '- Match the capture: the same grain, white balance, and colour grade across subject and scene, so both look like one exposure from one camera.',
+      ]
+    : [];
+
   return [
     '=== TASK: POSE-ONLY EDIT OF A REAL COMMERCIAL PRODUCT PHOTO ===',
-    'This is the same photo, just with a different body pose. Keep everything else pixel-faithful to Image 1 — same face, same skin tone, same body, and the exact same garments (same color, same fabric, same fit, same shoes, same accessories). Do not redraw, re-texture, sharpen, or reinterpret the clothing in any way.',
+    isCustomLocation
+      ? 'This is the same person in the same outfit, with a different body pose, photographed on location. The face, skin tone, body, and every garment/accessory stay exactly as in Image 1 (same color, same fabric, same fit, same shoes) — do not redraw, re-texture, sharpen, or reinterpret the clothing in any way. The ONLY thing that may differ is how the light of the new location falls on them (see the lighting section below).'
+      : 'This is the same photo, just with a different body pose. Keep everything else pixel-faithful to Image 1 — same face, same skin tone, same body, and the exact same garments (same color, same fabric, same fit, same shoes, same accessories). Do not redraw, re-texture, sharpen, or reinterpret the clothing in any way.',
     // (2026-07-09) 목 위(얼굴)가 안 나오게 크롭된 사진을 넣었는데 결과물에 얼굴이 새로 생성되던
     // 버그 — 이전 버전이 "head to toe visible"을 무조건 강제해서, 입력 사진에 없는 신체 부위까지
     // 억지로 만들어내고 있었다. 입력 사진의 크롭/프레이밍 자체를 그대로 유지하도록 명시.
@@ -91,11 +122,17 @@ function buildVariationPrompt(
     // 미묘하게 충돌해 재해석을 유발할 여지를 없앤다. 체형/피부톤/털/흉터 등 모델 정보는
     // 전부 AI 피팅(restyle) 단계에서만 주입되고, 바리에이션은 그 결과 사진 자체가 유일한 기준.
     'The person in Image 1 IS the model spec — do not adjust the body, skin, or face toward any other standard.',
+    ...locationIntegrationBlock,
     '',
     '=== NEGATIVE CONSTRAINTS ===',
-    'cartoon, illustration, CGI, 3D render, different person, different face, different clothing, different color, different footwear, added or altered fabric pattern/texture, inventing body parts not shown in Image 1, extending the frame beyond Image 1\'s crop, extra limbs, bad hands, distorted anatomy, collage, split screen, multi-panel grid, watermark, text, logo, low resolution, blurry.',
+    'cartoon, illustration, CGI, 3D render, different person, different face, different clothing, different color, different footwear, added or altered fabric pattern/texture, inventing body parts not shown in Image 1, extending the frame beyond Image 1\'s crop, extra limbs, bad hands, distorted anatomy, collage, split screen, multi-panel grid, watermark, text, logo, low resolution, blurry.'
+      + (isCustomLocation
+        ? ' cutout look, pasted-on subject, subject composited onto a backdrop, studio-lit subject standing in a location shot, missing contact shadow, floating above the ground, mismatched light direction between subject and scene, flat sticker-like silhouette edge, flat backdrop wall with no depth.'
+        : ''),
     '',
-    'Single photorealistic commercial lookbook photograph, same framing/crop as Image 1, professional studio lighting.',
+    isCustomLocation
+      ? 'Single photorealistic commercial lookbook photograph shot on location, same framing/crop as Image 1, natural lighting consistent with the location.'
+      : 'Single photorealistic commercial lookbook photograph, same framing/crop as Image 1, professional studio lighting.',
   ].join('\n');
 }
 
@@ -108,6 +145,8 @@ async function runSingleVariation(
   poseReferenceImage: { buffer: Buffer; mimeType: string } | null,
   quality: 'low' | 'medium' = 'medium',
   isCustomPose: boolean = false,
+  /** 배경 참고가 사용자가 올린 장소 사진인지 (기본 흰 스튜디오 참고 사진이면 false) */
+  isCustomLocation: boolean = false,
 ): Promise<{ imageUrl: string; engineUsed: string }> {
   // 입력 이미지는 1024px로 다운스케일 — 페이로드/입력 토큰 절감
   const source = await downscaleImage(sourceBuf, sourceMime);
@@ -121,7 +160,13 @@ async function runSingleVariation(
   );
   const imageInput = refFiles.length > 0 ? [sourceFile, ...refFiles] : sourceFile;
 
-  const prompt = buildVariationPrompt(poseInstruction, !!backgroundReferenceImage, !!poseReferenceImage, isCustomPose);
+  const prompt = buildVariationPrompt(
+    poseInstruction,
+    !!backgroundReferenceImage,
+    !!poseReferenceImage,
+    isCustomPose,
+    isCustomLocation,
+  );
 
   const res: any = await withImageRetry(() => (openai.images as any).edit({
     model: 'gpt-image-2',
@@ -201,7 +246,10 @@ export async function POST(req: Request) {
       const openai = new OpenAI({ apiKey: oKey });
       // (2026-07-17) 사용자가 원하는 배경/장소 사진을 올리면 그걸 배경 참고로 쓰고,
       // 없으면 기존과 동일하게 고정 흰색 스튜디오 참고 사진을 기본값으로 사용한다.
-      const backgroundReferenceImage = customBackgroundImageBase64
+      // (2026-07-22) 이 둘은 프롬프트에서 다르게 다뤄야 한다 — 기본 스튜디오 사진은 "정확히 복제",
+      // 사용자가 올린 장소 사진은 "장면 재구성 + 인물 재조명". isCustomLocation이 그 분기점.
+      const isCustomLocation = !!customBackgroundImageBase64;
+      const backgroundReferenceImage = isCustomLocation
         ? await resultImageToBuffer(customBackgroundImageBase64)
         : getDefaultBackgroundReferenceImage();
 
@@ -211,7 +259,7 @@ export async function POST(req: Request) {
             // 사용자가 public/reference_poses/pose_{N}.png 에 포즈 참고 사진을 넣어두면 자동으로 같이 참고한다.
             // 커스텀 자세(poseNumber=null)는 프리셋 번호가 없으므로 건너뛴다.
             const poseReferenceImage = poseNumber ? getPoseReferenceImage(poseNumber) : null;
-            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage, draftMode ? 'low' : 'medium', pose.id === 'custom');
+            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage, draftMode ? 'low' : 'medium', pose.id === 'custom', isCustomLocation);
             const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
             await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt: pose.poseInstruction });
           } catch (err: any) {
