@@ -488,11 +488,21 @@ export function buildProductFittingPrompt(
     ? `\n- LAYERING (mandatory — the sourced product is an OUTER garment): the top/상의 item styled below (or its reference image, if provided) is a BASE LAYER worn UNDERNEATH this outer garment, not a separate standalone outfit. It must be visible wherever the outer garment is open — at the neckline/collar, at the sleeve cuffs if the outer sleeves are shorter or pushed up, and at the front opening/hem if the outer garment is not fully closed. The outer garment's own fabric must visibly drape and fold over the base layer at the shoulders and front placket — do NOT render the base layer floating separately, and do NOT render the outer garment as if nothing is worn underneath. Keep the base layer slim and simple (a plain crew-neck tee, turtleneck, or thin knit) so it adds no visible bulk under the outer garment's silhouette.`
     : '';
 
-  // (2026-07-23) 클로즈업 프레이밍 — 원단 질감·스티치가 잘 보이는 상반신 위주 디테일샷 요청.
-  // 기존 "FULL BODY SHOT ONLY"가 두 분기(포즈 지시 있음/없음) 모두에 하드코딩돼 있어서 포즈
-  // 텍스트로 아무리 "클로즈업"이라고 적어도 이겨왔다 — 이 한 줄만 교체하고 나머지 구조는 그대로 둔다.
+  // (2026-07-23) 클로즈업 프레이밍 — 원단 질감·스티치가 잘 보이는 디테일샷 요청. 첫 시도(상반신
+  // 고정 문구)로 실제 생성해보니 여전히 전신으로 나왔다는 신고 반영 — 대표님 의도는 "상반신"
+  // 고정이 아니라 소싱한 제품이 실제로 걸쳐진 부위 위주(상의/아우터=가슴, 하의=다리, 신발=발,
+  // 액세서리=그 아이템을 착용하는 부위)로 타이트하게 잘라내는 것이었고, 얼굴은 안 나와도 된다.
+  // "reference 사진이 전신이라도 그걸 그대로 베끼지 말고 새로 크롭해서 재구성하라"를 명시해야
+  // gpt-image-2가 edit 특성상 입력 사진의 전신 구도를 그냥 답습하는 걸 막을 수 있다.
+  const CLOSE_UP_FRAMING_BY_CATEGORY: Record<SourcedCategory, string> = {
+    top: 'the bust/chest area of the sourced top — roughly from the collar or shoulders down to about the waist, filling most of the frame with the garment',
+    outer: 'the chest/torso area of the sourced outer garment — roughly from the collar or shoulders down to about the waist, clearly showing the collar/lapel and button or zipper closure',
+    bottom: 'the sourced bottom (pants/skirt) — roughly from the waistband down to the knee or ankle, filling most of the frame with the garment',
+    shoes: 'the feet and ankles wearing the sourced shoes',
+    accessory: 'whichever body part naturally wears or carries the sourced accessory (the wrist for a watch or bracelet, the neck/collarbone for a necklace, the hand or shoulder for a bag), filling most of the frame with the product',
+  };
   const framingLine = framing === 'close'
-    ? 'Camera framing: CLOSE-UP UPPER BODY SHOT — frame tightly from about the collarbone/shoulders down to the waist or hip line, like a fashion detail photograph. Do NOT show the legs, feet, or full body — this is intentionally cropped close so the garment\'s fabric texture, stitching, and construction read clearly.'
+    ? `Camera framing: CLOSE-UP PRODUCT DETAIL SHOT — a tight crop centered on ${CLOSE_UP_FRAMING_BY_CATEGORY[category]}, like a fashion detail/product photograph. This must be an intentionally tight, cropped-in shot, NOT the same wide framing as a full-body photo — even if any reference photo (the model identity image, a pose anchor, etc.) is a full-body shot, you must recompose this shot as a genuinely close crop, not simply reproduce that photo's wider framing. The model's face does not need to be in frame at all — it is completely fine if the face, or most of the rest of the body, is cropped out entirely. The sourced product and its fabric texture/construction are the entire focus of this shot.`
     : 'Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped.';
 
   // 색상 옵션 지정 시 — 샘플 시트에 여러 색상이 있어도 이 색상 하나만 입혀서 생성
@@ -586,6 +596,11 @@ export function buildProductFittingPrompt(
         ]
       : []),
     `POSE (obey exactly): ${userAdditions.trim() || 'clean, confident commercial standing pose, facing camera'}`,
+    // (2026-07-23) 프레이밍도 이 최우선 체크리스트에 짧게 먼저 못박는다 — 뒤쪽 PRODUCT FIDELITY의
+    // 거대한 CRITICAL 규칙 더미에 묻혀서 클로즈업 지시가 무시되고 전신으로 나왔다는 신고 반영.
+    framing === 'close'
+      ? `FRAMING (obey exactly): CLOSE-UP crop on ${CLOSE_UP_FRAMING_BY_CATEGORY[category]} — NOT a full-body shot, do not show the whole figure head-to-toe.`
+      : '',
     // (2026-07-19) "AI가 없는 실밥선/절개선을 밑단·측면에 지어내는" 품질 문제 — 최우선으로 못박음.
     `PRODUCT SURFACE — ADD NOTHING: reproduce ONLY the seams, topstitching, panel lines, pockets, and details that are actually visible on the sourced product in its reference photo. Do NOT add any extra stitch line, seam, panel line, or topstitching that is not on the real product — especially do NOT invent decorative stitch/seam lines near the hem, side, or chest. If the product is a plain simple garment, keep it plain: fewer lines, not more.`,
     '',
@@ -668,7 +683,7 @@ export function buildProductFittingPrompt(
     userAdditions.trim()
       ? `${framingLine}
 THE POSE FOR THIS SHOT (mandatory — this IS the pose to render, not a suggestion; do NOT default to a generic frontal standing pose, and do NOT default to whatever pose/turn direction any other reference image happens to show): ${userAdditions.trim()}
-(If this specifies a direction or turn — e.g. facing left/right, three-quarter turn, side profile, back view, walking — the body orientation AND camera framing must clearly and unambiguously show it, exactly as worded (left means left, right means right) — this pose instruction is the ONLY authority on body direction and wins over every other image in this request. A back-view pose must actually show the model's back with the garment's BACK-zone construction. STRICT: the output is ONE photograph of exactly ONE person in ONE pose — if multiple poses are listed, pick only the single most suitable one, never render several people or a multi-pose lineup.${framing === 'close' ? ' If this pose instruction describes a full-body action, keep only its upper-body portion, hand position, and gaze, adapted to this tighter crop.' : ''})`
+(If this specifies a direction or turn — e.g. facing left/right, three-quarter turn, side profile, back view, walking — the body orientation AND camera framing must clearly and unambiguously show it, exactly as worded (left means left, right means right) — this pose instruction is the ONLY authority on body direction and wins over every other image in this request. A back-view pose must actually show the model's back with the garment's BACK-zone construction. STRICT: the output is ONE photograph of exactly ONE person in ONE pose — if multiple poses are listed, pick only the single most suitable one, never render several people or a multi-pose lineup.${framing === 'close' ? ' If this pose instruction describes a broader full-body action, keep only whatever portion of it is visible within the tight crop defined above, adapted to that crop.' : ''})`
       : `${framingLine} Clean, confident, polished commercial standing pose with natural hand placement. Default gaze/head direction: face and eyes toward or near the camera, in a natural relaxed way — do NOT habitually turn the head to one side (e.g. always to the right).`,
     '',
     '=== NEW STYLING TO GENERATE (everything except the product above) ===',
@@ -676,13 +691,18 @@ THE POSE FOR THIS SHOT (mandatory — this IS the pose to render, not a suggesti
     ...styleReferenceLines,
     backgroundLine,
     GARMENT_SIDE_CONSISTENCY_RULE,
-    '- The model\'s face must be fully and clearly visible — bare face, no eyewear or headwear of any kind unless a USER MANDATE above explicitly asks for it.',
+    framing === 'close'
+      ? '- No eyewear or headwear of any kind unless a USER MANDATE above explicitly asks for it (this applies only if the face happens to be in frame).'
+      : '- The model\'s face must be fully and clearly visible — bare face, no eyewear or headwear of any kind unless a USER MANDATE above explicitly asks for it.',
     '',
     '=== NEGATIVE CONSTRAINTS (ABSOLUTE) ===',
     RESTYLE_QUALITY_CONSTRAINTS,
+    framing === 'close' ? 'full body shot, entire figure visible head-to-toe, wide establishing shot, legs and feet in frame' : '',
     '',
     '=== OUTPUT QUALITY MANDATE ===',
-    'Produce a single authentic commercial lookbook photograph — the kind a person would want to buy the product after seeing. Photorealistic, natural skin texture, natural fabric folds, professional photography lighting. No CGI, no collage, single subject only.',
+    framing === 'close'
+      ? 'Produce a single authentic commercial product DETAIL photograph — a tightly cropped close-up, the kind used to showcase fabric texture and construction quality up close. Photorealistic, natural skin texture, natural fabric folds, professional photography lighting. No CGI, no collage, single subject only, no full-body wide shot.'
+      : 'Produce a single authentic commercial lookbook photograph — the kind a person would want to buy the product after seeing. Photorealistic, natural skin texture, natural fabric folds, professional photography lighting. No CGI, no collage, single subject only.',
   ].join('\n');
 }
 
