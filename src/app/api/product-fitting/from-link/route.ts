@@ -166,13 +166,18 @@ async function filterRelevantImages(
   title: string,
   colorOptions: string[],
   geminiApiKey?: string,
-): Promise<boolean[]> {
-  if (!geminiApiKey || images.length === 0) return images.map(() => true);
+): Promise<Array<{ keep: boolean; colorway: string }>> {
+  const passAll = () => images.map(() => ({ keep: true, colorway: '' }));
+  if (!geminiApiKey || images.length === 0) return passAll();
   try {
     const ai = new GoogleGenAI({ apiKey: geminiApiKey });
     const parts: any[] = [
       {
-        text: `These ${images.length} numbered photos (index 0 to ${images.length - 1}, in order) were scraped from a single product's detail page titled "${title || 'unknown'}"${colorOptions.length ? `, sold in these colorways: ${colorOptions.join(', ')}` : ''}. Some may be UNRELATED brand mood shots, a different product, banners/promos, or street photography that does not actually show this garment. For EACH image, decide if it should be KEPT (it clearly shows THIS garment — worn, laid flat, a construction/fabric close-up, or a size chart) or DROPPED (unrelated scenery/person, a clearly different garment/color-family, or a banner/promo graphic with no real garment view). Return keep=true/false per index, in the same order.`,
+        text: `These ${images.length} numbered photos (index 0 to ${images.length - 1}, in order) were scraped from a single product's detail page titled "${title || 'unknown'}"${colorOptions.length ? `, sold in these colorways: ${colorOptions.join(', ')}` : ''}. Some may be UNRELATED brand mood shots, a different product, banners/promos, or street photography that does not actually show this garment.
+
+For EACH image return two things:
+1. keep — true if it clearly shows THIS garment (worn, laid flat, a construction/fabric close-up, or a size chart); false if it is unrelated scenery/person, a clearly different garment, or a banner/promo graphic with no real garment view.
+2. colorway — WHICH colorway of this product the garment in that photo actually is. Judge by the garment's real color in the photo${colorOptions.length ? ` and answer with EXACTLY one of these option names: ${colorOptions.join(', ')}` : ''}. This matters a lot: the same product is photographed in several different colors on one page, and we must not mix them up. If the photo is a size chart, a text-only graphic, or the garment's color genuinely cannot be told, answer "unknown".`,
       },
     ];
     images.forEach((img, i) => {
@@ -193,7 +198,15 @@ async function filterRelevantImages(
           properties: {
             decisions: {
               type: Type.ARRAY,
-              items: { type: Type.OBJECT, properties: { index: { type: Type.NUMBER }, keep: { type: Type.BOOLEAN } }, required: ['index', 'keep'] },
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  index: { type: Type.NUMBER },
+                  keep: { type: Type.BOOLEAN },
+                  colorway: { type: Type.STRING, description: 'One of the listed colorway names, or "unknown"' },
+                },
+                required: ['index', 'keep', 'colorway'],
+              },
             },
           },
           required: ['decisions'],
@@ -201,13 +214,20 @@ async function filterRelevantImages(
       },
     });
     const parsed = JSON.parse(response.text?.trim() || '{}');
-    const decisions: Array<{ index: number; keep: boolean }> = Array.isArray(parsed.decisions) ? parsed.decisions : [];
-    const keepMap = new Map(decisions.map((d) => [d.index, d.keep]));
+    const decisions: Array<{ index: number; keep: boolean; colorway?: string }> = Array.isArray(parsed.decisions)
+      ? parsed.decisions
+      : [];
+    const map = new Map(decisions.map((d) => [d.index, d]));
     // 판정이 없는 이미지는 안전하게 통과(fail-open) — 필터가 실수로 다 지우는 것보다 낫다
-    return images.map((_, i) => keepMap.get(i) ?? true);
+    return images.map((_, i) => {
+      const d = map.get(i);
+      const raw = (d?.colorway || '').trim();
+      const matched = colorOptions.find((c) => c.toLowerCase() === raw.toLowerCase()) || '';
+      return { keep: d?.keep ?? true, colorway: matched };
+    });
   } catch (err) {
     console.warn('[from-link] 이미지 관련성 필터 호출 실패 — 필터 생략:', err);
-    return images.map(() => true);
+    return passAll();
   }
 }
 
@@ -266,11 +286,21 @@ export async function POST(req: Request) {
     const productImagesRaw = await downloadBucket(official, 8);
     const materialImagesRaw = await downloadBucket(detail, 6);
 
-    // 무관 이미지 필터 — 두 버킷을 합쳐 한 번에 검사(호출 절약), keep[]을 원래 길이 기준으로 되나눈다.
+    // 무관 이미지 필터 + 이미지별 컬러웨이 판별 — 두 버킷을 합쳐 한 번에 검사(호출 절약) 후
+    // 원래 길이 기준으로 되나눈다. 컬러웨이는 "GRAY 골랐는데 브라운 사진만 들어가는" 사고 방지용.
     const combined = [...productImagesRaw, ...materialImagesRaw];
-    const keep = await filterRelevantImages(combined, title, options.colors, geminiApiKey);
-    const productImages = productImagesRaw.filter((_, i) => keep[i]);
-    const materialImages = materialImagesRaw.filter((_, i) => keep[productImagesRaw.length + i]);
+    const verdicts = await filterRelevantImages(combined, title, options.colors, geminiApiKey);
+    const productKept = productImagesRaw
+      .map((img, i) => ({ img, v: verdicts[i] }))
+      .filter((x) => x.v.keep);
+    const materialKept = materialImagesRaw
+      .map((img, i) => ({ img, v: verdicts[productImagesRaw.length + i] }))
+      .filter((x) => x.v.keep);
+
+    const productImages = productKept.map((x) => x.img);
+    const materialImages = materialKept.map((x) => x.img);
+    const productImageColors = productKept.map((x) => x.v.colorway);
+    const materialImageColors = materialKept.map((x) => x.v.colorway);
 
     if (productImages.length === 0 && materialImages.length === 0) {
       return NextResponse.json({
@@ -286,6 +316,9 @@ export async function POST(req: Request) {
       success: true,
       productImages,
       materialImages,
+      // 이미지별 판별된 컬러웨이(빈 문자열 = 판별 불가) — 프론트가 선택 색상에 맞는 컷만 쓰도록
+      productImageColors,
+      materialImageColors,
       title,
       description,
       sourceUrl: pageUrl,

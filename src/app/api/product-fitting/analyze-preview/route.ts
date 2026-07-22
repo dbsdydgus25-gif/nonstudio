@@ -45,6 +45,9 @@ export async function POST(req: Request) {
       category: analysis.category,
       color: analysis.color,
       material: analysis.material,
+      details: analysis.details,
+      fitType: analysis.fitType,
+      length: analysis.length,
     });
   } catch (err: any) {
     console.error('[api/product-fitting/analyze-preview] 처리 실패:', err);

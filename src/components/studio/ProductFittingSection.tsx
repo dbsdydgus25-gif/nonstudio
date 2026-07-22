@@ -76,6 +76,11 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   // colorOverride로 프롬프트에 명시 반영(사진 색이 곧 정답이라는 규칙의 유일한 예외)
   const [linkColorOptions, setLinkColorOptions] = useState<string[]>([]);
   const [colorOverride, setColorOverride] = useState<string | null>(null);
+  // 링크로 가져온 이미지별로 판별된 컬러웨이 (productImages/materialImages와 인덱스 대응).
+  // 색상을 고르면 그 색 컷만 생성에 넣는다 — 텍스트로만 "GRAY로 그려라" 하면 브라운 사진 8장에
+  // 밀려서 무시되는 게 실측 확인됐다.
+  const [productImageColors, setProductImageColors] = useState<string[]>([]);
+  const [materialImageColors, setMaterialImageColors] = useState<string[]>([]);
   // 초안 품질(low) — medium 대비 약 1/4 비용, 코디/색상 확인용
   const [draftMode, setDraftMode] = useState(false);
   const otherSlots = CATEGORY_OPTIONS.map((c) => c.id).filter((id) => id !== category);
@@ -220,9 +225,15 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       // 각 파트에 자동으로 꽂혀서 색/핏은 제품컷 기준, 질감/사이즈는 상세컷 기준으로 분석됨.
       const productImgs: string[] = data.productImages || [];
       const materialImgs: string[] = data.materialImages || [];
-      setProductImages((prev) => [...prev, ...productImgs].slice(0, 8));
-      setMaterialImages((prev) => [...prev, ...materialImgs].slice(0, 4));
-      // <select>에서 뽑은 정확한 사이즈 옵션이 있으면 바로 채운다 (없으면 상세컷 분석으로 보완)
+      const prodColors: string[] = data.productImageColors || [];
+      const matColors: string[] = data.materialImageColors || [];
+      // 링크로 가져올 땐 기존 목록에 덧붙이지 않고 교체한다 — 색상 인덱스가 어긋나면
+      // "GRAY 골랐는데 브라운 컷이 들어가는" 사고가 나므로 이미지/색상 배열을 항상 짝맞춘다.
+      setProductImages(productImgs.slice(0, 8));
+      setProductImageColors(prodColors.slice(0, 8));
+      setMaterialImages(materialImgs.slice(0, 4));
+      setMaterialImageColors(matColors.slice(0, 4));
+      // <select>에서 뽑은 정확한 사이즈 옵션이 있으면 바로 채운다 (없으면 아래 자동 분석으로 보완)
       const linkSizes: Array<{ label: string; measurements?: string }> = data.sizeOptions || [];
       if (linkSizes.length) setSizeOptions(linkSizes);
       const colorOpts: string[] = data.colorOptions || [];
@@ -237,12 +248,58 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         .join(' · ');
       setImportMsg({
         kind: 'ok',
-        text: `제품 이미지 ${productImgs.length}장을 가져왔습니다${data.title ? ` — ${data.title}` : ''}${extra ? ` / ${extra} 인식` : ''}. 아래에서 확인하고 필요 없는 건 지우세요.`,
+        text: `제품 이미지 ${productImgs.length}장을 가져왔습니다${data.title ? ` — ${data.title}` : ''}${extra ? ` / ${extra} 인식` : ''}. 상세 분석 중...`,
       });
+
+      // 상세페이지 내용(소재·특징·사이즈표)을 이어서 자동 분석해 "제품 핏 · 디테일 지시"까지 채운다.
+      void autoFillFromAnalysis(productImgs.slice(0, 8), materialImgs.slice(0, 4), extra, data.title);
     } catch (err: any) {
       setImportMsg({ kind: 'blocked', text: err?.message || '링크 처리 중 오류가 발생했습니다.' });
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  /**
+   * 링크 가져오기 직후 상세컷까지 분석해서 "제품 핏 · 디테일 지시"와 사이즈 옵션을 자동으로 채운다.
+   * (상세페이지의 소재/특징 텍스트는 대부분 이미지 안에 있어 비전 분석이 필요하다.)
+   */
+  const autoFillFromAnalysis = async (
+    productImgs: string[],
+    materialImgs: string[],
+    extra: string,
+    title?: string,
+  ) => {
+    if (!geminiKey || productImgs.length === 0) return;
+    try {
+      const res = await fetch('/api/product-fitting/analyze-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productImagesBase64: productImgs,
+          materialImagesBase64: materialImgs.length ? materialImgs : undefined,
+          category,
+          geminiApiKey: geminiKey,
+          openaiApiKey: openaiKey,
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d.success) return;
+
+      // 사진만으로 판단 어려운 핏/소재 정보를 요약해 채운다 (사용자가 그대로 고쳐 쓸 수 있음)
+      const notes = [d.material, d.fitType ? `${d.fitType} 핏` : '', d.length, d.details]
+        .filter((v: string) => typeof v === 'string' && v.trim())
+        .join(' / ');
+      if (notes) setProductNotes((prev) => (prev.trim() ? prev : notes));
+      if (Array.isArray(d.sizeOptions) && d.sizeOptions.length) {
+        setSizeOptions((prev) => (prev.length ? prev : d.sizeOptions));
+      }
+      setImportMsg({
+        kind: 'ok',
+        text: `제품 이미지 ${productImgs.length}장 · 상세 분석 완료${title ? ` — ${title}` : ''}${extra ? ` / ${extra} 인식` : ''}. 소재·핏이 아래 02번에 자동으로 채워졌습니다.`,
+      });
+    } catch {
+      /* 자동 채움 실패는 조용히 무시 — 사용자가 직접 입력하면 된다 */
     }
   };
 
@@ -296,6 +353,29 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     setCurrentResult(null);
     setColorJobs([]);
 
+    // (2026-07-21) 색상을 골랐으면 그 색 컷만 생성에 넣는다 — 텍스트로만 "GRAY로 그려라"라고 하면
+    // 브라운/차콜 사진 여러 장의 시각 정보에 밀려 무시되는 게 실측 확인됨(GRAY 선택 → 브라운 출력).
+    // 판별된 컬러웨이가 일치하는 컷을 우선 사용하고, 제품컷에 없으면 상세컷에서라도 찾아 쓴다.
+    let effectiveProductImages = productImages;
+    let colorNote = '';
+    if (colorOverride) {
+      const matchProduct = productImages.filter(
+        (_, i) => (productImageColors[i] || '').toLowerCase() === colorOverride.toLowerCase(),
+      );
+      const matchMaterial = materialImages.filter(
+        (_, i) => (materialImageColors[i] || '').toLowerCase() === colorOverride.toLowerCase(),
+      );
+      const matched = [...matchProduct, ...matchMaterial];
+      if (matched.length > 0) {
+        effectiveProductImages = matched;
+        colorNote = ` (${colorOverride} 컷 ${matched.length}장만 사용)`;
+      } else {
+        // 그 색 사진이 아예 없으면 기존 사진 + 색상 지시 텍스트로 진행(정직하게 알림)
+        colorNote = ` (${colorOverride} 색상 사진이 없어 텍스트 지시로만 반영 — 색이 다르게 나올 수 있음)`;
+      }
+    }
+    if (colorNote) setStageMsg((prev) => prev + colorNote);
+
     // 포즈 1장이면 기존과 동일하게 "자세" 텍스트 하나만, 여러 장이면 컷별 지시 배열을 그대로 전달
     // (비운 컷은 서버에서 프리셋 포즈 중 랜덤으로 채움)
     const effectiveCustomPoseTexts =
@@ -306,7 +386,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          productImagesBase64: productImages,
+          productImagesBase64: effectiveProductImages,
           materialImagesBase64: materialImages.length ? materialImages : undefined,
           category,
           geminiApiKey: geminiKey,
@@ -450,19 +530,28 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             {/* 링크에서 뽑은 판매 색상 옵션 — 참고 사진과 다른 색을 고르면 그 색으로 렌더링 지시 */}
             {linkColorOptions.length > 0 && (
               <div className="space-y-1.5 pt-1">
-                <span className="text-[10px] font-semibold text-gray-500">판매 색상 (사진과 다른 색을 고르면 그 색으로 렌더링합니다)</span>
+                <span className="text-[10px] font-semibold text-gray-500">
+                  판매 색상 — 고르면 <b>그 색 사진만</b> 골라서 생성합니다 (숫자 = 그 색 사진 장수)
+                </span>
                 <div className="flex flex-wrap gap-1.5">
                   {linkColorOptions.map((c) => {
                     const active = colorOverride === c;
+                    const count =
+                      productImageColors.filter((x) => x.toLowerCase() === c.toLowerCase()).length +
+                      materialImageColors.filter((x) => x.toLowerCase() === c.toLowerCase()).length;
                     return (
                       <button
                         key={c}
                         onClick={() => setColorOverride(active ? null : c)}
+                        title={count === 0 ? '이 색 사진이 없어 텍스트 지시로만 반영됩니다' : `${c} 사진 ${count}장`}
                         className={`px-3 py-1.5 rounded-full text-[11px] font-medium border transition ${
                           active ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400'
                         }`}
                       >
                         {c}
+                        <span className={active ? 'ml-1 opacity-70' : `ml-1 ${count === 0 ? 'text-amber-500' : 'text-gray-400'}`}>
+                          {count || '0'}
+                        </span>
                       </button>
                     );
                   })}
@@ -512,6 +601,20 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                   <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-medium tracking-wide">
                     {i === 0 ? '대표' : extractColors ? `색상 ${i + 1}` : `각도 ${i + 1}`}
                   </span>
+                  {/* 링크로 가져온 컷은 판별된 컬러웨이를 표시 — 선택 색상과 다른 컷을 한눈에 구분 */}
+                  {productImageColors[i] && (
+                    <span
+                      className={`absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide ${
+                        colorOverride && productImageColors[i].toLowerCase() === colorOverride.toLowerCase()
+                          ? 'bg-emerald-500 text-white'
+                          : colorOverride
+                            ? 'bg-white/80 text-gray-400'
+                            : 'bg-white/85 text-gray-700'
+                      }`}
+                    >
+                      {productImageColors[i]}
+                    </span>
+                  )}
                 </div>
               );
             })}
