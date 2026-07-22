@@ -94,14 +94,22 @@ function buildVariationPrompt(
   // 커스텀 장소일 때만 붙는 "실제로 거기서 찍은 사진" 블록.
   // 주의: 위 주석(2026-07-09)의 교훈대로 같은 개념을 반복하면 역효과가 나므로,
   // 각 항목을 한 번씩만 언급하고 블록을 짧게 유지한다.
+  //
+  // (2026-07-23) 실사용 확인 — 조명/그림자는 맞아도 "사람이 밴 옆에서 4미터 거인처럼" 나오는
+  // 사고가 재현됐다. 원인: 이 블록이 빛(조명/그림자/피사계심도)만 다루고, 인물이 그 장면
+  // 안에서 물리적으로 맞는 크기여야 한다는 말이 단 한 줄도 없었다. gpt-image-2는 배경 사진과
+  // 인물 사진을 각자 "적당한 크기"로 합성해버려서, 차·건물·통행인 같은 실제 크기 기준이 있는
+  // 사물 옆에 두면 스케일이 완전히 어긋난다. 이건 조명 불일치보다 훨씬 눈에 띄는 결함이라
+  // 이 블록 맨 앞(최우선)에 스케일 규칙을 추가한다.
   const locationIntegrationBlock = isCustomLocation
     ? [
         '',
         '=== THE PERSON MUST LOOK GENUINELY PHOTOGRAPHED IN THIS PLACE (not pasted onto it) ===',
-        'This is the single most important quality bar for this image. The subject and the scene must have been lit by the same light:',
-        '- Relight the person to match the scene: same light direction, colour temperature, intensity, and softness as the location. This is the ONE thing about the person that is allowed — and required — to change.',
-        '- Ground the person physically: a correct contact shadow under the feet (and under any part touching a surface), falling in the direction the scene\'s light dictates.',
-        '- Let the environment touch the subject: subtle bounce light and colour spill from nearby surfaces, and natural occlusion where the body meets the scene.',
+        'This is the single most important quality bar for this image. Two things must be true — scale and light:',
+        '- SCALE (check this first): find the size cues already in the location image — parked vehicles, doorways/windows, utility poles, lane markings, furniture, or other people standing in the scene — and use them to fix how large the person must appear at this distance and camera height. A real adult standing next to a car is roughly chest-to-shoulder height against it, not taller than the car\'s roofline; a doorway typically clears the head by a small margin, not by feet. If the reference image contains other people, the subject must be a normal, comparable human height next to them — never noticeably larger or smaller. Getting this wrong (an oversized or undersized person) reads instantly as a bad composite, more than any lighting mismatch does.',
+        '- LIGHT: the subject and the scene must have been lit by the same light — relight the person to match the scene\'s light direction, colour temperature, intensity, and softness. This is the ONE thing about the person that is allowed — and required — to change.',
+        '- Ground the person physically: a correct contact shadow under the feet (and under any part touching a surface), falling in the direction the scene\'s light dictates, sized consistently with the scale fixed above.',
+        '- Let the environment touch the subject: subtle bounce light and colour spill from nearby surfaces, and natural occlusion where the body meets the scene (e.g. partially behind a nearby object if the chosen framing places it in front of the subject).',
         '- Match the optics: consistent lens perspective and eye level, with the background falling off in natural depth of field while the subject stays in focus.',
         '- Match the capture: the same grain, white balance, and colour grade across subject and scene, so both look like one exposure from one camera.',
       ]
