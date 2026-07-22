@@ -155,6 +155,15 @@ export async function POST(req: Request) {
           analyzePose(photoBase64, geminiApiKey, openaiApiKey),
         ]);
 
+        // (2026-07-23) AI 제품 피팅과 동일 — 분석이 실패해 일반 폴백값으로 채워졌으면
+        // 재질·구조가 반영 안 된 결과에 비용만 쓰게 되므로, 생성 전에 이유를 알리고 멈춘다.
+        if (garmentAnalysis.analysisFailed) {
+          throw new Error(
+            '제품 분석에 실패해 생성을 중단했습니다 (Gemini 사용량 한도 초과 가능성이 가장 큽니다). ' +
+              '잠시 후 다시 시도하거나 API 설정에서 Gemini 키 사용량을 확인해주세요.',
+          );
+        }
+
         const { buffer: photoBuf, mimeType: photoMime } = parseBase64Image(photoBase64);
         const openai = new OpenAI({ apiKey: openaiApiKey });
 

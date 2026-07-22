@@ -31,7 +31,11 @@ export async function pollGenerationStatuses(
   opts: { intervalMs?: number; timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<PolledGenerationStatus[]> {
   const intervalMs = opts.intervalMs ?? 3000;
-  const timeoutMs = opts.timeoutMs ?? 240000; // 4분 — gpt-image-2 90~100초 + 여유
+  // (2026-07-23) 240초(4분)였는데 서버 라우트의 maxDuration이 280초라, 서버가 아직 작업 중인데
+  // 클라이언트가 40초 먼저 포기해서 "시간이 오래 걸린다"는 에러가 뜨는 구조였다(실제 신고).
+  // 포즈 여러 장(첫 컷을 기준 사진으로 쓰느라 순차 실행) + 클로즈업 고화질 + 검증 불합격 시
+  // 1회 재생성까지 겹치면 4분을 넘기는 게 정상 범위다. 서버 한도(280초)보다 뒤에 끝나도록 맞춘다.
+  const timeoutMs = opts.timeoutMs ?? 300000;
   const startedAt = Date.now();
   const signal = opts.signal;
 
@@ -52,7 +56,9 @@ export async function pollGenerationStatuses(
     if (allSettled) return items;
 
     if (Date.now() - startedAt > timeoutMs) {
-      throw new Error('생성 시간이 너무 오래 걸리고 있습니다. 잠시 후 히스토리 화면에서 결과를 확인해주세요.');
+      throw new Error(
+        '생성이 아직 진행 중입니다 — 화면 대기만 종료했을 뿐 서버에서는 계속 만들고 있습니다. 잠시 후 새로고침하면 히스토리에 결과가 나타납니다. (컷 수가 많거나 클로즈업 고화질일수록 오래 걸립니다)',
+      );
     }
 
     // 대기 도중에 중단을 누르면 다음 폴링을 기다리지 않고 바로 빠져나온다.

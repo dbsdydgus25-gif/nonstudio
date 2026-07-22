@@ -333,6 +333,15 @@ export async function POST(req: Request) {
     ).flat();
 
     after(async () => {
+      // (2026-07-23) 이 함수 전체가 maxDuration(280초) 안에서 끝나야 한다 — 넘기면 런타임이
+      // 통째로 죽어서 아직 pending인 컷들이 영영 pending으로 남고, 사용자에겐 "시간이 오래
+      // 걸린다"만 보인다. 검증 불합격 시의 교정 재생성은 이미지 생성을 한 번 더 하는 거라
+      // 가장 큰 변동 요인이므로, 남은 시간이 부족하면 재생성을 건너뛰고 첫 결과를 저장한다
+      // (완벽하진 않아도 저장된 결과가 아무것도 없는 것보다 낫다).
+      const routeStartedAt = Date.now();
+      const RETRY_DEADLINE_MS = 175_000; // 이 시점을 넘겼으면 교정 재생성(≈60~120초)은 포기
+      const hasTimeForCorrectionRetry = () => Date.now() - routeStartedAt < RETRY_DEADLINE_MS;
+
       const openai = new OpenAI({ apiKey: openaiApiKey });
       // 참고 이미지도 다운스케일 — job마다 반복 업로드되므로 절감 효과가 색상 수만큼 곱해진다
       const rawBackground = getDefaultBackgroundReferenceImage();
@@ -408,6 +417,21 @@ export async function POST(req: Request) {
             openaiApiKey,
             materialImagesBase64?.length ? materialImagesBase64 : undefined,
           );
+
+          // (2026-07-23) 분석이 실패(Gemini 한도 초과 등)하면 여기서 즉시 멈춘다.
+          // 예전엔 analysisFailed를 이 경로에서 아무도 안 봤다 — 그래서 색/재질/구조 지도가
+          // 전부 일반 폴백값("as shown in image", constructionMap 없음)인 채로 그대로 생성돼
+          // "한참 잘 되다가 갑자기 재질이 뭉개지고 옷이 이상하게 나오는" 증상이 났고,
+          // 사용자는 원인을 알 수 없었다(생성 후 자동 검증도 constructionMap이 없으면 건너뜀).
+          // 이 상태로 계속 진행해봐야 결과물은 못 쓰고 이미지 생성 비용만 나가므로,
+          // 비싼 생성에 들어가기 전에 이유를 명확히 알리고 중단하는 편이 낫다.
+          if (garmentAnalysis.analysisFailed) {
+            throw new Error(
+              '제품 분석에 실패해 생성을 중단했습니다 (Gemini 사용량 한도 초과 가능성이 가장 큽니다). ' +
+                '이대로 진행하면 재질·색상·구조가 반영되지 않은 결과가 나오고 비용만 발생해서 미리 멈췄습니다. ' +
+                '잠시 후 다시 시도하거나 API 설정에서 Gemini 키 사용량을 확인해주세요.',
+            );
+          }
 
           // 색상마다 어울리는 코디가 다를 수 있음 — 색상별 지시(styleHints)가 있는 슬롯은
           // 공통 지시(userPreferenceHints)를 덮어쓰고, 비어 있는 슬롯은 공통을 그대로 쓴다.
@@ -526,7 +550,14 @@ export async function POST(req: Request) {
                   styleChecklist,
                   effectiveProductNotes,
                 );
-                if (!verdict.pass && verdict.defects.length > 0) {
+                if (!verdict.pass && verdict.defects.length > 0 && !hasTimeForCorrectionRetry()) {
+                  // 남은 시간이 부족하면 재생성을 포기하고 첫 결과를 그대로 저장한다 —
+                  // 여기서 무리하면 런타임이 죽어 이 컷 자체가 pending으로 방치된다.
+                  console.warn(
+                    '[api/product-fitting][after] 검증 불합격이지만 시간이 부족해 교정 재생성을 건너뜁니다:',
+                    verdict.defects,
+                  );
+                } else if (!verdict.pass && verdict.defects.length > 0) {
                   console.warn('[api/product-fitting][after] 자동 검증 불합격 — 교정 재생성 1회 시도:', verdict.defects);
                   try {
                     const retryPrompt = `${buildDefectCorrectionBlock(verdict.defects)}\n\n${prompt}`;
