@@ -22,6 +22,7 @@ const CONSTRUCTION_MAP_SCHEMA = {
     neckline: { type: Type.STRING, description: 'TOPS: the neckline — collar shape (crew/v/mock/polo), the band construction (ribbed band, bound edge, self-fabric), and CRITICALLY whether a contrast trim/stitch runs along it (state the trim colors and stitch style, e.g. "crew neck with narrow ribbed band edged by a black-and-white contrast whipstitch"). "none" if the garment is not a top' },
     sleeveCuffs: { type: Type.STRING, description: 'TOPS: the sleeve hem/cuff — band type (ribbed cuff, plain folded hem, raw edge) and whether the SAME contrast trim/stitch as the neckline appears here or not. Be explicit; this is frequently rendered wrong. "none" if not a top' },
     hem: { type: Type.STRING, description: 'TOPS: the BOTTOM hem of the garment — band type (wide ribbed band, plain hem, drawcord) and whether a contrast trim/stitch is present. If the neckline/cuffs have contrast trim but the hem does NOT, say so explicitly ("plain ribbed hem band, NO contrast stitching"). "none" if not a top' },
+    closures: { type: Type.STRING, description: 'ALL closures and hardware, with EXACT COUNTS as digits. Look closely at the photos and literally COUNT them — do not estimate or assume a typical number. State: how many buttons and where they run (e.g. "5 buttons down a full-length center front placket, spaced evenly"), how many are on cuffs/pockets/collar, plus any zipper (state its length/type/pull colour, e.g. "1 full-length gold metal zipper"), snaps, toggles, hooks, or drawcords. Name the hardware colour and material (matte black plastic / gold metal / tortoiseshell / self-fabric covered). If the garment is a pullover with NO closures at all, write exactly "none — pullover, no buttons, no zipper, no closures of any kind". Never invent a placket or button that is not clearly visible in the photos' },
     frontWaistband: { type: Type.STRING, description: 'Front waistband construction: fly type, buttons/zip, belt loops, whether elastic is visible from front' },
     frontLeftLeg: { type: Type.STRING, description: "Wearer's LEFT leg, front view — ONLY details that exist on this leg and NOT on the other leg (a symmetric pair present on both legs does NOT belong here). \"none\" if this leg has no unique detail" },
     frontRightLeg: { type: Type.STRING, description: "Wearer's RIGHT leg, front view — ONLY details that exist on this leg and NOT on the other leg. \"none\" if this leg has no unique detail" },
@@ -32,7 +33,7 @@ const CONSTRUCTION_MAP_SCHEMA = {
     sideSeams: { type: Type.STRING, description: 'Side seam construction, or "not visible in provided photos" if unseen' },
     asymmetryChecklist: { type: Type.STRING, description: 'EVERY one-side-only detail of this garment, each as "<detail> — wearer\'s <LEFT|RIGHT> <leg/side> ONLY, the opposite side has NO such detail", separated by "; ". Example: "hammer loop — wearer\'s LEFT leg ONLY, the opposite side has NO loop; cargo patch pocket with woven brand patch — wearer\'s RIGHT leg ONLY, the opposite side has NO cargo pocket and NO patch". Write "none — all details are symmetric" if truly nothing is one-sided' },
   },
-  required: ['photoClassification', 'neckline', 'sleeveCuffs', 'hem', 'frontWaistband', 'frontLeftLeg', 'frontRightLeg', 'backWaistband', 'backLeftLeg', 'backRightLeg', 'backPockets', 'sideSeams', 'asymmetryChecklist'],
+  required: ['photoClassification', 'neckline', 'sleeveCuffs', 'hem', 'closures', 'frontWaistband', 'frontLeftLeg', 'frontRightLeg', 'backWaistband', 'backLeftLeg', 'backRightLeg', 'backPockets', 'sideSeams', 'asymmetryChecklist'],
 };
 
 /** OpenAI 폴백은 responseSchema 강제가 안 되므로, 필드가 빠지거나 문자열째로 와도 안전하게 정규화한다. */
@@ -48,6 +49,7 @@ function normalizeConstructionMap(cm: any): GarmentConstructionMap | undefined {
     neckline: cm.neckline || fallback,
     sleeveCuffs: cm.sleeveCuffs || fallback,
     hem: cm.hem || fallback,
+    closures: cm.closures || fallback,
     frontWaistband: cm.frontWaistband || fallback,
     frontLeftLeg: cm.frontLeftLeg || fallback,
     frontRightLeg: cm.frontRightLeg || fallback,
@@ -827,6 +829,7 @@ GROUND TRUTH CONSTRUCTION MAP (wearer's left/right):
 - NECKLINE (tops): ${constructionMap.neckline}
 - SLEEVE CUFFS (tops): ${constructionMap.sleeveCuffs}
 - BOTTOM HEM (tops): ${constructionMap.hem}
+- CLOSURES / HARDWARE (exact counts): ${constructionMap.closures}
 - FRONT waistband: ${constructionMap.frontWaistband}
 - FRONT wearer-LEFT leg: ${constructionMap.frontLeftLeg}
 - FRONT wearer-RIGHT leg: ${constructionMap.frontRightLeg}
@@ -850,6 +853,7 @@ INSPECTION PROCEDURE:
 5. Does the garment's fabric/color in the GENERATED photo roughly match the ground truth (obvious mismatches only — e.g. smooth dress fabric instead of sturdy twill, clearly wrong color)? Ignore lighting differences.
 6. If the pose instruction specifies a turn/facing direction (e.g. 왼쪽 = model's left turn, 오른쪽 = model's right turn, 뒤 = back view): does the GENERATED body orientation actually match it? "왼쪽으로 돌아" means the model rotates toward the MODEL'S OWN left. If the direction is clearly opposite or ignored (e.g. frontal standing when a turn was required), that is a FAIL.
 6.5 EDGE CHECK (tops) — compare the GENERATED garment's three edges against the NECKLINE / SLEEVE CUFFS / BOTTOM HEM lines above. They are finished differently from each other, so check each separately: (a) is the finish type right (ribbed band vs plain hem vs raw edge)? (b) is a contrast trim/stitch present on exactly the edges that name one, and ABSENT on the edges that say no contrast stitching? (c) do the trim's colors/stitch style match? A contrast stitch copied onto the hem when the hem should be plain, a missing ribbed hem band, or a missing neckline/cuff trim are all FAILS — report the specific edge and the required correction.
+6.6 CLOSURE COUNT CHECK — read the CLOSURES / HARDWARE line above, then COUNT the buttons/snaps/zippers actually visible in the GENERATED photo and compare the numbers literally. A different count (one extra or one missing), a button placket invented on a garment whose closures line says "none — pullover", a missing zipper, or hardware in the wrong colour/material are all FAILS. Report the exact required count, e.g. "render exactly 5 front buttons, not 6". Only count closures that would be visible in this crop/view — do not fail an item that is simply out of frame.
 ${styleChecklist.length ? `7. STYLING CHECK — for EACH styling line above, look at the corresponding item in the GENERATED photo and verify BOTH its color and its garment type match the words. This is a common, high-priority failure: if the line says 베이지/beige and the item is black, or 갈색/brown and it is black, or 워싱 데님/washed denim and it is plain black slacks, that is a FAIL. Do NOT accept the outfit being recolored to a black/grey/monochrome look to match the product. Report each mismatch as a correction naming the item, the wrong color/type seen, and the required one.` : ''}
 ${keyFit ? `8. FIT CHECK — verify the sourced product's fit matches the KEY FIT words. In particular a "tight/꽉 맞음/타이트" neckline must hug the neck high and close; a loose, wide, or dropped neckline that exposes the collarbone/trapezius is a FAIL. Report the required fit correction.` : ''}
 

@@ -56,7 +56,7 @@ async function runSingleProductFitting(
   prompt: string,
   identityReferenceImage: { buffer: Buffer; mimeType: string } | null,
   backgroundReferenceImage: { buffer: Buffer; mimeType: string } | null,
-  quality: 'low' | 'medium' = 'medium',
+  quality: 'low' | 'medium' | 'high' = 'medium',
   /** (2026-07-14) 같은 제품의 다른 각도/디테일 참고 사진 — 색상 아님, 실루엣/디테일 교차 확인용 */
   otherProductImages: Array<{ buffer: Buffer; mimeType: string }> = [],
   /** (2026-07-14) 재질/텍스처 클로즈업 참고 사진 — 색상 아닌 원단/버튼/스티치 디테일 전용 */
@@ -216,6 +216,11 @@ export async function POST(req: Request) {
 
     const sourcedCategory = category as SourcedCategory;
     const resolvedFraming: 'full' | 'close' = framing === 'close' ? 'close' : 'full';
+    // (2026-07-23) 클로즈업은 "원단 짜임·스티치·팔 솜털까지 보이는 디테일컷"이 목적이라
+    // 해상도가 곧 결과물의 존재 이유다 — low로 뽑으면 뭉개져서 돈만 버린다. 그래서 클로즈업은
+    // high로 올리고, 초안 모드를 켰더라도 low 대신 medium까지만 낮춘다.
+    const resolvedQuality: 'low' | 'medium' | 'high' =
+      resolvedFraming === 'close' ? (draftMode ? 'medium' : 'high') : draftMode ? 'low' : 'medium';
 
     // (2026-07-19) 선택 사이즈를 productNotes에 접붙여 기존 "치수→여유분 추론" 로직(productNotesLine)을
     // 그대로 재사용한다. 실측치가 있으면 그 숫자를 근거로, 없으면 라벨만 참고로 넘어간다.
@@ -340,12 +345,25 @@ export async function POST(req: Request) {
       const identityReferenceImage = rawIdentity ? await downscaleImage(rawIdentity.buffer, rawIdentity.mimeType) : null;
       const bodySpec = buildBodySpecFromProfile(modelProfile);
 
-      // (2026-07-19) 재질 참고 사진은 이제 생성기(gpt-image-2)에 이미지로 넣지 않는다 —
-      // 대표님 지시: 제품 이미지가 색/디자인/기장/실루엣의 유일한 주(主) 기준이고, 재질 참고는
-      // "원단/질감을 분석해 설명(텍스트)으로 얹는" 보조 역할이다. 재질 클로즈업을 생성기에 직접
-      // 넣으면 확대된 짜임이 패턴으로, 다른 조명의 색이 색상으로 오염돼(혼용) 색·패턴이 틀어졌다.
-      // 그래서 재질 이미지는 analyzeGarment(Gemini)에만 넘겨 material/texture/lightReaction 텍스트로
-      // 뽑고, 그 텍스트만 프롬프트에 넣는다. 생성기 입력은 제품 이미지(+다른 각도)만 유지.
+      // (2026-07-19) 전신 컷에서는 재질 참고 사진을 생성기(gpt-image-2)에 이미지로 넣지 않는다 —
+      // 제품 이미지가 색/디자인/기장/실루엣의 유일한 주(主) 기준이고, 재질 참고는 "원단/질감을
+      // 분석해 설명(텍스트)으로 얹는" 보조 역할이다. 재질 클로즈업을 생성기에 직접 넣으면
+      // 확대된 짜임이 옷 전체의 패턴으로, 다른 조명의 색이 색상으로 오염돼 색·패턴이 틀어졌다.
+      //
+      // (2026-07-23) 단, 클로즈업 프레이밍에서는 정반대다 — 화면 대부분을 원단이 채우므로
+      // 텍스트 설명("smooth cotton knit")만으로는 실제 짜임을 절대 재현 못 하고, 실제로
+      // "재질이 아예 다르게 나온다"는 신고가 있었다. 위 부작용(확대 짜임이 전체 패턴이 됨)은
+      // 애초에 전신 컷에서 스케일이 안 맞아 생긴 것이라, 크롭 배율이 실제로 비슷한 클로즈업에선
+      // 해당되지 않는다. 그래서 클로즈업일 때만 재질 사진을 생성기에 함께 넣는다.
+      const materialImagesDownscaled =
+        resolvedFraming === 'close' && materialImagesBase64?.length
+          ? await Promise.all(
+              materialImagesBase64.slice(0, 3).map(async (b64) => {
+                const parsed = parseBase64Image(b64);
+                return downscaleImage(parsed.buffer, parsed.mimeType);
+              }),
+            )
+          : [];
 
       // (2026-07-17) 소싱 제품이 아닌 슬롯(예: 상의) "이렇게 입혀줘" 참고 사진 — 슬롯당 최대
       // 3장, 색상/포즈와 무관하게 공통이라 한 번만 다운스케일한다. SLOT_ORDER 고정 순서로
@@ -441,8 +459,9 @@ export async function POST(req: Request) {
               // 헷갈려서 재질/구조를 뭉개는 문제가 실제로 재현됨. 기준 사진이 있을 땐 원본
               // 참고 사진들을 비우고 [모델, 제품 대표컷, 기준사진, 배경]만 남겨 집중시킨다.
               const otherAngleForThisCall = poseAnchorImage ? [] : otherAngleImagesDownscaled;
-              // 재질 참고 이미지는 생성기에 넣지 않는다(위 주석 참고) — 항상 빈 배열.
-              const materialForThisCall: Array<{ buffer: Buffer; mimeType: string }> = [];
+              // 재질 참고 이미지 — 전신 컷에선 빈 배열(위 주석 참고), 클로즈업에선 원단 재현의
+              // 핵심 근거라 함께 넣는다. 기준 사진이 있을 땐 그쪽이 이미 확정본이라 생략.
+              const materialForThisCall = poseAnchorImage ? [] : materialImagesDownscaled;
               const styleRefForThisCall = poseAnchorImage ? [] : styleReferenceImagesFlat;
               const styleRefCountsForThisCall = poseAnchorImage ? {} : styleReferenceCountsBySlot;
 
@@ -471,7 +490,7 @@ export async function POST(req: Request) {
                 prompt,
                 identityReferenceImage,
                 backgroundReferenceImage,
-                draftMode ? 'low' : 'medium',
+                resolvedQuality,
                 otherAngleForThisCall,
                 materialForThisCall,
                 styleRefForThisCall,
@@ -517,7 +536,7 @@ export async function POST(req: Request) {
                       retryPrompt,
                       identityReferenceImage,
                       backgroundReferenceImage,
-                      draftMode ? 'low' : 'medium',
+                      resolvedQuality,
                       otherAngleForThisCall,
                       materialForThisCall,
                       styleRefForThisCall,

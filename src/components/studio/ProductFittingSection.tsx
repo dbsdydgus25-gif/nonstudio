@@ -1043,7 +1043,8 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           <div>
             <div className="text-[13px] font-semibold text-gray-900 tracking-tight">프레이밍</div>
             <div className="text-[11px] text-gray-400 mt-0.5">
-              클로즈업은 상반신 위주로 가까이서 찍은 듯한 컷 — 원단 질감이 더 선명하게 나옵니다
+              클로즈업은 소싱한 제품 부위(상의=가슴 · 하의=다리 · 신발=발)만 확대한 디테일컷 — 얼굴은 안 나올 수 있습니다.
+              고화질로 생성하고 <b className="text-gray-600">재질 참고 사진도 함께 참고</b>하므로, 원단 클로즈업을 올려두면 정확도가 크게 올라갑니다.
             </div>
           </div>
           <div className="flex items-center gap-2">

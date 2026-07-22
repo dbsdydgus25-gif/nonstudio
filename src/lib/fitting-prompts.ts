@@ -78,6 +78,12 @@ export interface GarmentConstructionMap {
   neckline: string;
   sleeveCuffs: string;
   hem: string;
+  /**
+   * (2026-07-23) 여밈/하드웨어 전용 존 — 셔츠·아우터에서 가장 자주 틀리는 부위인데
+   * 전용 필드가 없어 free-text(details)에 묻히거나 통째로 누락됐다(실제 사고: 클로즈업에서
+   * 단추 개수가 원본과 다르게 나옴). 개수를 숫자로 명시하도록 스키마로 강제한다.
+   */
+  closures: string;
   frontWaistband: string;
   /** 착용자 기준 왼쪽 다리 — 앞면 */
   frontLeftLeg: string;
@@ -501,6 +507,21 @@ export function buildProductFittingPrompt(
     shoes: 'the feet and ankles wearing the sourced shoes',
     accessory: 'whichever body part naturally wears or carries the sourced accessory (the wrist for a watch or bracelet, the neck/collarbone for a necklace, the hand or shoulder for a bag), filling most of the frame with the product',
   };
+  // (2026-07-23) 클로즈업의 존재 이유는 "전신보다 원단·마감이 더 잘 보이는 것"인데, 실제로는
+  // 오히려 뭉개진 원단이 나온다는 신고가 있었다. 가까이 찍으면 자동으로 디테일이 살아나는 게
+  // 아니라 "이 배율에서 무엇이 보여야 하는지"를 명시해야 한다 — 짜임 한 올, 스티치 실, 피부
+  // 질감/솜털까지. (반복 교훈대로 각 항목은 한 번씩만 언급해 과장을 피한다.)
+  const closeUpDetailBlock = framing === 'close'
+    ? [
+        '',
+        '=== CLOSE-UP DETAIL MANDATE (this shot exists to show detail that a full-body shot cannot) ===',
+        'At this crop the fabric fills most of the frame, so its real structure must be legible: individual knit loops or weave threads, the actual yarn thickness and any slub/fuzz of the fibre, the direction and tension of ribbing, and real stitch threads at seams and edges — rendered as an in-focus macro photograph of real cloth, not a smooth flat fill or a blurred approximation.',
+        'Reproduce the fabric that the reference photos actually show. Do NOT substitute a generic smooth jersey/cotton look for a textured knit, and do NOT invent a decorative pattern out of the weave — a plain fabric stays plain, just visibly woven/knitted at this magnification.',
+        'Skin at this range must read as real photographed skin: natural pores and fine surface variation, and the fine short body hair on the forearms that the model spec describes. Do NOT airbrush the skin into a smooth plastic surface.',
+        'Sharp focus on the product with realistic shallow depth of field falling off behind it, as in a professional product detail photograph.',
+      ].join('\n')
+    : '';
+
   const framingLine = framing === 'close'
     ? `Camera framing: CLOSE-UP PRODUCT DETAIL SHOT — a tight crop centered on ${CLOSE_UP_FRAMING_BY_CATEGORY[category]}, like a fashion detail/product photograph. This must be an intentionally tight, cropped-in shot, NOT the same wide framing as a full-body photo — even if any reference photo (the model identity image, a pose anchor, etc.) is a full-body shot, you must recompose this shot as a genuinely close crop, not simply reproduce that photo's wider framing. The model's face does not need to be in frame at all — it is completely fine if the face, or most of the rest of the body, is cropped out entirely. The sourced product and its fabric texture/construction are the entire focus of this shot.`
     : 'Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped.';
@@ -649,6 +670,7 @@ export function buildProductFittingPrompt(
             `  NECKLINE: ${garmentAnalysis.constructionMap.neckline}`,
             `  SLEEVE CUFFS: ${garmentAnalysis.constructionMap.sleeveCuffs}`,
             `  BOTTOM HEM: ${garmentAnalysis.constructionMap.hem}`,
+            `  CLOSURES / HARDWARE (exact counts — reproduce this number literally, never a "typical" number): ${garmentAnalysis.constructionMap.closures}`,
             `  Side seams: ${garmentAnalysis.constructionMap.sideSeams}`,
             `  EDGE RENDERING RULE: render each of the three edges exactly as its line describes, and treat them as INDEPENDENT. A contrast trim/stitch belongs ONLY on the edges whose line actually names it — if the neckline and cuffs have a contrast whipstitch but the hem line says a plain band with no contrast stitching, the hem must be rendered plain, with the contrast stitch absent there. Never copy one edge's trim onto another edge, never omit a trim that IS named, and never replace a described ribbed band with a plain raw edge (or vice versa). Match the trim's stated colors and stitch style, and keep the band's stated width/proportion.`,
           ].join('\n'),
@@ -695,9 +717,13 @@ THE POSE FOR THIS SHOT (mandatory — this IS the pose to render, not a suggesti
       ? '- No eyewear or headwear of any kind unless a USER MANDATE above explicitly asks for it (this applies only if the face happens to be in frame).'
       : '- The model\'s face must be fully and clearly visible — bare face, no eyewear or headwear of any kind unless a USER MANDATE above explicitly asks for it.',
     '',
+    closeUpDetailBlock,
+    '',
     '=== NEGATIVE CONSTRAINTS (ABSOLUTE) ===',
     RESTYLE_QUALITY_CONSTRAINTS,
-    framing === 'close' ? 'full body shot, entire figure visible head-to-toe, wide establishing shot, legs and feet in frame' : '',
+    framing === 'close'
+      ? 'full body shot, entire figure visible head-to-toe, wide establishing shot, legs and feet in frame, smoothed-over fabric with no visible weave, blurry out-of-focus garment, flat untextured cloth, waxy airbrushed skin'
+      : '',
     '',
     '=== OUTPUT QUALITY MANDATE ===',
     framing === 'close'

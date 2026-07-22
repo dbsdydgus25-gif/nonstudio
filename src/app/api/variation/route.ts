@@ -74,6 +74,13 @@ function buildVariationPrompt(
   /** 사용자가 자세 참고 사진과 텍스트를 동시에 입력했는지 — true면 poseInstruction은 사진 위에
    *  얹는 보조 디테일로, false(사진만)면 poseInstruction은 자동 생성된 "사진 그대로 따라라" 문장 */
   hasCustomPoseText: boolean = false,
+  /**
+   * (2026-07-23) 클로즈업 프레이밍 — 전신 결과물을 그대로 넣고 "이 옷 디테일만 가까이" 컷을
+   * 뽑고 싶다는 요청. 바리에이션은 원래 "Image 1의 크롭을 그대로 유지"가 최우선 규칙이라
+   * (얼굴 없는 크롭에 얼굴이 생기던 버그 방어), 클로즈업일 때만 그 규칙을 의도적으로 푼다 —
+   * 대신 "안 보이는 부위를 지어내지 말라"는 원래 취지는 그대로 유지한다.
+   */
+  framing: 'full' | 'close' = 'full',
 ): string {
   const imageNotes: string[] = [
     'Image 1 (the base photo): the exact person and exact outfit to reproduce — the single source of truth for face, skin tone, body, and every garment/accessory.',
@@ -169,9 +176,16 @@ ${
     // (2026-07-23) 자세 참고 사진이 있을 땐 이 규칙을 "카메라 앵글까지 Image 1과 똑같이"가
     // 아니라 "안 보이는 신체 부위를 지어내지 말라"는 원래 취지로만 좁힌다 — 안 그러면 참고
     // 사진이 다른 각도(예: 뒷모습)를 보여줘도 이 규칙이 그걸 되돌려버린다.
-    hasPoseReferenceImage
+    framing === 'close'
+      ? 'FRAMING RULE (CLOSE-UP — this overrides the usual "keep Image 1\'s crop" rule): crop in tight on the garment/product worn in Image 1, framing roughly the chest-to-waist area for a top or outer layer, the waist-to-knee area for a bottom, the feet for shoes, or the relevant body part for an accessory — a fashion detail photograph where the garment fills most of the frame. The face does NOT need to be in frame; it is completely fine for the head and most of the body to be cropped out. Zoom into what Image 1 already shows — never extend the frame or invent any body part, garment area, or detail that is not visible in Image 1; if a region is not present in Image 1, do not crop to it.'
+      : hasPoseReferenceImage
       ? 'FRAMING RULE: match how much of the body Image 1 actually shows (do not invent a head/face if Image 1 is cropped at the neck or chest, do not invent feet if Image 1 crops above them). Within that limit, the CAMERA ANGLE and BODY ORIENTATION follow the pose reference image, not Image 1 — e.g. if the reference image shows a back view or profile, render a back view or profile here too, cropped to show the same vertical extent of the body as Image 1.'
       : 'FRAMING RULE (HIGHEST PRIORITY — overrides everything else in this prompt including the pose instruction): the output must have the exact same framing and crop as Image 1. If Image 1 does not show the head/face (cropped at the neck or chest), the output must be cropped identically and contain NO head and NO face — in that case, ignore every part of the pose instruction that mentions the head, face, chin, or gaze, and apply only the body/arm/leg parts of the pose. Never extend the frame or invent any body part (head, face, feet, etc.) that is not visible in Image 1.',
+    ...(framing === 'close'
+      ? [
+          'CLOSE-UP DETAIL MANDATE: at this crop the fabric fills most of the frame, so its real structure must be legible — individual knit loops or weave threads, yarn thickness, ribbing direction, and real stitch threads at seams and edges, as an in-focus macro photograph of real cloth. Skin must read as real photographed skin with natural pores and the fine forearm hair already present in Image 1. This is a magnified view of the SAME garment in Image 1: do not re-texture, recolor, or reinterpret it — only resolve the detail that was already there at higher magnification.',
+        ]
+      : []),
     ...imageNotes,
     poseLine,
     // (2026-07-09) PERSONAL_BODY_SPEC 텍스트를 여기서 제거함 — 사용자 결정: AI 바리에이션은
@@ -196,7 +210,9 @@ ${
         ? ' cutout look, pasted-on subject, subject composited onto a backdrop, studio-lit subject standing in a location shot, missing contact shadow, floating above the ground, mismatched light direction between subject and scene, flat sticker-like silhouette edge, flat backdrop wall with no depth.'
         : ''),
     '',
-    isCustomLocation
+    framing === 'close'
+      ? `Single photorealistic commercial product DETAIL photograph — a tightly cropped close-up of the garment worn in Image 1, sharp focus on the fabric, ${isCustomLocation ? 'natural lighting consistent with the location' : 'professional studio lighting'}. Not a full-body shot.`
+      : isCustomLocation
       ? 'Single photorealistic commercial lookbook photograph shot on location, same framing/crop as Image 1, natural lighting consistent with the location.'
       : 'Single photorealistic commercial lookbook photograph, same framing/crop as Image 1, professional studio lighting.',
   ].join('\n');
@@ -209,7 +225,7 @@ async function runSingleVariation(
   poseInstruction: string,
   backgroundReferenceImage: { buffer: Buffer; mimeType: string } | null,
   poseReferenceImage: { buffer: Buffer; mimeType: string } | null,
-  quality: 'low' | 'medium' = 'medium',
+  quality: 'low' | 'medium' | 'high' = 'medium',
   isCustomPose: boolean = false,
   /** 배경 참고가 사용자가 올린 장소 사진인지 (기본 흰 스튜디오 참고 사진이면 false) */
   isCustomLocation: boolean = false,
@@ -217,6 +233,8 @@ async function runSingleVariation(
   identityReferenceImage: { buffer: Buffer; mimeType: string } | null = null,
   /** 사용자가 이 컷에 자세 텍스트도 함께 입력했는지 — 사진과 병행 시 우선순위 판단용 */
   hasCustomPoseText: boolean = false,
+  /** (2026-07-23) 'close'면 Image 1의 옷 부위를 확대한 디테일컷으로 뽑는다 */
+  framing: 'full' | 'close' = 'full',
 ): Promise<{ imageUrl: string; engineUsed: string }> {
   // 입력 이미지는 1024px로 다운스케일 — 페이로드/입력 토큰 절감
   const source = await downscaleImage(sourceBuf, sourceMime);
@@ -240,6 +258,7 @@ async function runSingleVariation(
     isCustomLocation,
     !!identityReferenceImage,
     hasCustomPoseText,
+    framing,
   );
 
   const res: any = await withImageRetry(() => (openai.images as any).edit({
@@ -275,6 +294,9 @@ export async function POST(req: Request) {
       // 리포즈 도중 몸/핏줄/얼굴이 드리프트하는 걸 막는다. 본인 모델이 아닌 사진을 올릴 땐
       // 프론트에서 꺼서 보낸다.
       matchModelIdentity,
+      // (2026-07-23) 'close'면 Image 1의 옷 부위를 확대한 디테일컷 — 전신 결과물을 그대로
+      // 넣고 "이 옷 디테일만 가까이" 컷을 뽑고 싶다는 요청.
+      framing,
     } = await req.json();
 
     if (!sourceImageBase64) {
@@ -284,6 +306,12 @@ export async function POST(req: Request) {
     if (!oKey) {
       return NextResponse.json({ success: false, error: 'OpenAI API 키가 필요합니다.' }, { status: 400 });
     }
+
+    const resolvedFraming: 'full' | 'close' = framing === 'close' ? 'close' : 'full';
+    // 클로즈업은 원단 짜임까지 보이는 게 목적이라 해상도가 곧 존재 이유 — low로 뽑으면 뭉개져서
+    // 돈만 버린다. 초안 모드를 켰더라도 low 대신 medium까지만 낮춘다. (AI 제품 피팅과 동일 정책)
+    const resolvedQuality: 'low' | 'medium' | 'high' =
+      resolvedFraming === 'close' ? (draftMode ? 'medium' : 'high') : draftMode ? 'low' : 'medium';
 
     const count = Math.min(4, Math.max(1, Number(variationCount) || 4));
     // (2026-07-15) 컷마다 자세를 따로 지정할 수 있도록 배열로 받는다 — 인덱스가 비어있으면
@@ -395,7 +423,7 @@ export async function POST(req: Request) {
               : poseNumber
                 ? getPoseReferenceImage(poseNumber)
                 : null;
-            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage, draftMode ? 'low' : 'medium', pose.id === 'custom', isCustomLocation, identityReferenceImage, hasCustomPoseText);
+            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage, resolvedQuality, pose.id === 'custom', isCustomLocation, identityReferenceImage, hasCustomPoseText, resolvedFraming);
             const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
             await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt: pose.poseInstruction });
           } catch (err: any) {

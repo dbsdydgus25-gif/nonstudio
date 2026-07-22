@@ -36,6 +36,8 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
   // 사진(포즈만 참고하려고 넣은 남의 사진 등)을 돌릴 땐 꺼서, 그 사진에 얼굴/체형을 억지로
   // 입히지 않게 한다.
   const [matchModelIdentity, setMatchModelIdentity] = useState(true);
+  // (2026-07-23) 프레이밍 — 'close'면 위 사진의 옷 부위를 확대한 디테일컷으로 뽑는다
+  const [framing, setFraming] = useState<'full' | 'close'>('full');
   // 컷마다 자세를 따로 지정 — 특정 컷을 비워두면 그 컷만 기존처럼 프리셋 포즈 중 랜덤으로 뽑힘.
   // 최대 컷 수(4)만큼 고정 슬롯을 두고, 실제로는 variationCount개만 화면에 노출/전송한다.
   const [customPoseTexts, setCustomPoseTexts] = useState<string[]>(['', '', '', '']);
@@ -130,6 +132,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
           customPoseImagesBase64: customPoseImages.slice(0, variationCount).map((img) => img || ''),
           customBackgroundImageBase64: customBackgroundImage || undefined,
           matchModelIdentity,
+          framing,
         }),
       });
 
@@ -275,6 +278,32 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
             >
               +
             </button>
+          </div>
+        </div>
+
+        {/* 프레이밍 — 클로즈업은 위 사진의 옷 부위를 확대한 디테일컷 */}
+        <div className="bg-white border border-gray-200 rounded-2xl p-5 flex items-center justify-between">
+          <div>
+            <div className="text-[13px] font-semibold text-gray-900 tracking-tight">프레이밍</div>
+            <div className="text-[11px] text-gray-400 mt-0.5">
+              클로즈업은 위 사진의 옷 부위를 확대한 디테일컷 — 원단 짜임 · 스티치가 선명하게 나옵니다 (고화질로 생성)
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {(['full', 'close'] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFraming(f)}
+                className={`px-4 py-2 rounded-lg border text-[13px] font-medium tracking-tight transition ${
+                  framing === f
+                    ? 'border-gray-900 bg-gray-900 text-white'
+                    : 'border-gray-200 bg-white text-gray-500 hover:text-gray-900 hover:border-gray-300'
+                }`}
+              >
+                {f === 'full' ? '원본 그대로' : '클로즈업'}
+              </button>
+            ))}
           </div>
         </div>
       </section>
