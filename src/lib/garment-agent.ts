@@ -557,6 +557,7 @@ Examples:
 const CATEGORY_SLOT_LABELS: Record<SourcedCategory, string> = {
   top: '상의',
   bottom: '하의',
+  outer: '아우터',
   shoes: '신발',
   accessory: '액세서리',
 };
@@ -594,10 +595,15 @@ export async function generateStylingSuggestion(
     .filter((line): line is string => !!line)
     .join('\n');
 
+  const outerBaseLayerHint = protectedCategory === 'outer'
+    ? '\nThe sourced item is an OUTER garment (jacket/cardigan/coat) worn OVER a base layer. The "top" slot in your JSON output represents that BASE LAYER, not another jacket — suggest a slim, simple piece (a plain crew-neck tee, turtleneck, or thin knit) that would peek through at the neckline and cuffs. Do NOT suggest another outer layer, heavy garment, or anything bulky for the "top" slot.'
+    : '';
+
   const promptText = `
 You are a professional fashion stylist for a Korean menswear lookbook shoot.
 A model is already wearing the confirmed sourced product: a ${garmentAnalysis.category} described as "${garmentAnalysis.color}, ${garmentAnalysis.material}, ${garmentAnalysis.fitType} fit". This item is masked/protected and must NOT be changed or mentioned as something to generate.
 Current pose in the photo: ${poseDescription}
+${outerBaseLayerHint}
 ${mandatoryLines ? `MANDATORY USER REQUIREMENTS (NOT soft preferences — follow each exactly):\n${mandatoryLines}\nIMPORTANT: if a requirement contains a negation or exclusion (e.g., "not X", "no X", "X 아님", "(X 제외)", "(X 하지마)", "(X X)" meaning "avoid X"), that exclusion is just as mandatory as the positive part — you must actively avoid producing X in your description, not merely fail to mention it.` : ''}
 
 Suggest a cohesive, stylish outfit for ONLY these remaining slots: ${slotsToFill.map((s) => CATEGORY_SLOT_LABELS[s]).join(', ')}, plus a studio/location background that matches the mood. Any slot not covered by a mandatory requirement above should be styled freely to match it.

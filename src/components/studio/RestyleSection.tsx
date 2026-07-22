@@ -24,9 +24,13 @@ const CATEGORY_OPTIONS: { id: SourcedCategory; label: string; desc: string }[] =
 
 // 슬롯별로 입력 필드를 분리해서 보낸다 — 예전엔 "상하의 스타일" 한 칸에 여러 슬롯 지시(하의+신발 등)를
 // 섞어서 적었더니 AI가 어느 문장이 어느 슬롯 얘기인지 잘못 해석해서 신발 같은 슬롯을 놓치는 경우가 많았음.
+// (2026-07-22) 'outer'는 AI 제품 피팅 전용으로 SourcedCategory에 추가된 값 — 이 화면
+// (AI 리스타일링)의 CATEGORY_OPTIONS엔 넣지 않아 실제로 선택되지 않지만, 공유 타입이라
+// Record<SourcedCategory, ...>의 완전성을 위해 채워둔다.
 const STYLE_SLOT_META: Record<SourcedCategory, { label: string; placeholder: string }> = {
   top: { label: '상의 스타일', placeholder: '예: 미니멀한 톤의 니트' },
   bottom: { label: '하의 스타일', placeholder: '예: 생지 와이드 데님, 기장감 긴 걸로 (배바지 아님)' },
+  outer: { label: '아우터 스타일', placeholder: '예: 네이비 울 코트' },
   shoes: { label: '신발 스타일', placeholder: '예: 베이지 계열 샌들' },
   accessory: { label: '액세서리 스타일', placeholder: '예: 토트백 하나' },
 };

@@ -21,6 +21,7 @@ interface ProductFittingSectionProps {
 const CATEGORY_OPTIONS: { id: SourcedCategory; label: string; desc: string }[] = [
   { id: 'top', label: '상의', desc: '제품이 상의' },
   { id: 'bottom', label: '하의', desc: '제품이 하의' },
+  { id: 'outer', label: '아우터', desc: '재킷 · 가디건 · 코트' },
   { id: 'shoes', label: '신발', desc: '제품이 신발' },
   { id: 'accessory', label: '액세서리', desc: '가방 · 시계 · 주얼리 등' },
 ];
@@ -28,9 +29,19 @@ const CATEGORY_OPTIONS: { id: SourcedCategory; label: string; desc: string }[] =
 const STYLE_SLOT_META: Record<SourcedCategory, { label: string; placeholder: string }> = {
   top: { label: '상의 스타일', placeholder: '예: 미니멀한 톤의 니트' },
   bottom: { label: '하의 스타일', placeholder: '예: 생지 와이드 데님, 기장감 긴 걸로 (배바지 아님)' },
+  outer: { label: '아우터 스타일', placeholder: '예: 네이비 울 코트' },
   shoes: { label: '신발 스타일', placeholder: '예: 베이지 계열 샌들' },
   accessory: { label: '액세서리 스타일', placeholder: '예: 토트백 하나' },
 };
+
+/** 아우터를 소싱할 땐 "상의" 슬롯이 사실상 안에 받쳐입는 이너티(베이스레이어)가 된다 —
+ * 표시 라벨만 그에 맞게 바꾼다 (데이터는 여전히 top 키를 그대로 사용). */
+function getStyleSlotMeta(slot: SourcedCategory, sourcedCategory: SourcedCategory): { label: string; placeholder: string } {
+  if (slot === 'top' && sourcedCategory === 'outer') {
+    return { label: '이너티 · 베이스레이어 스타일', placeholder: '예: 화이트 크루넥 반팔티' };
+  }
+  return STYLE_SLOT_META[slot];
+}
 
 interface ColorJobItem {
   generationId: string;
@@ -56,6 +67,8 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   // (2026-07-17) 여러 포즈 컷을 한 번에 뽑을 때 — 컷별로 자세를 따로 지정, 비워두면 랜덤 프리셋 포즈
   const [poseCount, setPoseCount] = useState(1);
   const [customPoseTexts, setCustomPoseTexts] = useState<string[]>(['', '', '', '']);
+  // (2026-07-23) 카메라 프레이밍 — 기본 전신, 클로즈업은 상반신 위주로 가까이서 찍은 디테일샷
+  const [framing, setFraming] = useState<'full' | 'close'>('full');
   const [styleHints, setStyleHints] = useState<Partial<Record<SourcedCategory, string>>>({});
   // (2026-07-17) 소싱 제품이 아닌 슬롯(예: 상의)을 말로 설명하기 어려울 때 첨부하는 "이렇게
   // 입혀줘" 참고 사진 — 슬롯당 최대 3장, 화면엔 "첨부됨 N장"으로만 간단히 표시
@@ -423,6 +436,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           openaiApiKey: openaiKey,
           poseCount,
           customPoseTexts: effectiveCustomPoseTexts,
+          framing,
           productNotes: productNotes.trim() || undefined,
           selectedSize: selectedSize || undefined,
           colorOverride: colorOverride || undefined,
@@ -753,7 +767,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         {otherSlots.map((slot) => {
-                          const meta = STYLE_SLOT_META[slot];
+                          const meta = getStyleSlotMeta(slot, category);
                           return (
                             <input
                               key={slot}
@@ -784,7 +798,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {otherSlots.map((slot) => {
-                        const meta = STYLE_SLOT_META[slot];
+                        const meta = getStyleSlotMeta(slot, category);
                         const refCount = styleReferenceImages[slot]?.length || 0;
                         return (
                           <div
@@ -901,7 +915,11 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           <textarea
             value={productNotes}
             onChange={(e) => setProductNotes(e.target.value)}
-            placeholder="예: 머슬핏, 크롭 기장감, 어깨 딱 떨어지는 세미오버핏"
+            placeholder={
+              category === 'top' || category === 'outer'
+                ? '예: 머슬핏, 크롭 기장감, 어깨 딱 떨어지는 세미오버핏 / 단추 5개, 골드 지퍼'
+                : '예: 머슬핏, 크롭 기장감, 어깨 딱 떨어지는 세미오버핏'
+            }
             rows={2}
             className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
           />
@@ -957,8 +975,9 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         <div className="bg-white border border-gray-200 rounded-2xl p-6 space-y-4">
           <p className="text-xs text-gray-400 leading-relaxed">
             저장된 모델 정보가 이 제품을 실제로 착용한 룩북 화보를 생성합니다. 배경은 화이트 스튜디오로 고정됩니다.
+            {category === 'outer' && ' 아우터를 고르면 안에 받쳐입는 이너티도 아래 04번의 "이너티 · 베이스레이어 스타일" 칸에서 함께 지정할 수 있어요(선택).'}
           </p>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-5 gap-2">
             {CATEGORY_OPTIONS.map((cat) => (
               <button
                 key={cat.id}
@@ -1019,6 +1038,32 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           </div>
         </div>
 
+        {/* 프레이밍 — 전신(기본) vs 클로즈업(상반신 위주, 원단 질감이 더 선명하게 나옴) */}
+        <div className="bg-white border border-gray-200 rounded-2xl p-5 flex items-center justify-between">
+          <div>
+            <div className="text-[13px] font-semibold text-gray-900 tracking-tight">프레이밍</div>
+            <div className="text-[11px] text-gray-400 mt-0.5">
+              클로즈업은 상반신 위주로 가까이서 찍은 듯한 컷 — 원단 질감이 더 선명하게 나옵니다
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {(['full', 'close'] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFraming(f)}
+                className={`px-4 py-2 rounded-lg border text-[13px] font-medium tracking-tight transition ${
+                  framing === f
+                    ? 'border-gray-900 bg-gray-900 text-white'
+                    : 'border-gray-200 bg-white text-gray-500 hover:text-gray-900 hover:border-gray-300'
+                }`}
+              >
+                {f === 'full' ? '전신' : '클로즈업'}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {poseCount === 1 ? (
             <div className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">
@@ -1054,7 +1099,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
               "참고 이미지 (모든 색상 공통)"를 사용한다 — 중복 노출 방지. */}
           {!(extractColors && colorPlans) &&
             otherSlots.map((slot) => {
-              const meta = STYLE_SLOT_META[slot];
+              const meta = getStyleSlotMeta(slot, category);
               const refCount = styleReferenceImages[slot]?.length || 0;
               return (
                 <div key={slot} className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2.5">

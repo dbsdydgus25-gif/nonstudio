@@ -154,6 +154,7 @@ export async function POST(req: Request) {
       poseCount,
       customPoseTexts,
       styleReferenceImagesBySlot,
+      framing,
     }: {
       /** 제품 사진 — extractColors/colorPlans 없으면 전부 "같은 제품의 다른 각도" 참고 사진으로 함께 쓰인다 */
       productImagesBase64: string[];
@@ -198,12 +199,14 @@ export async function POST(req: Request) {
       /** (2026-07-17) 소싱 제품이 아닌 슬롯(예: 상의)을 말로 설명하기 어려울 때 첨부하는
        * "이렇게 입혀줘" 참고 사진 — 슬롯당 최대 3장 */
       styleReferenceImagesBySlot?: Partial<Record<SourcedCategory, string[]>>;
+      /** (2026-07-23) 카메라 프레이밍 — 기본 전신('full'), 'close'면 상반신 위주 클로즈업 디테일샷 */
+      framing?: 'full' | 'close';
     } = await req.json();
 
     if (!productImagesBase64?.length) {
       return NextResponse.json({ success: false, error: '제품 이미지를 등록해주세요.' }, { status: 400 });
     }
-    const validCategories: string[] = ['top', 'bottom', 'shoes', 'accessory'];
+    const validCategories: string[] = ['top', 'bottom', 'outer', 'shoes', 'accessory'];
     if (!validCategories.includes(category)) {
       return NextResponse.json({ success: false, error: '제품 카테고리를 선택해주세요.' }, { status: 400 });
     }
@@ -212,6 +215,7 @@ export async function POST(req: Request) {
     }
 
     const sourcedCategory = category as SourcedCategory;
+    const resolvedFraming: 'full' | 'close' = framing === 'close' ? 'close' : 'full';
 
     // (2026-07-19) 선택 사이즈를 productNotes에 접붙여 기존 "치수→여유분 추론" 로직(productNotesLine)을
     // 그대로 재사용한다. 실측치가 있으면 그 숫자를 근거로, 없으면 라벨만 참고로 넘어간다.
@@ -458,6 +462,7 @@ export async function POST(req: Request) {
                 styleRefCountsForThisCall,
                 !!poseAnchorImage,
                 colorOverride?.trim() || '',
+                resolvedFraming,
               );
 
               const imageUrl = await runSingleProductFitting(

@@ -156,7 +156,7 @@ export const FULLBODY_POSES: PoseVariation[] = [
 // ─────────────────────────────────────────────────────────────────
 
 /** 사용자가 실제로 입고/착용한 실사 사진 속에서 "소싱한 실물 제품"에 해당하는 부위 */
-export type SourcedCategory = 'top' | 'bottom' | 'shoes' | 'accessory';
+export type SourcedCategory = 'top' | 'bottom' | 'outer' | 'shoes' | 'accessory';
 
 /** 보존되지 않는 나머지 슬롯에 대해 AI가 자동 제안하는 코디 설명 */
 export interface StylingSuggestion {
@@ -211,6 +211,7 @@ ${buildModelLockLines(bodySpec)}
 const CATEGORY_PRESERVE_LABEL: Record<SourcedCategory, string> = {
   top: '상의(윗옷)',
   bottom: '하의(바지/스커트)',
+  outer: '아우터(재킷/가디건/코트 등)',
   shoes: '신발',
   accessory: '액세서리(가방/시계/주얼리 등)',
 };
@@ -369,6 +370,20 @@ function buildFitEmphasisLines(productNotes: string): string[] {
   return lines;
 }
 
+/**
+ * (2026-07-23) 사용자가 "제품 핏 · 디테일 지시"(productNotes)에 단추/지퍼 같은 하드웨어를
+ * 구체적으로 적었는지 감지한다. productNotesLine은 이미 "overrides visual guesses from the
+ * photo"라고 말하지만, 뒤쪽의 CRITICAL BUTTON/HARDWARE COUNT RULE은 그 사실과 무관하게
+ * 독립적으로 "사진에서 세어라"고만 지시해서 서로 부딪힐 여지가 있었다 — buildFitEmphasisLines가
+ * KEY FIT에 쓴 것과 같은 "감지되면 사용자 텍스트가 사진보다 우선" 패턴을 여기도 적용한다.
+ */
+function hasHardwareSpec(productNotes: string): boolean {
+  const n = productNotes.toLowerCase();
+  return ['단추', '버튼', '지퍼', 'zipper', 'button', '스냅', '후크', 'hook', 'snap', '벨크로'].some((k) =>
+    n.includes(k.toLowerCase()),
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────
 // AI 제품 피팅 (신규, 2026-07-09) — 착용 사진 없이 "제품 단독 이미지"만으로
 // 윤용현 모델(PERSONAL_BODY_SPEC + 아이덴티티 참고 사진)이 그 제품을 입은 화보를 생성한다.
@@ -412,6 +427,11 @@ export function buildProductFittingPrompt(
    * 원칙에 대한 유일한 예외로 취급한다 — 참고 사진 없는 텍스트 추측과는 다르다.
    */
   colorOverrideNote: string = '',
+  /**
+   * (2026-07-23) 카메라 프레이밍 — 기본은 전신(기존 동작 그대로). 'close'면 상반신 위주
+   * 클로즈업으로 촬영한 디테일샷으로 바꾼다(원단 질감·스티치가 더 선명하게 보이길 원하는 요청).
+   */
+  framing: 'full' | 'close' = 'full',
 ): string {
   const stylingLines: string[] = [];
   if (stylingSuggestion.top) stylingLines.push(`- 상의: ${stylingSuggestion.top}`);
@@ -460,6 +480,20 @@ export function buildProductFittingPrompt(
   const identityBlock = hasIdentityReferenceImage
     ? `Image 1 shows THE model — the exact person who must appear in the output. Keep Image 1's face, skin tone, and body identical. Do NOT copy any clothing or accessory from Image 1; the outfit is defined entirely by the PRODUCT and NEW STYLING sections below.`
     : 'Generate the model described in the MODEL section below.';
+
+  // (2026-07-22) 소싱 제품이 아우터일 때 — "상의" 슬롯은 별도 카테고리가 아니라 이 아우터
+  // 안에 받쳐입는 베이스레이어(이너티)로 재해석한다. 지시가 없으면 아우터만 덩그러니 걸치고
+  // 안이 텅 빈 것처럼 나오거나, 반대로 이너가 별개의 완성된 옷처럼 붕 떠 보이는 문제를 막는다.
+  const outerLayeringLine = category === 'outer'
+    ? `\n- LAYERING (mandatory — the sourced product is an OUTER garment): the top/상의 item styled below (or its reference image, if provided) is a BASE LAYER worn UNDERNEATH this outer garment, not a separate standalone outfit. It must be visible wherever the outer garment is open — at the neckline/collar, at the sleeve cuffs if the outer sleeves are shorter or pushed up, and at the front opening/hem if the outer garment is not fully closed. The outer garment's own fabric must visibly drape and fold over the base layer at the shoulders and front placket — do NOT render the base layer floating separately, and do NOT render the outer garment as if nothing is worn underneath. Keep the base layer slim and simple (a plain crew-neck tee, turtleneck, or thin knit) so it adds no visible bulk under the outer garment's silhouette.`
+    : '';
+
+  // (2026-07-23) 클로즈업 프레이밍 — 원단 질감·스티치가 잘 보이는 상반신 위주 디테일샷 요청.
+  // 기존 "FULL BODY SHOT ONLY"가 두 분기(포즈 지시 있음/없음) 모두에 하드코딩돼 있어서 포즈
+  // 텍스트로 아무리 "클로즈업"이라고 적어도 이겨왔다 — 이 한 줄만 교체하고 나머지 구조는 그대로 둔다.
+  const framingLine = framing === 'close'
+    ? 'Camera framing: CLOSE-UP UPPER BODY SHOT — frame tightly from about the collarbone/shoulders down to the waist or hip line, like a fashion detail photograph. Do NOT show the legs, feet, or full body — this is intentionally cropped close so the garment\'s fabric texture, stitching, and construction read clearly.'
+    : 'Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped.';
 
   // 색상 옵션 지정 시 — 샘플 시트에 여러 색상이 있어도 이 색상 하나만 입혀서 생성
   const colorVariantLine = colorVariant
@@ -537,6 +571,7 @@ export function buildProductFittingPrompt(
   // 사용자/상세페이지 지시가 있으면 그쪽이 핏의 유일한 기준이고, 추정값은 아예 언급하지 않는다.
   const hasFitSpec = !!productNotes?.trim();
   const fitEmphasisLines = hasFitSpec ? buildFitEmphasisLines(productNotes!.trim()) : [];
+  const hasHardwareNote = hasFitSpec && hasHardwareSpec(productNotes!.trim());
 
   const priorityChecklistBlock = [
     '=== OUTFIT & POSE — HIGHEST-PRIORITY CHECKLIST (read and obey this FIRST; these exact instructions are the ones most often missed, so they come before everything else) ===',
@@ -584,7 +619,9 @@ export function buildProductFittingPrompt(
           : `the color shown in Image ${productImageNumber}`
     }${colorOverrideNote?.trim() ? '' : ' is the actual product color being sold — match it precisely, do not shift the hue, saturation, or brightness. Do NOT pull color from any other image or from the texture description.'}`,
     `- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image ${productImageNumber} — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.`,
-    `- CRITICAL BUTTON/HARDWARE COUNT RULE: before finalizing, actually count the buttons, snaps, zippers, or other hardware visible in ${materialImageNumbers.length ? `the close-up material reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')}) — this is the clearest, most zoomed-in view and is the authoritative source for the exact count and spacing` : `Image ${productImageNumber}`}. The output must show that exact same count in the exact same positions — neither more nor fewer. This is a common failure mode: do not casually add an extra button or omit one out of habit. Every button must sit directly on the actual fabric placket opening with a real, visible buttonhole/gap beneath it — never place a button on a closed, seamless section of the knit/fabric where there is no opening, and never render two buttons stacked or duplicated at the same spot. The button placket must look structurally coherent, like a real garment construction photo.`,
+    hasHardwareNote
+      ? `- CRITICAL BUTTON/HARDWARE COUNT RULE: the seller has specified exact hardware details in the KEY FIT spec above — that spec is the ONLY authority on the count, type, and color of buttons/snaps/zippers/other hardware, and wins over anything the photo seems to show. Use the reference photo${materialImageNumbers.length ? ` and the close-up reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')})` : ''} only to confirm placement and spacing style, not to override the stated count/type/color. Every button must sit directly on the actual fabric placket opening with a real, visible buttonhole/gap beneath it — never place a button on a closed, seamless section of the knit/fabric where there is no opening, and never render two buttons stacked or duplicated at the same spot. The button placket must look structurally coherent, like a real garment construction photo.`
+      : `- CRITICAL BUTTON/HARDWARE COUNT RULE: before finalizing, actually count the buttons, snaps, zippers, or other hardware visible in ${materialImageNumbers.length ? `the close-up material reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')}) — this is the clearest, most zoomed-in view and is the authoritative source for the exact count and spacing` : `Image ${productImageNumber}`}. The output must show that exact same count in the exact same positions — neither more nor fewer. This is a common failure mode: do not casually add an extra button or omit one out of habit. Every button must sit directly on the actual fabric placket opening with a real, visible buttonhole/gap beneath it — never place a button on a closed, seamless section of the knit/fabric where there is no opening, and never render two buttons stacked or duplicated at the same spot. The button placket must look structurally coherent, like a real garment construction photo.`,
     `- CRITICAL SEAM/POCKET/PATCH RULE: the "Details" spec above lists the exact seam/panel lines, pocket type+location, and logo/patch placement found by directly inspecting the real product photos. Treat this list as a checklist — reproduce each item at its stated location, in the stated quantity, and invent NOTHING beyond what is listed (no extra pocket, no extra patch, no seam line that isn't described). A single patch mentioned once must appear exactly once, at the location described — never mirrored onto both sides or duplicated. This is a common failure mode when the model isn't given a clear reference photo of the construction, so double-check the reference image(s) directly rather than defaulting to a generic version of this garment type.`,
     // (2026-07-21) 상의 전용 구조 지도 — 목/소매/밑단. 이 세 부위는 마감(골지 밴드/일반 시접)과
     // 대조 트림 유무가 서로 달라서 가장 자주 틀린다(실제 사고: 목·소매엔 흑백 휘프스티치, 밑단은
@@ -593,7 +630,7 @@ export function buildProductFittingPrompt(
     ...(garmentAnalysis.constructionMap && category !== 'bottom'
       ? [
           [
-            `- EDGE CONSTRUCTION MAP (neckline / cuffs / hem — the three edges of a top are finished DIFFERENTLY from each other and are the most commonly mis-rendered part; treat each line as exact ground truth):`,
+            `- EDGE CONSTRUCTION MAP (neckline / cuffs / hem — the three edges of an upper-body garment are finished DIFFERENTLY from each other and are the most commonly mis-rendered part; treat each line as exact ground truth):`,
             `  NECKLINE: ${garmentAnalysis.constructionMap.neckline}`,
             `  SLEEVE CUFFS: ${garmentAnalysis.constructionMap.sleeveCuffs}`,
             `  BOTTOM HEM: ${garmentAnalysis.constructionMap.hem}`,
@@ -629,13 +666,13 @@ export function buildProductFittingPrompt(
     // 베이스의 반복 교훈: 지시문 위치가 반영을 좌우한다). 포즈 지시가 있으면 그게 유일한 포즈
     // 문장이 되도록 교체하고, 기본 스탠딩 문구는 지시가 없을 때만 쓴다.
     userAdditions.trim()
-      ? `Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped.
+      ? `${framingLine}
 THE POSE FOR THIS SHOT (mandatory — this IS the pose to render, not a suggestion; do NOT default to a generic frontal standing pose, and do NOT default to whatever pose/turn direction any other reference image happens to show): ${userAdditions.trim()}
-(If this specifies a direction or turn — e.g. facing left/right, three-quarter turn, side profile, back view, walking — the body orientation AND camera framing must clearly and unambiguously show it, exactly as worded (left means left, right means right) — this pose instruction is the ONLY authority on body direction and wins over every other image in this request. A back-view pose must actually show the model's back with the garment's BACK-zone construction. STRICT: the output is ONE photograph of exactly ONE person in ONE pose — if multiple poses are listed, pick only the single most suitable one, never render several people or a multi-pose lineup.)`
-      : `Camera framing: FULL BODY SHOT ONLY — head to toe, both feet and full footwear fully visible in frame, nothing cropped. Clean, confident, polished commercial standing pose with natural hand placement. Default gaze/head direction: face and eyes toward or near the camera, in a natural relaxed way — do NOT habitually turn the head to one side (e.g. always to the right).`,
+(If this specifies a direction or turn — e.g. facing left/right, three-quarter turn, side profile, back view, walking — the body orientation AND camera framing must clearly and unambiguously show it, exactly as worded (left means left, right means right) — this pose instruction is the ONLY authority on body direction and wins over every other image in this request. A back-view pose must actually show the model's back with the garment's BACK-zone construction. STRICT: the output is ONE photograph of exactly ONE person in ONE pose — if multiple poses are listed, pick only the single most suitable one, never render several people or a multi-pose lineup.${framing === 'close' ? ' If this pose instruction describes a full-body action, keep only its upper-body portion, hand position, and gaze, adapted to this tighter crop.' : ''})`
+      : `${framingLine} Clean, confident, polished commercial standing pose with natural hand placement. Default gaze/head direction: face and eyes toward or near the camera, in a natural relaxed way — do NOT habitually turn the head to one side (e.g. always to the right).`,
     '',
     '=== NEW STYLING TO GENERATE (everything except the product above) ===',
-    (stylingLines.length > 0 ? stylingLines.join('\n') : '- Complete the outfit naturally with cohesive, stylish items that flatter the product.') + mandateBlock,
+    (stylingLines.length > 0 ? stylingLines.join('\n') : '- Complete the outfit naturally with cohesive, stylish items that flatter the product.') + mandateBlock + outerLayeringLine,
     ...styleReferenceLines,
     backgroundLine,
     GARMENT_SIDE_CONSISTENCY_RULE,
