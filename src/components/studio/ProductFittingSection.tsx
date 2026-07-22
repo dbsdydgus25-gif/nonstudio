@@ -81,6 +81,8 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   // 밀려서 무시되는 게 실측 확인됐다.
   const [productImageColors, setProductImageColors] = useState<string[]>([]);
   const [materialImageColors, setMaterialImageColors] = useState<string[]>([]);
+  // 링크 상세페이지에서 뽑은 제품명·특징 텍스트 — 분석(rawSpecs)에 넘겨 머슬핏/골지 같은 특징을 살린다
+  const [linkProductText, setLinkProductText] = useState('');
   // 초안 품질(low) — medium 대비 약 1/4 비용, 코디/색상 확인용
   const [draftMode, setDraftMode] = useState(false);
   const otherSlots = CATEGORY_OPTIONS.map((c) => c.id).filter((id) => id !== category);
@@ -239,6 +241,8 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       const colorOpts: string[] = data.colorOptions || [];
       setLinkColorOptions(colorOpts);
       setColorOverride(null);
+      const pText: string = data.productText || '';
+      setLinkProductText(pText);
       const extra = [
         colorOpts.length ? `색상 ${colorOpts.length}개(${colorOpts.slice(0, 6).join(', ')})` : '',
         materialImgs.length ? `재질 참고 ${materialImgs.length}장` : '',
@@ -252,7 +256,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       });
 
       // 상세페이지 내용(소재·특징·사이즈표)을 이어서 자동 분석해 "제품 핏 · 디테일 지시"까지 채운다.
-      void autoFillFromAnalysis(productImgs.slice(0, 8), materialImgs.slice(0, 4), extra, data.title);
+      void autoFillFromAnalysis(productImgs.slice(0, 8), materialImgs.slice(0, 4), extra, data.title, pText);
     } catch (err: any) {
       setImportMsg({ kind: 'blocked', text: err?.message || '링크 처리 중 오류가 발생했습니다.' });
     } finally {
@@ -269,6 +273,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     materialImgs: string[],
     extra: string,
     title?: string,
+    productText?: string,
   ) => {
     if (!geminiKey || productImgs.length === 0) return;
     try {
@@ -281,15 +286,18 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           category,
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
+          productText,
         }),
       });
       const d = await res.json();
       if (!res.ok || !d.success) return;
 
-      // 사진만으로 판단 어려운 핏/소재 정보를 요약해 채운다 (사용자가 그대로 고쳐 쓸 수 있음)
-      const notes = [d.material, d.fitType ? `${d.fitType} 핏` : '', d.length, d.details]
-        .filter((v: string) => typeof v === 'string' && v.trim())
-        .join(' / ');
+      // 상세페이지에 적힌 한글 특징(머슬핏/골지/니트 소재 등)을 앞에 두고, 분석한 소재·핏을 덧붙인다.
+      // 페이지 원문이 가장 정확한 근거이므로 우선한다.
+      const notes = [productText?.trim(), d.material, d.fitType ? `${d.fitType} 핏` : '', d.length, d.details]
+        .filter((v?: string) => typeof v === 'string' && v.trim())
+        .join(' / ')
+        .slice(0, 1500);
       if (notes) setProductNotes((prev) => (prev.trim() ? prev : notes));
       if (Array.isArray(d.sizeOptions) && d.sizeOptions.length) {
         setSizeOptions((prev) => (prev.length ? prev : d.sizeOptions));
@@ -396,6 +404,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
           productNotes: productNotes.trim() || undefined,
           selectedSize: selectedSize || undefined,
           colorOverride: colorOverride || undefined,
+          productText: linkProductText.trim() || undefined,
           draftMode,
           extractColors,
           // (2026-07-17) 색상 옵션 모드여도 공통으로 적용 — 참고 이미지는 색상과 무관하게

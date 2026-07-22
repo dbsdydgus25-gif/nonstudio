@@ -106,6 +106,63 @@ function collectImageUrls(html: string, pageUrl: string): { official: string[]; 
   return { official, detail: detailOnly };
 }
 
+/**
+ * (2026-07-21) 상세페이지의 "제품 특징 텍스트"를 뽑는다 — 제품명(예: "스티치 머슬 니트티"의 머슬)과
+ * 설명 불릿(골지 텍스처/니트 소재 등)에 핏·재질·특징이 그대로 적혀 있는데 지금까지 버리고 있었다.
+ * 이 텍스트를 analyzeGarment의 rawSpecs로 넘겨야 "머슬핏·크롭" 같은 특징이 결과에 반영된다.
+ * 네비게이션/약관 같은 잡텍스트를 피하려고 불릿과 키워드 주변만 좁게 긁는다.
+ */
+function extractProductText(html: string, title: string): string {
+  const plain = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // 네비게이션·리뷰·다른 상품(가격 붙은 추천 상품) 등 오염원을 걸러낸다.
+  // 특히 "트윌 커브드 와이드 카고 팬츠 62,900원" 같은 추천 상품명이 섞이면 분석이 딴 옷을 본다.
+  const isJunkText = (s: string) =>
+    /\d{1,3},\d{3}\s*원/.test(s) || // 가격 → 추천 상품/가격 영역
+    /조회|추천\s*\d|리뷰|REVIEW|Q&A|배송|교환|반품|적립|쿠폰|장바구니|LOGIN|REGISTER|MY PAGE|검색어|검색기록|공지/i.test(s);
+
+  const picked: string[] = [];
+  if (title) picked.push(title);
+
+  // 설명 불릿(• …) — 대부분의 자사몰이 제품 특징을 이 형태로 적어둔다(가장 깨끗한 소스)
+  const bullets: string[] = [];
+  for (const m of plain.matchAll(/[•·]\s*([^•·]{4,90})/g)) {
+    const s = m[1].trim();
+    if (s && !isJunkText(s)) bullets.push(s);
+    if (bullets.length >= 8) break;
+  }
+  picked.push(...bullets);
+
+  // 불릿이 충분하면 그것만 쓴다 — 키워드 스캔은 리뷰/추천상품까지 긁어와 오염되기 쉽다.
+  if (bullets.length < 2) {
+    const KEY = /(소재|혼용률|안감|신축|스판|두께감|비침|촉감|골지|기모|머슬|크롭|슬림|오버핏|루즈핏|기장)/g;
+    const seenWin = new Set<string>();
+    for (const m of plain.matchAll(KEY)) {
+      const win = plain.slice(Math.max(0, m.index! - 45), Math.min(plain.length, m.index! + 60)).trim();
+      if (win && !seenWin.has(win) && !isJunkText(win)) {
+        seenWin.add(win);
+        picked.push(win);
+      }
+      if (seenWin.size >= 5) break;
+    }
+  }
+
+  // 부분 문자열 중복 제거(같은 문장이 잘린 형태로 여러 번 들어오는 것 방지)
+  const out: string[] = [];
+  for (const raw of picked.map((s) => s.trim()).filter((s) => s.length >= 2)) {
+    if (out.some((k) => k.includes(raw) || raw.includes(k))) continue;
+    out.push(raw);
+  }
+  return out.join(' / ').slice(0, 800);
+}
+
 /** 상품 옵션 <select>(색상/사이즈)에서 실제 옵션 값을 뽑는다. 카페24 등 대부분 자사몰에 통함. */
 function extractOptions(html: string): { colors: string[]; sizes: Array<{ label: string }> } {
   const groups: string[][] = [];
@@ -262,6 +319,7 @@ export async function POST(req: Request) {
 
     const title = extractMeta(html, 'title');
     const description = extractMeta(html, 'description');
+    const productText = extractProductText(html, title);
     const { official, detail } = collectImageUrls(html, pageUrl);
     const options = extractOptions(html);
 
@@ -321,6 +379,8 @@ export async function POST(req: Request) {
       materialImageColors,
       title,
       description,
+      // 제품명·설명 불릿에서 뽑은 특징 텍스트(머슬핏/골지/니트 소재 등) — 분석의 rawSpecs로 쓰인다
+      productText,
       sourceUrl: pageUrl,
       colorOptions: options.colors, // <select>에서 뽑은 정확한 색상 옵션 (있으면)
       sizeOptions: options.sizes, // <select>에서 뽑은 사이즈 옵션 (없으면 상세컷에서 비전이 읽음)

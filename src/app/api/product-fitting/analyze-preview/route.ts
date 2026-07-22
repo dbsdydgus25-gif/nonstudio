@@ -14,13 +14,16 @@ export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {
-    const { productImagesBase64, materialImagesBase64, category, geminiApiKey, openaiApiKey } = (await req.json()) as {
-      productImagesBase64: string[];
-      materialImagesBase64?: string[];
-      category?: string;
-      geminiApiKey: string;
-      openaiApiKey?: string;
-    };
+    const { productImagesBase64, materialImagesBase64, category, geminiApiKey, openaiApiKey, productText } =
+      (await req.json()) as {
+        productImagesBase64: string[];
+        materialImagesBase64?: string[];
+        category?: string;
+        geminiApiKey: string;
+        openaiApiKey?: string;
+        /** 링크 상세페이지에서 뽑은 제품명·특징 텍스트(머슬핏/골지 등) — 분석 정확도를 크게 올린다 */
+        productText?: string;
+      };
 
     if (!productImagesBase64?.length) {
       return NextResponse.json({ success: false, error: '제품 이미지를 등록해주세요.' }, { status: 400 });
@@ -33,7 +36,7 @@ export async function POST(req: Request) {
       productImagesBase64,
       geminiApiKey,
       undefined,
-      undefined,
+      productText?.trim() || undefined, // rawSpecs — 상세페이지 특징 텍스트
       category,
       openaiApiKey,
       materialImagesBase64?.length ? materialImagesBase64 : undefined,

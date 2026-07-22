@@ -144,6 +144,7 @@ export async function POST(req: Request) {
       productNotes,
       selectedSize,
       colorOverride,
+      productText,
       draftMode,
       poseCount,
       customPoseTexts,
@@ -165,6 +166,9 @@ export async function POST(req: Request) {
       /** (2026-07-21) 링크로 가져온 판매 컬러웨이 중 참고 사진과 다른 색을 선택했을 때의 override
        * (예: 사진은 BROWN인데 "NAVY" 선택) — 실제 판매 색상 중 의도적 선택이라 색상 규칙의 유일한 예외. */
       colorOverride?: string;
+      /** (2026-07-21) 링크 상세페이지에서 뽑은 제품명·특징 텍스트 — analyzeGarment의 rawSpecs로 넘겨
+       * "머슬핏/크롭/골지" 같은 핏·재질 특징이 분석과 프롬프트에 반영되게 한다. */
+      productText?: string;
       /** true면 초안 품질(low)로 생성 — medium 대비 약 1/4 비용 */
       draftMode?: boolean;
       /** true면 첫 이미지(색상 샘플 시트)에서 색상 옵션을 자동 추출해 색상별로 생성 */
@@ -372,7 +376,7 @@ export async function POST(req: Request) {
             [first.imageBase64, ...(first.otherAngles || [])],
             geminiApiKey,
             undefined,
-            undefined,
+            productText?.trim() || undefined, // rawSpecs — 링크 상세페이지의 핏/재질 특징 텍스트
             sourcedCategory,
             openaiApiKey,
             materialImagesBase64?.length ? materialImagesBase64 : undefined,
