@@ -28,7 +28,14 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
   const [sourceImage, setSourceImage] = useState<string | null>(null);
   // (2026-07-17) 비워두면 기존처럼 고정 흰 배경 스튜디오 사진이 기본으로 사용됨
   const [customBackgroundImage, setCustomBackgroundImage] = useState<string | null>(null);
-  const [variationCount, setVariationCount] = useState(4);
+  // (2026-07-23) 컷 하나로 자세부터 확인하고 마음에 들면 늘리는 흐름이 더 자연스럽다는
+  // 대표님 요청으로 기본값을 4장에서 1장으로 낮춤.
+  const [variationCount, setVariationCount] = useState(1);
+  // (2026-07-23) "모델 정보와 동일" — 기본 켜짐. 리포즈 중 몸이 과하게 근육질/핏줄지고 얼굴이
+  // 미묘하게 달라지는 드리프트를 저장된 모델 참고 이미지로 붙잡아준다. 대표님 본인 모델이 아닌
+  // 사진(포즈만 참고하려고 넣은 남의 사진 등)을 돌릴 땐 꺼서, 그 사진에 얼굴/체형을 억지로
+  // 입히지 않게 한다.
+  const [matchModelIdentity, setMatchModelIdentity] = useState(true);
   // 컷마다 자세를 따로 지정 — 특정 컷을 비워두면 그 컷만 기존처럼 프리셋 포즈 중 랜덤으로 뽑힘.
   // 최대 컷 수(4)만큼 고정 슬롯을 두고, 실제로는 variationCount개만 화면에 노출/전송한다.
   const [customPoseTexts, setCustomPoseTexts] = useState<string[]>(['', '', '', '']);
@@ -122,6 +129,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
           customPoseTexts: customPoseTexts.slice(0, variationCount).map((t) => t.trim()),
           customPoseImagesBase64: customPoseImages.slice(0, variationCount).map((img) => img || ''),
           customBackgroundImageBase64: customBackgroundImage || undefined,
+          matchModelIdentity,
         }),
       });
 
@@ -208,6 +216,18 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
           onImageChange={setSourceImage}
           badgeText="기준"
         />
+        <label className="flex items-start gap-2.5 cursor-pointer select-none bg-white border border-gray-200 rounded-2xl px-5 py-4">
+          <input
+            type="checkbox"
+            checked={matchModelIdentity}
+            onChange={(e) => setMatchModelIdentity(e.target.checked)}
+            className="w-4 h-4 mt-0.5 rounded border-gray-300 accent-gray-900"
+          />
+          <span className="text-[12px] text-gray-500 leading-relaxed">
+            <b className="text-gray-700 font-semibold">모델 정보와 동일</b> — 저장된 내 모델 참고 이미지를 함께 참고해서 리포즈 도중 몸이
+            과하게 근육질로 변하거나 얼굴이 미묘하게 달라지는 걸 막습니다. 위 사진이 내 모델이 아닌 경우(포즈만 참고하는 다른 사진)엔 꺼주세요.
+          </span>
+        </label>
       </section>
 
       {/* 배경/장소 */}

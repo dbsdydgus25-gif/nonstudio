@@ -25,6 +25,8 @@ import {
 } from '@/lib/generation-store';
 import { downscaleImage, withImageRetry, runWithConcurrency } from '@/lib/image-utils';
 import { resultImageToBuffer } from '@/lib/image-source';
+import { getSessionUserId } from '@/lib/auth';
+import { getModelIdentityImage } from '@/lib/model-profile';
 
 export const runtime = 'nodejs';
 // Vercel Hobby+Fluid Compute는 함수당 최대 300초까지 허용한다 — 포즈 4개를 병렬로 생성해도
@@ -59,10 +61,28 @@ function buildVariationPrompt(
   isCustomPose: boolean = false,
   /** true면 배경 참고가 사용자가 올린 "장소 사진" — 복제가 아니라 장면 재구성 + 인물 재조명 */
   isCustomLocation: boolean = false,
+  /**
+   * (2026-07-23) "모델 정보와 동일" 토글 — 저장된 모델 정보(모델 정보 페이지)의 참고 이미지가
+   * 있으면 그걸 identity 앵커로 함께 넣는다. 실사용에서 포즈를 크게 바꿀 때 몸이 과하게
+   * 근육질로 변하거나 핏줄이 생기고 얼굴이 살짝 달라지는 드리프트가 확인됐는데, Image 1
+   * 한 장만으로는 gpt-image-2가 큰 리포즈 도중 "그럴듯한 커머셜 모델"쪽으로 슬쩍 밀리는
+   * 경향이 있다. 기본은 켜짐 — 대부분의 바리에이션 입력이 대표님 본인 모델이기 때문.
+   * 본인 모델이 아닌 사진(다른 사람 사진으로 포즈만 참고하는 경우)을 넣을 땐 꺼서, 그 사진에
+   * 대표님 얼굴/체형을 억지로 입히지 않게 한다.
+   */
+  hasIdentityReferenceImage: boolean = false,
+  /** 사용자가 자세 참고 사진과 텍스트를 동시에 입력했는지 — true면 poseInstruction은 사진 위에
+   *  얹는 보조 디테일로, false(사진만)면 poseInstruction은 자동 생성된 "사진 그대로 따라라" 문장 */
+  hasCustomPoseText: boolean = false,
 ): string {
   const imageNotes: string[] = [
     'Image 1 (the base photo): the exact person and exact outfit to reproduce — the single source of truth for face, skin tone, body, and every garment/accessory.',
   ];
+  if (hasIdentityReferenceImage) {
+    imageNotes.push(
+      `Image ${imageNotes.length + 1}: this person's saved MODEL IDENTITY reference — the authoritative reference for this exact person's face structure, body build, and skin tone. Image 1 still defines the CURRENT pose, framing, and outfit — do NOT copy this image's clothing, background, or pose. Use it only to correct drift: if re-rendering the pose in Image 1 would make the face, body shape, muscle definition, or skin look like a different person, match THIS image's face/body instead of inventing a more "commercial-model" physique.`,
+    );
+  }
   if (hasBackgroundReferenceImage) {
     imageNotes.push(
       isCustomLocation
@@ -82,8 +102,27 @@ function buildVariationPrompt(
   // (2) "45도 돌려서" 같은 각도 지시가 살짝 몸만 트는 정도로 약하게만 반영됨.
   // (3) 원본 사진에서 손으로 들고 있던 가방/소품이, 팔짱 낀 자세처럼 두 손이 다 막힌 포즈에서
   //     쥘 손이 없어지자 허공에 붕 뜬 채로 렌더링됨(어느 손/팔에도 걸쳐있지 않음).
+  //
+  // (2026-07-23) 자세 참고 사진 + 텍스트를 동시에 넣으면 사진이 무시되는 버그를 실측으로 확인.
+  // 뒷모습 참고 사진 + "정면을 바라보며 카메라 응시"라는(사진과 정면충돌하는) 텍스트를 같이
+  // 넣었더니, 실제로 정면 결과가 나왔다 — 원인은 병합 문구가 "사진이 우선"이라고 말해놓고
+  // 바로 뒤에 충돌하는 텍스트를 그대로 붙여서, 모델이 그 텍스트도 "적용해야 할 지시"로 읽은
+  // 것. 사진이 있을 땐 블록 전체를 별도로 구성해서 (a) 자세/각도/시선의 유일한 근거는 사진이고
+  // (b) 텍스트는 사진과 충돌하면 그 부분만 무시하라고 명시적으로 못박는다 — Direction/turn
+  // 키워드 게이트(텍스트에 "돌아서/측면/뒤돌아" 같은 단어가 없으면 각도를 그대로 유지하라는
+  // 규칙)도 사진이 있을 땐 완전히 다른 전제라 여기서만 빼고 별도로 적용한다.
   const poseLine = isCustomPose
-    ? `MANDATORY POSE (user-specified — this is the actual pose to render, not a suggestion; overrides any default frontal/standing assumption): ${poseInstruction}
+    ? hasPoseReferenceImage
+      ? `MANDATORY POSE — THE POSE REFERENCE IMAGE IS THE ONLY SOURCE OF TRUTH for body pose, camera angle, body orientation, and gaze/head direction. Copy exactly what it shows — including whether the person faces the camera, looks to a side, or is shown from behind — even if this differs from the note below.
+${
+  hasCustomPoseText
+    ? `The user also wrote this note: "${poseInstruction}". Apply ONLY the parts of this note that do NOT conflict with the reference image's pose, camera angle, or gaze — such as a held prop, hand position, or facial expression. If any part of this note names a different camera angle, body direction, or gaze than the reference image actually shows, ignore that specific part completely and keep following the image.`
+    : 'Match the body pose, camera angle, and framing shown in the pose reference image exactly.'
+}
+- Apply only to body parts that are visible in Image 1.
+- Accessory/prop handling: if Image 1 shows a hand-held item (bag, phone, etc.) and the new pose does not leave a hand free to hold it the same way (e.g. arms crossed, both hands in pockets), do NOT render it floating disconnected in mid-air with no visible support. Instead keep it physically plausible: hang it from the crook of the elbow, drape the strap over the forearm or shoulder, or adjust which hand/arm holds it — it must always look like gravity and a real grip are acting on it.
+(STRICT: ONE person, ONE pose, ONE photograph — never render several people or a multi-pose lineup.)`
+      : `MANDATORY POSE (user-specified — this is the actual pose to render, not a suggestion; overrides any default frontal/standing assumption): ${poseInstruction}
 - Direction/turn: only change the camera-facing angle (three-quarter turn, side profile, back view, etc.) if the instruction explicitly uses a direction/turn word (e.g. "돌아서", "측면", "뒤돌아", "왼쪽/오른쪽을 보고", "back view", "profile"). A phrase about hand placement alone (e.g. "뒷주머니에 손" / "hand in back pocket") describes the HAND only — keep the body's camera-facing angle as it already is in Image 1 unless a separate direction word says otherwise; do NOT turn the whole body away from the camera just because a pocket or hand position is mentioned.
 - If the instruction does give an explicit direction/turn, and especially if it specifies a numeric angle (e.g. "45도"), the body orientation AND camera framing must clearly and unambiguously show that amount of turn — a partial turn readable at a glance, not just a front-facing pose with a slight head tilt.
 - Apply only to body parts that are visible in Image 1.
@@ -127,18 +166,32 @@ function buildVariationPrompt(
     // 고개/시선 문구("head turned back...", "gaze looking down...")가 "머리가 존재해야 한다"는
     // 신호로 작용해 프레이밍 규칙을 이기고 있었다. 머리가 안 보이는 입력이면 포즈 지시의
     // 고개/시선 부분 자체를 무시하라고 우선순위를 명시적으로 못박는다.
-    'FRAMING RULE (HIGHEST PRIORITY — overrides everything else in this prompt including the pose instruction): the output must have the exact same framing and crop as Image 1. If Image 1 does not show the head/face (cropped at the neck or chest), the output must be cropped identically and contain NO head and NO face — in that case, ignore every part of the pose instruction that mentions the head, face, chin, or gaze, and apply only the body/arm/leg parts of the pose. Never extend the frame or invent any body part (head, face, feet, etc.) that is not visible in Image 1.',
+    // (2026-07-23) 자세 참고 사진이 있을 땐 이 규칙을 "카메라 앵글까지 Image 1과 똑같이"가
+    // 아니라 "안 보이는 신체 부위를 지어내지 말라"는 원래 취지로만 좁힌다 — 안 그러면 참고
+    // 사진이 다른 각도(예: 뒷모습)를 보여줘도 이 규칙이 그걸 되돌려버린다.
+    hasPoseReferenceImage
+      ? 'FRAMING RULE: match how much of the body Image 1 actually shows (do not invent a head/face if Image 1 is cropped at the neck or chest, do not invent feet if Image 1 crops above them). Within that limit, the CAMERA ANGLE and BODY ORIENTATION follow the pose reference image, not Image 1 — e.g. if the reference image shows a back view or profile, render a back view or profile here too, cropped to show the same vertical extent of the body as Image 1.'
+      : 'FRAMING RULE (HIGHEST PRIORITY — overrides everything else in this prompt including the pose instruction): the output must have the exact same framing and crop as Image 1. If Image 1 does not show the head/face (cropped at the neck or chest), the output must be cropped identically and contain NO head and NO face — in that case, ignore every part of the pose instruction that mentions the head, face, chin, or gaze, and apply only the body/arm/leg parts of the pose. Never extend the frame or invent any body part (head, face, feet, etc.) that is not visible in Image 1.',
     ...imageNotes,
     poseLine,
     // (2026-07-09) PERSONAL_BODY_SPEC 텍스트를 여기서 제거함 — 사용자 결정: AI 바리에이션은
     // "첨부된 사진을 그대로 가져와서 포즈만 바꾸는" 단계라, 텍스트 체형 스펙이 이미지와
     // 미묘하게 충돌해 재해석을 유발할 여지를 없앤다. 체형/피부톤/털/흉터 등 모델 정보는
     // 전부 AI 피팅(restyle) 단계에서만 주입되고, 바리에이션은 그 결과 사진 자체가 유일한 기준.
-    'The person in Image 1 IS the model spec — do not adjust the body, skin, or face toward any other standard.',
+    // (2026-07-23) identity 앵커가 있을 때만 문구를 살짝 보강 — "다른 표준으로 조정하지 말라"에
+    // 더해 근육/핏줄/스킨톤 드리프트를 구체적으로 금지한다(아래 NEGATIVE에도 중복 명시하되,
+    // 이 줄은 "왜"를 설명하는 본문 문맥이라 완전히 겹치지 않는다).
+    hasIdentityReferenceImage
+      ? 'The person in Image 1 (confirmed by the identity reference image) IS the model — do not adjust the body, skin, or face toward any other standard, and do not make the physique look more toned, muscular, or veiny than it actually is.'
+      : 'The person in Image 1 IS the model spec — do not adjust the body, skin, or face toward any other standard.',
     ...locationIntegrationBlock,
     '',
     '=== NEGATIVE CONSTRAINTS ===',
-    'cartoon, illustration, CGI, 3D render, different person, different face, different clothing, different color, different footwear, added or altered fabric pattern/texture, inventing body parts not shown in Image 1, extending the frame beyond Image 1\'s crop, extra limbs, bad hands, distorted anatomy, collage, split screen, multi-panel grid, watermark, text, logo, low resolution, blurry.'
+    // (2026-07-23) 실사용 확인 — 자세를 크게 바꾸면 몸이 과하게 근육질로 변하고 핏줄이 생기고
+    // 얼굴이 미묘하게 달라지는 드리프트가 재현됐다. 매 컷 반드시 지켜야 하는 항목이라
+    // identity 앵커 유무와 무관하게 항상 넣는다.
+    'more muscular or toned than Image 1, added or exaggerated muscle definition, visible veins or vascularity not present in Image 1, tanned or darker skin than Image 1, different face shape, different facial features, different jawline, different eyes or nose, '
+      + 'cartoon, illustration, CGI, 3D render, different person, different clothing, different color, different footwear, added or altered fabric pattern/texture, inventing body parts not shown in Image 1, extending the frame beyond Image 1\'s crop, extra limbs, bad hands, distorted anatomy, collage, split screen, multi-panel grid, watermark, text, logo, low resolution, blurry.'
       + (isCustomLocation
         ? ' cutout look, pasted-on subject, subject composited onto a backdrop, studio-lit subject standing in a location shot, missing contact shadow, floating above the ground, mismatched light direction between subject and scene, flat sticker-like silhouette edge, flat backdrop wall with no depth.'
         : ''),
@@ -160,11 +213,17 @@ async function runSingleVariation(
   isCustomPose: boolean = false,
   /** 배경 참고가 사용자가 올린 장소 사진인지 (기본 흰 스튜디오 참고 사진이면 false) */
   isCustomLocation: boolean = false,
+  /** "모델 정보와 동일" 토글이 켜져 있고 저장된 모델 참고 이미지가 있을 때만 전달됨 */
+  identityReferenceImage: { buffer: Buffer; mimeType: string } | null = null,
+  /** 사용자가 이 컷에 자세 텍스트도 함께 입력했는지 — 사진과 병행 시 우선순위 판단용 */
+  hasCustomPoseText: boolean = false,
 ): Promise<{ imageUrl: string; engineUsed: string }> {
   // 입력 이미지는 1024px로 다운스케일 — 페이로드/입력 토큰 절감
   const source = await downscaleImage(sourceBuf, sourceMime);
   const sourceFile = await toOpenAIFile(source.buffer, source.mimeType, `source.${source.mimeType.split('/')[1] || 'jpg'}`);
-  const rawRefs = [backgroundReferenceImage, poseReferenceImage].filter(
+  // 순서가 buildVariationPrompt의 imageNotes 구성 순서(identity → background → pose)와
+  // 정확히 일치해야 "Image N" 번호가 서로 어긋나지 않는다.
+  const rawRefs = [identityReferenceImage, backgroundReferenceImage, poseReferenceImage].filter(
     (r): r is { buffer: Buffer; mimeType: string } => !!r,
   );
   const refs = await Promise.all(rawRefs.map((r) => downscaleImage(r.buffer, r.mimeType)));
@@ -179,6 +238,8 @@ async function runSingleVariation(
     !!poseReferenceImage,
     isCustomPose,
     isCustomLocation,
+    !!identityReferenceImage,
+    hasCustomPoseText,
   );
 
   const res: any = await withImageRetry(() => (openai.images as any).edit({
@@ -209,6 +270,11 @@ export async function POST(req: Request) {
       // 사진이 있으면 프리셋 참고 사진 대신 이걸 쓴다.
       customPoseImagesBase64,
       customBackgroundImageBase64,
+      // (2026-07-23) "모델 정보와 동일" 토글 — 기본 켜짐. 대부분의 바리에이션 입력이 대표님
+      // 본인 모델(AI 피팅 결과)이라, 저장된 모델 참고 이미지를 identity 앵커로 같이 넣어서
+      // 리포즈 도중 몸/핏줄/얼굴이 드리프트하는 걸 막는다. 본인 모델이 아닌 사진을 올릴 땐
+      // 프론트에서 꺼서 보낸다.
+      matchModelIdentity,
     } = await req.json();
 
     if (!sourceImageBase64) {
@@ -238,31 +304,40 @@ export async function POST(req: Request) {
     const emptySlotCount = Array.from({ length: count }, (_, i) => i).filter((i) => !isCustomSlot(i)).length;
     const randomPosesForEmptySlots = pickRandomPoses(emptySlotCount);
     let randomCursor = 0;
-    const poses: Array<{ pose: (typeof FULLBODY_POSES)[number]; poseNumber: number | null; slotIndex: number }> =
+    const poses: Array<{
+      pose: (typeof FULLBODY_POSES)[number];
+      poseNumber: number | null;
+      slotIndex: number;
+      /** 사용자가 실제로 텍스트를 입력했는지 — 사진과 병행 시 우선순위 판단에 쓰인다 */
+      hasCustomPoseText: boolean;
+    }> =
       Array.from({ length: count }, (_, i) => {
         if (isCustomSlot(i)) {
           const text = customTexts[i];
+          const hasImage = !!customPoseImages[i];
+          // (2026-07-23) poseInstruction은 라벨/히스토리 표시용으로 원문 그대로 둔다 — 병합
+          // 문구를 여기서 만들면 히스토리에 그 문구가 그대로 남고, "텍스트가 이미지와 충돌하면
+          // 무시하라"는 우선순위 판단도 매번 새로 만든 병합 문장 안에 파묻혀 약해진다(실측
+          // 확인 — "정면 응시"처럼 이미지와 정면충돌하는 텍스트가 실제로 이겨버렸다). 우선순위
+          // 판단은 buildVariationPrompt 쪽에서 hasCustomPoseText로 명확히 분기해서 처리한다.
+          const poseInstruction = hasImage && !text
+            ? 'Match the body pose, camera angle, and framing shown in the pose reference image exactly.'
+            : text;
           return {
-            pose: {
-              id: 'custom',
-              label: count > 1 ? `커스텀 자세 ${i + 1}` : '커스텀 자세',
-              // 사진만 올린 경우엔 참고 사진 자체가 지시가 된다.
-              poseInstruction:
-                text ||
-                'Match the body pose, camera angle, and framing shown in the pose reference image exactly.',
-            },
+            pose: { id: 'custom', label: count > 1 ? `커스텀 자세 ${i + 1}` : '커스텀 자세', poseInstruction },
             poseNumber: null,
             slotIndex: i,
+            hasCustomPoseText: !!text,
           };
         }
         const picked = randomPosesForEmptySlots[randomCursor];
         randomCursor += 1;
-        return { ...picked, slotIndex: i };
+        return { ...picked, slotIndex: i, hasCustomPoseText: false };
       });
 
     // 포즈마다 "처리 중" 행을 먼저 만들어 id를 즉시 반환한다 — 실제 생성은 아래 after()에서 진행.
     const jobs = await Promise.all(
-      poses.map(async ({ pose, poseNumber, slotIndex }) => ({
+      poses.map(async ({ pose, poseNumber, slotIndex, hasCustomPoseText }) => ({
         generationId: await createPendingGeneration({
           pipeline: 'restyle',
           modeOrCategory: 'variation',
@@ -272,6 +347,7 @@ export async function POST(req: Request) {
         pose,
         slotIndex,
         poseNumber,
+        hasCustomPoseText,
       })),
     );
 
@@ -291,8 +367,22 @@ export async function POST(req: Request) {
         ? await resultImageToBuffer(customBackgroundImageBase64)
         : getDefaultBackgroundReferenceImage();
 
+      // (2026-07-23) "모델 정보와 동일" 토글 — 기본 켜짐(값이 안 왔거나 true일 때). 로그인 세션의
+      // 저장된 모델 참고 이미지를 identity 앵커로 가져온다. 없으면(비로그인/미저장) 조용히
+      // null로 진행 — 기존처럼 Image 1만으로 생성된다.
+      const useModelIdentity = matchModelIdentity !== false;
+      let identityReferenceImage: { buffer: Buffer; mimeType: string } | null = null;
+      if (useModelIdentity) {
+        try {
+          const uid = await getSessionUserId();
+          if (uid) identityReferenceImage = await getModelIdentityImage(uid);
+        } catch (err) {
+          console.warn('[api/variation] 모델 정체성 참고 이미지 조회 실패 — 앵커 없이 진행:', err);
+        }
+      }
+
       // 전체 병렬 대신 3개씩 배치 — 이미지 API 분당 한도(429)로 일부 포즈만 성공하는 것 방지
-      await runWithConcurrency(jobs, 3, async ({ generationId, pose, poseNumber, slotIndex }) => {
+      await runWithConcurrency(jobs, 3, async ({ generationId, pose, poseNumber, slotIndex, hasCustomPoseText }) => {
           try {
             // (2026-07-22) 사용자가 중단했으면 남은 컷은 아예 생성하지 않는다 — 4컷을 3개씩
             // 나눠 돌기 때문에, 뒤쪽 배치는 여기서 걸러져 그만큼 비용이 절약된다.
@@ -305,7 +395,7 @@ export async function POST(req: Request) {
               : poseNumber
                 ? getPoseReferenceImage(poseNumber)
                 : null;
-            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage, draftMode ? 'low' : 'medium', pose.id === 'custom', isCustomLocation);
+            const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage, draftMode ? 'low' : 'medium', pose.id === 'custom', isCustomLocation, identityReferenceImage, hasCustomPoseText);
             const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
             await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt: pose.poseInstruction });
           } catch (err: any) {
