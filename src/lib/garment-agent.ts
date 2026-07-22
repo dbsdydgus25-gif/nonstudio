@@ -19,6 +19,9 @@ const CONSTRUCTION_MAP_SCHEMA = {
   type: Type.OBJECT,
   properties: {
     photoClassification: { type: Type.STRING, description: 'Per-photo FRONT/BACK/side/close-up classification with the anatomical cue used (e.g. "Photo 1: center fly visible → FRONT; Photo 2: patch pockets + elastic waistband, no fly → BACK")' },
+    neckline: { type: Type.STRING, description: 'TOPS: the neckline — collar shape (crew/v/mock/polo), the band construction (ribbed band, bound edge, self-fabric), and CRITICALLY whether a contrast trim/stitch runs along it (state the trim colors and stitch style, e.g. "crew neck with narrow ribbed band edged by a black-and-white contrast whipstitch"). "none" if the garment is not a top' },
+    sleeveCuffs: { type: Type.STRING, description: 'TOPS: the sleeve hem/cuff — band type (ribbed cuff, plain folded hem, raw edge) and whether the SAME contrast trim/stitch as the neckline appears here or not. Be explicit; this is frequently rendered wrong. "none" if not a top' },
+    hem: { type: Type.STRING, description: 'TOPS: the BOTTOM hem of the garment — band type (wide ribbed band, plain hem, drawcord) and whether a contrast trim/stitch is present. If the neckline/cuffs have contrast trim but the hem does NOT, say so explicitly ("plain ribbed hem band, NO contrast stitching"). "none" if not a top' },
     frontWaistband: { type: Type.STRING, description: 'Front waistband construction: fly type, buttons/zip, belt loops, whether elastic is visible from front' },
     frontLeftLeg: { type: Type.STRING, description: "Wearer's LEFT leg, front view — ONLY details that exist on this leg and NOT on the other leg (a symmetric pair present on both legs does NOT belong here). \"none\" if this leg has no unique detail" },
     frontRightLeg: { type: Type.STRING, description: "Wearer's RIGHT leg, front view — ONLY details that exist on this leg and NOT on the other leg. \"none\" if this leg has no unique detail" },
@@ -29,7 +32,7 @@ const CONSTRUCTION_MAP_SCHEMA = {
     sideSeams: { type: Type.STRING, description: 'Side seam construction, or "not visible in provided photos" if unseen' },
     asymmetryChecklist: { type: Type.STRING, description: 'EVERY one-side-only detail of this garment, each as "<detail> — wearer\'s <LEFT|RIGHT> <leg/side> ONLY, the opposite side has NO such detail", separated by "; ". Example: "hammer loop — wearer\'s LEFT leg ONLY, the opposite side has NO loop; cargo patch pocket with woven brand patch — wearer\'s RIGHT leg ONLY, the opposite side has NO cargo pocket and NO patch". Write "none — all details are symmetric" if truly nothing is one-sided' },
   },
-  required: ['photoClassification', 'frontWaistband', 'frontLeftLeg', 'frontRightLeg', 'backWaistband', 'backLeftLeg', 'backRightLeg', 'backPockets', 'sideSeams', 'asymmetryChecklist'],
+  required: ['photoClassification', 'neckline', 'sleeveCuffs', 'hem', 'frontWaistband', 'frontLeftLeg', 'frontRightLeg', 'backWaistband', 'backLeftLeg', 'backRightLeg', 'backPockets', 'sideSeams', 'asymmetryChecklist'],
 };
 
 /** OpenAI 폴백은 responseSchema 강제가 안 되므로, 필드가 빠지거나 문자열째로 와도 안전하게 정규화한다. */
@@ -42,6 +45,9 @@ function normalizeConstructionMap(cm: any): GarmentConstructionMap | undefined {
   }
   return {
     photoClassification: cm.photoClassification || 'not provided',
+    neckline: cm.neckline || fallback,
+    sleeveCuffs: cm.sleeveCuffs || fallback,
+    hem: cm.hem || fallback,
     frontWaistband: cm.frontWaistband || fallback,
     frontLeftLeg: cm.frontLeftLeg || fallback,
     frontRightLeg: cm.frontRightLeg || fallback,
@@ -187,6 +193,7 @@ CRITICAL RULES:
       BACK pockets: (count, shape, placement)
       SIDE seams / other: ...
    d. If a zone is not visible in any provided photo, write "not visible in provided photos — do not invent" for that zone.
+   d2. TOPS — the three edge zones ("neckline", "sleeveCuffs", "hem") are MANDATORY and are the most frequently mis-rendered part of a top. For EACH of the three, state (1) the finish type (ribbed band / plain folded hem / bound edge / raw edge / drawcord) and (2) whether a CONTRAST trim or decorative stitch runs along that edge, naming its colors and stitch style. These three edges often differ from each other: a garment can have a contrast whipstitch at the neckline and cuffs but a plain ribbed hem band with NO contrast stitching. Never assume the three match — inspect each separately and, when an edge has no contrast trim, write "NO contrast stitching" explicitly. For bottoms, set these three to "none".
    e. NO DUPLICATION ACROSS ROWS (critical): each physical detail appears in EXACTLY ONE row of the map. A symmetric pair (e.g. the two standard back patch pockets) is described ONCE in its shared row ("backPockets": "two large rectangular patch pockets, one per side") and must NOT be repeated in the per-leg rows. The per-leg rows list ONLY details unique to that one leg. Repeating a detail in multiple rows makes the image generator render extra copies of it.
    f. ASYMMETRY CHECKLIST ("asymmetryChecklist" field): after building the map, list every one-side-only detail as "<detail> — wearer's <LEFT|RIGHT> leg ONLY, the opposite side has NO such detail", joined by "; ". This is the ground truth used to catch mirrored/duplicated details in the generated output, so triple-check each side assignment against the mirror rule (b) before writing it.
 7. READ TEXT INSIDE THE IMAGES (critical for Korean 상세페이지). Some provided photos are not clean product shots but long detail-page cuts (상세컷) that contain TEXT baked into the image — fabric composition/혼용률, 소재, care, features/특징, and especially a SIZE CHART (사이즈표: 허리/총장/밑위/허벅지/가슴/어깨/소매 등). You MUST read that embedded Korean/English text and use it: fold material/care/feature text into "material" and "details", and extract every listed size into "sizeOptions". Text printed inside an image is real product data — never skip it because it is "in an image".
@@ -206,7 +213,7 @@ Return ONLY valid JSON, no markdown, no explanation:
   "chestWidth": "estimated chest measurement if visible (e.g., '54cm', '58cm') or null",
   "length": "garment length description (e.g., 'hip length', 'cropped above waist', 'ankle length', '28 inch inseam') or null",
   "sizeOptions": "an ARRAY (per rules 7-8) of {label, measurements} read from size charts/spec text in the images or accompanying text — [] if none. Never invent.",
-  "constructionMap": "an OBJECT (per rule 6) with 10 required string fields: photoClassification, frontWaistband, frontLeftLeg, frontRightLeg, backWaistband, backLeftLeg, backRightLeg, backPockets, sideSeams, asymmetryChecklist — every field filled using WEARER'S left/right with the mirror rule applied, 'none' for empty zones, 'not visible in provided photos — do not invent' for unseen zones, no detail repeated across rows (rule 6e), and the asymmetry checklist per rule 6f. Every field is mandatory, never omit one."
+  "constructionMap": "an OBJECT (per rule 6) with these required string fields — for TOPS the three edge zones neckline/sleeveCuffs/hem are the most important (rule 6d2): photoClassification, neckline, sleeveCuffs, hem, frontWaistband, frontLeftLeg, frontRightLeg, backWaistband, backLeftLeg, backRightLeg, backPockets, sideSeams, asymmetryChecklist — every field filled using WEARER'S left/right with the mirror rule applied, 'none' for empty zones, 'not visible in provided photos — do not invent' for unseen zones, no detail repeated across rows (rule 6e), and the asymmetry checklist per rule 6f. Every field is mandatory, never omit one."
 }
 `.trim();
 
@@ -396,7 +403,13 @@ Output raw JSON ONLY. No markdown formatting, no \`\`\`json block. Just the raw 
       }
     }
 
-    // 최종 폴백 기본값 (Gemini/OpenAI 둘 다 실패했을 때만 — 데님 단정 대신 일반적인 값으로)
+    // 최종 폴백 기본값 (Gemini/OpenAI 둘 다 실패했을 때만 — 데님 단정 대신 일반적인 값으로).
+    // analysisFailed로 표시해서 호출부/UI가 "분석 실패 상태로 생성 중"임을 알 수 있게 한다 —
+    // 무료 등급 한도(429) 초과 시 조용히 이 값으로 생성돼 품질이 무너지던 문제 대응.
+    console.error(
+      '[GarmentAgent] 분석 실패 — 일반 폴백값으로 진행합니다. 구조/재질/디테일이 반영되지 않습니다.',
+      geminiError,
+    );
     return {
       color: 'as shown in image',
       material: 'as shown in image',
@@ -405,6 +418,7 @@ Output raw JSON ONLY. No markdown formatting, no \`\`\`json block. Just the raw 
       details: rawSpecs || 'as shown in the reference garment photo',
       texture: 'textured fabric',
       lightReaction: 'matte finish',
+      analysisFailed: true,
     };
   }
 }
@@ -804,6 +818,9 @@ export async function verifyGarmentRender(
 You are a strict QA inspector for AI-generated fashion lookbook photos. Inspect the GENERATED photo against the ground truth below and report every construction/placement defect.
 
 GROUND TRUTH CONSTRUCTION MAP (wearer's left/right):
+- NECKLINE (tops): ${constructionMap.neckline}
+- SLEEVE CUFFS (tops): ${constructionMap.sleeveCuffs}
+- BOTTOM HEM (tops): ${constructionMap.hem}
 - FRONT waistband: ${constructionMap.frontWaistband}
 - FRONT wearer-LEFT leg: ${constructionMap.frontLeftLeg}
 - FRONT wearer-RIGHT leg: ${constructionMap.frontRightLeg}
@@ -826,6 +843,7 @@ INSPECTION PROCEDURE:
 4. Are there invented details NOT on the real product — extra pockets, extra patches, extra seams/panel lines, or extra topstitch/stitch lines (especially added near the hem, side seam, or chest of an otherwise plain garment)? Compare against the REFERENCE photo(s). Any stitch/seam line the reference does not show is a FAIL — report it as "remove the invented <where> stitch/seam line; the real product has no such line there".
 5. Does the garment's fabric/color in the GENERATED photo roughly match the ground truth (obvious mismatches only — e.g. smooth dress fabric instead of sturdy twill, clearly wrong color)? Ignore lighting differences.
 6. If the pose instruction specifies a turn/facing direction (e.g. 왼쪽 = model's left turn, 오른쪽 = model's right turn, 뒤 = back view): does the GENERATED body orientation actually match it? "왼쪽으로 돌아" means the model rotates toward the MODEL'S OWN left. If the direction is clearly opposite or ignored (e.g. frontal standing when a turn was required), that is a FAIL.
+6.5 EDGE CHECK (tops) — compare the GENERATED garment's three edges against the NECKLINE / SLEEVE CUFFS / BOTTOM HEM lines above. They are finished differently from each other, so check each separately: (a) is the finish type right (ribbed band vs plain hem vs raw edge)? (b) is a contrast trim/stitch present on exactly the edges that name one, and ABSENT on the edges that say no contrast stitching? (c) do the trim's colors/stitch style match? A contrast stitch copied onto the hem when the hem should be plain, a missing ribbed hem band, or a missing neckline/cuff trim are all FAILS — report the specific edge and the required correction.
 ${styleChecklist.length ? `7. STYLING CHECK — for EACH styling line above, look at the corresponding item in the GENERATED photo and verify BOTH its color and its garment type match the words. This is a common, high-priority failure: if the line says 베이지/beige and the item is black, or 갈색/brown and it is black, or 워싱 데님/washed denim and it is plain black slacks, that is a FAIL. Do NOT accept the outfit being recolored to a black/grey/monochrome look to match the product. Report each mismatch as a correction naming the item, the wrong color/type seen, and the required one.` : ''}
 ${keyFit ? `8. FIT CHECK — verify the sourced product's fit matches the KEY FIT words. In particular a "tight/꽉 맞음/타이트" neckline must hug the neck high and close; a loose, wide, or dropped neckline that exposes the collarbone/trapezius is a FAIL. Report the required fit correction.` : ''}
 

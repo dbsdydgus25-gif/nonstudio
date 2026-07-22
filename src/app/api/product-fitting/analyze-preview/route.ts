@@ -51,6 +51,8 @@ export async function POST(req: Request) {
       details: analysis.details,
       fitType: analysis.fitType,
       length: analysis.length,
+      // true면 Gemini/OpenAI 분석이 모두 실패해 일반 폴백값 상태 (무료 등급 한도 초과 등)
+      analysisFailed: !!analysis.analysisFailed,
     });
   } catch (err: any) {
     console.error('[api/product-fitting/analyze-preview] 처리 실패:', err);

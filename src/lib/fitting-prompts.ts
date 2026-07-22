@@ -58,11 +58,26 @@ export interface GarmentAnalysis {
    * 필수 필드로 쪼개고 Gemini responseSchema로 강제해서 빈 값이 나올 수 없게 한다.
    */
   constructionMap?: GarmentConstructionMap;
+  /**
+   * (2026-07-21) 분석(Gemini/OpenAI)이 둘 다 실패해 일반 폴백값으로 채워졌는지 표시.
+   * 실제 사고: Gemini 무료 등급 하루 20회 한도를 넘겨 429가 나는데도 조용히 폴백해서,
+   * 구조 지도·재질·디테일이 통째로 빈 채 생성이 진행됐다(품질이 무너지는데 원인이 안 보임).
+   * 이 플래그를 UI까지 올려 "분석 실패" 를 사용자가 알 수 있게 한다.
+   */
+  analysisFailed?: boolean;
 }
 
 export interface GarmentConstructionMap {
   /** 입력 사진마다 앞/뒤/옆/클로즈업 판별 + 근거 (예: "Photo 1: 지퍼 보임 → 앞면") */
   photoClassification: string;
+  /**
+   * (2026-07-21) 상의 전용 존 — 목/소매/밑단은 상의에서 가장 자주 틀리는 부위다.
+   * 실제 사고: 목·소매엔 흑백 대조 휘프스티치, 밑단은 대조 스티치 없는 골지 밴드인 제품인데
+   * 셋을 구분 못 해 밑단 마감과 트림이 뭉개졌다. 부위별로 "마감 종류 + 대조 트림 유무"를 고정한다.
+   */
+  neckline: string;
+  sleeveCuffs: string;
+  hem: string;
   frontWaistband: string;
   /** 착용자 기준 왼쪽 다리 — 앞면 */
   frontLeftLeg: string;
@@ -506,9 +521,22 @@ export function buildProductFittingPrompt(
     `- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image ${productImageNumber} — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.`,
     `- CRITICAL BUTTON/HARDWARE COUNT RULE: before finalizing, actually count the buttons, snaps, zippers, or other hardware visible in ${materialImageNumbers.length ? `the close-up material reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')}) — this is the clearest, most zoomed-in view and is the authoritative source for the exact count and spacing` : `Image ${productImageNumber}`}. The output must show that exact same count in the exact same positions — neither more nor fewer. This is a common failure mode: do not casually add an extra button or omit one out of habit. Every button must sit directly on the actual fabric placket opening with a real, visible buttonhole/gap beneath it — never place a button on a closed, seamless section of the knit/fabric where there is no opening, and never render two buttons stacked or duplicated at the same spot. The button placket must look structurally coherent, like a real garment construction photo.`,
     `- CRITICAL SEAM/POCKET/PATCH RULE: the "Details" spec above lists the exact seam/panel lines, pocket type+location, and logo/patch placement found by directly inspecting the real product photos. Treat this list as a checklist — reproduce each item at its stated location, in the stated quantity, and invent NOTHING beyond what is listed (no extra pocket, no extra patch, no seam line that isn't described). A single patch mentioned once must appear exactly once, at the location described — never mirrored onto both sides or duplicated. This is a common failure mode when the model isn't given a clear reference photo of the construction, so double-check the reference image(s) directly rather than defaulting to a generic version of this garment type.`,
-    // (2026-07-19) CONSTRUCTION MAP은 하의(다리/포켓 좌우 비대칭)용 도구다. 상의/신발/액세서리에
-    // 넣으면 "FRONT wearer-LEFT leg: not applicable for a top" 같은 무의미한 줄이 7개씩 깔려
-    // 정작 중요한 스타일링/핏 지시를 희석한다(실제 실패 확인). 하의일 때만 렌더한다.
+    // (2026-07-21) 상의 전용 구조 지도 — 목/소매/밑단. 이 세 부위는 마감(골지 밴드/일반 시접)과
+    // 대조 트림 유무가 서로 달라서 가장 자주 틀린다(실제 사고: 목·소매엔 흑백 휘프스티치, 밑단은
+    // 대조 스티치 없는 골지 밴드인데 뭉개짐). 하의용 다리/포켓 행은 상의에 무의미하므로 빼고
+    // 이 세 존만 좌표처럼 고정한다.
+    ...(garmentAnalysis.constructionMap && category !== 'bottom'
+      ? [
+          [
+            `- EDGE CONSTRUCTION MAP (neckline / cuffs / hem — the three edges of a top are finished DIFFERENTLY from each other and are the most commonly mis-rendered part; treat each line as exact ground truth):`,
+            `  NECKLINE: ${garmentAnalysis.constructionMap.neckline}`,
+            `  SLEEVE CUFFS: ${garmentAnalysis.constructionMap.sleeveCuffs}`,
+            `  BOTTOM HEM: ${garmentAnalysis.constructionMap.hem}`,
+            `  Side seams: ${garmentAnalysis.constructionMap.sideSeams}`,
+            `  EDGE RENDERING RULE: render each of the three edges exactly as its line describes, and treat them as INDEPENDENT. A contrast trim/stitch belongs ONLY on the edges whose line actually names it — if the neckline and cuffs have a contrast whipstitch but the hem line says a plain band with no contrast stitching, the hem must be rendered plain, with the contrast stitch absent there. Never copy one edge's trim onto another edge, never omit a trim that IS named, and never replace a described ribbed band with a plain raw edge (or vice versa). Match the trim's stated colors and stitch style, and keep the band's stated width/proportion.`,
+          ].join('\n'),
+        ]
+      : []),
     ...(garmentAnalysis.constructionMap && category === 'bottom'
       ? [
           [

@@ -292,6 +292,16 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       const d = await res.json();
       if (!res.ok || !d.success) return;
 
+      // 분석이 실패(무료 등급 한도 초과 등)하면 구조·재질·디테일 없이 생성돼 품질이 무너진다.
+      // 조용히 넘어가면 원인을 못 찾으므로 명확히 알린다.
+      if (d.analysisFailed) {
+        setImportMsg({
+          kind: 'blocked',
+          text: 'Gemini 분석에 실패했습니다(무료 등급 하루 한도 초과 가능성) — 이 상태로 생성하면 재질·구조·디테일이 반영되지 않습니다. API 설정에서 키를 확인하거나 잠시 후 다시 시도해주세요.',
+        });
+        return;
+      }
+
       // 상세페이지에 적힌 한글 특징(머슬핏/골지/니트 소재 등)을 앞에 두고, 분석한 소재·핏을 덧붙인다.
       // 페이지 원문이 가장 정확한 근거이므로 우선한다.
       const notes = [productText?.trim(), d.material, d.fitType ? `${d.fitType} 핏` : '', d.length, d.details]
