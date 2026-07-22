@@ -5,6 +5,7 @@ import { ImageUploader } from './ImageUploader';
 import { FittingResultViewer, type HistoryItem } from './FittingResultViewer';
 import { pollGenerationStatuses } from '@/lib/poll-generations';
 import { downloadResultImage } from '@/lib/download-image';
+import { useCancelableRun, isCanceledError } from '@/lib/use-cancelable-run';
 
 interface BatchItem {
   generationId: string;
@@ -31,6 +32,11 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
   // 컷마다 자세를 따로 지정 — 특정 컷을 비워두면 그 컷만 기존처럼 프리셋 포즈 중 랜덤으로 뽑힘.
   // 최대 컷 수(4)만큼 고정 슬롯을 두고, 실제로는 variationCount개만 화면에 노출/전송한다.
   const [customPoseTexts, setCustomPoseTexts] = useState<string[]>(['', '', '', '']);
+  // (2026-07-22) 컷마다 "이 자세로 찍어줘" 참고 사진을 직접 올릴 수 있다 — 텍스트만으로는
+  // 각도/프레이밍이 매번 흔들려서, 사진 한 장이 훨씬 정확하게 포즈를 고정한다.
+  const [customPoseImages, setCustomPoseImages] = useState<Array<string | null>>([null, null, null, null]);
+
+  const { begin, trackIds, finish, cancel, isCanceling, cancelNote } = useCancelableRun();
 
   const [isRunning, setIsRunning] = useState(false);
   const [stageMsg, setStageMsg] = useState('');
@@ -96,6 +102,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
       return;
     }
 
+    const signal = begin();
     setIsRunning(true);
     setStageMsg(`${variationCount}개 포즈 준비 중`);
     setBatchImages([]);
@@ -113,6 +120,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
           openaiApiKey: openaiKey,
           draftMode,
           customPoseTexts: customPoseTexts.slice(0, variationCount).map((t) => t.trim()),
+          customPoseImagesBase64: customPoseImages.slice(0, variationCount).map((img) => img || ''),
           customBackgroundImageBase64: customBackgroundImage || undefined,
         }),
       });
@@ -131,6 +139,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
       }
 
       const jobs: Array<{ generationId: string; poseLabel: string; prompt: string }> = startData.jobs || [];
+      trackIds(jobs.map((j) => j.generationId));
       setBatchImages(jobs.map((j) => ({ generationId: j.generationId, poseLabel: j.poseLabel, status: 'pending' as const })));
       setStageMsg(`${jobs.length}개 포즈 렌더링 중 (최대 90초)`);
 
@@ -152,6 +161,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
             );
           }
         },
+        { signal },
       );
 
       const succeeded = finalItems.filter((i) => i.status === 'completed' && i.imageUrl);
@@ -174,8 +184,10 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
         ...prev,
       ]);
     } catch (err: any) {
-      alert(err.message || '오류가 발생했습니다.');
+      // 중단은 사용자가 의도한 동작이므로 에러 알럿을 띄우지 않는다.
+      if (!isCanceledError(err)) alert(err.message || '오류가 발생했습니다.');
     } finally {
+      finish();
       setIsRunning(false);
     }
   };
@@ -256,7 +268,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
         </div>
         <div className="space-y-3">
           {Array.from({ length: variationCount }, (_, i) => (
-            <div key={i} className="bg-white border border-gray-200 rounded-2xl p-5 space-y-2">
+            <div key={i} className="bg-white border border-gray-200 rounded-2xl p-5 space-y-3">
               <div className="text-[11px] font-semibold text-gray-500 tracking-tight">자세 지시 {i + 1}</div>
               <textarea
                 value={customPoseTexts[i] ?? ''}
@@ -268,6 +280,17 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
                 placeholder="예: 오른쪽을 바라보며 몸을 살짝 돌린 자세, 정면 응시 아님 (비워두면 랜덤 포즈)"
                 rows={2}
                 className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-3 text-[13px] text-gray-900 placeholder-gray-400 focus:outline-none focus:border-gray-900 resize-none leading-relaxed transition"
+              />
+              <ImageUploader
+                label={`자세 참고 사진 ${i + 1} (선택)`}
+                subLabel="이 사진의 자세·카메라 앵글만 참고합니다 — 인물·의상·배경은 무시됩니다"
+                image={customPoseImages[i] ?? null}
+                onImageChange={(img) => {
+                  const next = [...customPoseImages];
+                  next[i] = img;
+                  setCustomPoseImages(next);
+                }}
+                badgeText="자세"
               />
             </div>
           ))}
@@ -311,6 +334,18 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
             'AI 바리에이션 생성'
           )}
         </button>
+        {isRunning && (
+          <button
+            onClick={cancel}
+            disabled={isCanceling}
+            className="w-full py-3 rounded-xl border border-gray-200 hover:border-gray-400 text-[13px] font-medium text-gray-500 hover:text-gray-900 transition disabled:opacity-40"
+          >
+            {isCanceling ? '중단하는 중...' : '생성 중단'}
+          </button>
+        )}
+        {cancelNote && (
+          <p className="text-[11px] text-gray-500 leading-relaxed px-1 pt-1">{cancelNote}</p>
+        )}
       </section>
 
       {/* 결과 */}

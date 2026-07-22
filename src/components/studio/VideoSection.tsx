@@ -5,6 +5,7 @@ import { ImageUploader } from './ImageUploader';
 import { DETAIL_VIDEO_PRESETS } from '@/lib/detail-video-prompts';
 import { pollGenerationStatuses } from '@/lib/poll-generations';
 import { downloadResultImage } from '@/lib/download-image';
+import { useCancelableRun, isCanceledError } from '@/lib/use-cancelable-run';
 
 interface HistoryItem {
   id: string;
@@ -36,6 +37,8 @@ export function VideoSection({ geminiKey, onNeedKeys, incomingImage, onConsumeIn
   const [stageMsg, setStageMsg] = useState('');
   const [result, setResult] = useState<{ imageUrl: string; prompt: string } | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+
+  const { begin, trackIds, finish, cancel, isCanceling, cancelNote } = useCancelableRun();
 
   // 다른 화면에서 넘어온 이미지가 있으면 자동으로 입력창을 채운다
   useEffect(() => {
@@ -90,6 +93,7 @@ export function VideoSection({ geminiKey, onNeedKeys, incomingImage, onConsumeIn
       return;
     }
 
+    const signal = begin();
     setIsRunning(true);
     setStageMsg('영상 생성 준비 중');
     setResult(null);
@@ -120,13 +124,14 @@ export function VideoSection({ geminiKey, onNeedKeys, incomingImage, onConsumeIn
         throw new Error(startData.error || '영상 생성 시작에 실패했습니다.');
       }
 
+      trackIds([startData.generationId]);
       setStageMsg('영상 렌더링 중 (보통 1~2분)');
 
       const finalItems = await pollGenerationStatuses(
         [startData.generationId],
         () => {},
         // 영상은 이미지보다 오래 걸린다 — 라우트의 폴링 한도(240초)보다 넉넉하게
-        { intervalMs: 5000, timeoutMs: 300000 },
+        { intervalMs: 5000, timeoutMs: 300000, signal },
       );
 
       const done = finalItems[0];
@@ -151,8 +156,10 @@ export function VideoSection({ geminiKey, onNeedKeys, incomingImage, onConsumeIn
         ...prev,
       ]);
     } catch (err: any) {
-      alert(err.message || '오류가 발생했습니다.');
+      // 중단은 사용자가 의도한 동작이므로 에러 알럿을 띄우지 않는다.
+      if (!isCanceledError(err)) alert(err.message || '오류가 발생했습니다.');
     } finally {
+      finish();
       setIsRunning(false);
     }
   };
@@ -267,6 +274,18 @@ export function VideoSection({ geminiKey, onNeedKeys, incomingImage, onConsumeIn
             'AI 영상 생성'
           )}
         </button>
+        {isRunning && (
+          <button
+            onClick={cancel}
+            disabled={isCanceling}
+            className="w-full py-3 rounded-xl border border-gray-200 hover:border-gray-400 text-[13px] font-medium text-gray-500 hover:text-gray-900 transition disabled:opacity-40"
+          >
+            {isCanceling ? '중단하는 중...' : '생성 중단'}
+          </button>
+        )}
+        {cancelNote && (
+          <p className="text-[11px] text-gray-500 leading-relaxed px-1 pt-1">{cancelNote}</p>
+        )}
       </section>
 
       {/* 결과 */}

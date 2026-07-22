@@ -124,6 +124,51 @@ export async function markGenerationFailed(generationId: string, errorMessage: s
     .eq('id', generationId);
 }
 
+/**
+ * (2026-07-22) 생성 중단 — 사용자가 "중단"을 누르면 아직 시작 안 한 건까지 낭비하지 않도록
+ * 상태를 먼저 failed로 못박는다.
+ *
+ * status 컬럼에 check 제약(pending/completed/failed)이 걸려 있어 'canceled'를 새로 넣으려면
+ * DB 마이그레이션이 필요하다 — 중단은 결국 "결과물 없음"이라 failed로 충분해서, 스키마를
+ * 건드리는 대신 error_message로 중단임을 구분한다.
+ *
+ * 이미 completed된 건은 건드리지 않는다(돈 낸 결과물을 지울 이유가 없다).
+ */
+export const CANCELED_MESSAGE = '사용자가 중단했습니다.';
+
+export async function cancelGenerations(ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from('generations')
+    .update({ status: 'failed', error_message: CANCELED_MESSAGE })
+    .in('id', ids)
+    .eq('status', 'pending')
+    .select('id');
+  if (error) throw error;
+  return (data || []).length;
+}
+
+/**
+ * 백그라운드 작업이 각 건을 시작하기 전에 호출한다 — 중단된 건은 API를 아예 호출하지 않아
+ * 그만큼 비용이 절약된다. 조회 실패는 "중단 아님"으로 처리해서, 확인이 안 된다는 이유로
+ * 정상 생성을 막지 않는다.
+ */
+export async function isGenerationCanceled(generationId: string): Promise<boolean> {
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase
+      .from('generations')
+      .select('status, error_message')
+      .eq('id', generationId)
+      .single();
+    if (error || !data) return false;
+    return (data as any).status === 'failed' && (data as any).error_message === CANCELED_MESSAGE;
+  } catch {
+    return false;
+  }
+}
+
 export interface GenerationStatusItem {
   id: string;
   status: 'pending' | 'completed' | 'failed';

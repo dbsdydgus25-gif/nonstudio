@@ -315,6 +315,60 @@ export function pickRandomPoses(count: number): Array<{ pose: PoseVariation; pos
   return result;
 }
 
+/**
+ * (2026-07-22) 한글 핏 용어를 gpt-image-2가 실제로 반영하는 명시적 지시로 번역한다.
+ *
+ * 문제: "머슬핏, 팔이랑 목 부분 타이트함"이라고 분명히 적어도 헐렁한 레귤러핏이 나왔다.
+ * 원인은 두 가지였다 — (1) 사진에서 추정한 fitType("regular")이 지시문과 나란히 들어가
+ * 정면충돌했고, (2) 한글 핏 용어를 그대로 넘기면 모델이 "이 옷이 몸에 어떻게 붙어야 하는지"를
+ * 구체적인 그림으로 옮기지 못했다. 여기서는 (2)를 해결한다: 감지된 용어에 대해서만
+ * "어디가 어떻게 붙는지"를 한 줄씩 명시한다.
+ *
+ * 감지된 항목만 내보낸다 — 파일 상단 주석(2026-07-09)의 교훈대로, 안 해당되는 규칙까지
+ * 잔뜩 붙이면 오히려 모델의 주의가 분산된다.
+ */
+function buildFitEmphasisLines(productNotes: string): string[] {
+  const n = productNotes.toLowerCase();
+  const has = (...keys: string[]) => keys.some((k) => n.includes(k.toLowerCase()));
+
+  const tight = has('타이트', '꽉', '슬림', 'slim fit', 'tight', 'fitted', 'snug', '밀착');
+  const lines: string[] = [];
+
+  if (has('머슬핏', '머슬 핏', 'muscle fit', 'musclefit')) {
+    lines.push(
+      '- MUSCLE FIT (mandatory): the garment is cut close to the body through the chest, shoulders, and upper arms. The fabric follows the contour of the pecs, shoulders, and biceps with no slack — you can read the shape of the torso through it. It must NOT hang loose, billow, or drape away from the body anywhere.',
+    );
+  }
+  if (has('목') && tight) {
+    lines.push(
+      '- TIGHT NECKLINE (mandatory): the neckline sits high and hugs the base of the neck closely, like a snug crew neck. Do NOT render a wide, loose, stretched, or dropped neckline, and do NOT expose the collarbone or trapezius.',
+    );
+  }
+  if (has('팔', '소매', 'sleeve', 'arm') && tight) {
+    lines.push(
+      '- TIGHT SLEEVES (mandatory): the sleeves hug the upper arm and biceps closely, with the sleeve opening gripping the arm. Do NOT render wide, boxy, or loosely hanging sleeves.',
+    );
+  }
+  if (has('크롭', 'cropped', 'crop 기장')) {
+    lines.push(
+      '- CROPPED LENGTH (mandatory): the hem is visibly short — it ends at or just above the waistband rather than covering the hips. Do NOT render a standard or long hem.',
+    );
+  }
+  if (has('오버핏', '오버 핏', 'oversize', 'oversized', '루즈', 'loose fit', '박시', 'boxy', '와이드핏')) {
+    lines.push(
+      '- OVERSIZED FIT (mandatory): the garment is visibly larger than the body — dropped shoulder seams, generous room through the chest and sleeves, and fabric that drapes away from the torso.',
+    );
+  }
+  // 머슬핏/오버핏 같은 구체 용어 없이 "타이트"만 적힌 경우의 폴백
+  if (tight && lines.length === 0) {
+    lines.push(
+      '- TIGHT FIT (mandatory): the garment sits close to the body with no slack, following the body\'s contour rather than draping away from it.',
+    );
+  }
+
+  return lines;
+}
+
 // ─────────────────────────────────────────────────────────────────
 // AI 제품 피팅 (신규, 2026-07-09) — 착용 사진 없이 "제품 단독 이미지"만으로
 // 윤용현 모델(PERSONAL_BODY_SPEC + 아이덴티티 참고 사진)이 그 제품을 입은 화보를 생성한다.
@@ -477,9 +531,18 @@ export function buildProductFittingPrompt(
     })
     .filter((l): l is string => !!l);
 
+  // (2026-07-22) 예전엔 여기서 `${garmentAnalysis.fitType} fit`을 사용자 지시보다 먼저,
+  // 그것도 확정 사실처럼 적었다. 그 값은 사진에서 추정한 것이라 상세페이지 원문과 자주
+  // 충돌했고("머슬핏 타이트"인데 추정은 "regular"), 앞에 나온 쪽이 이겨서 헐렁하게 나왔다.
+  // 사용자/상세페이지 지시가 있으면 그쪽이 핏의 유일한 기준이고, 추정값은 아예 언급하지 않는다.
+  const hasFitSpec = !!productNotes?.trim();
+  const fitEmphasisLines = hasFitSpec ? buildFitEmphasisLines(productNotes!.trim()) : [];
+
   const priorityChecklistBlock = [
     '=== OUTFIT & POSE — HIGHEST-PRIORITY CHECKLIST (read and obey this FIRST; these exact instructions are the ones most often missed, so they come before everything else) ===',
-    `SOURCED PRODUCT (this is the ${CATEGORY_PRESERVE_LABEL[category]} the model actually wears; full spec in PRODUCT FIDELITY below): ${garmentAnalysis.color}, ${garmentAnalysis.fitType} fit.${productNotes?.trim() ? ` KEY FIT — OBEY EXACTLY: ${productNotes.trim()} (e.g. a "tight/꽉 맞음" neckline hugs the neck high and close — do NOT render a loose, wide, or dropped neckline that exposes the collarbone/trapezius).` : ''}${colorOverrideNote?.trim() ? ` MANDATORY SOLD COLORWAY OVERRIDE: ${colorOverrideNote.trim()} — this is a deliberate choice of a real colorway this product is sold in, not a guess; render the SAME garment (identical construction, texture, fit) recolored to this colorway instead of the reference photo's color. This is the ONE exception to the color rule below.` : ''}`,
+    `SOURCED PRODUCT (this is the ${CATEGORY_PRESERVE_LABEL[category]} the model actually wears; full spec in PRODUCT FIDELITY below): ${garmentAnalysis.color}${hasFitSpec ? '' : `, ${garmentAnalysis.fitType} fit`}.${hasFitSpec ? ` KEY FIT — THIS IS THE SELLER'S OWN SPEC AND IS THE ONLY AUTHORITY ON HOW THE GARMENT FITS. Obey it exactly, and ignore any conflicting fit impression you form from the photo (shop photos are often shot loose on a different body): ${productNotes!.trim()}` : ''}${colorOverrideNote?.trim() ? ` MANDATORY SOLD COLORWAY OVERRIDE: ${colorOverrideNote.trim()} — this is a deliberate choice of a real colorway this product is sold in, not a guess; render the SAME garment (identical construction, texture, fit) recolored to this colorway instead of the reference photo's color. This is the ONE exception to the color rule below.` : ''}`,
+    // 한글 핏 용어를 "몸에 어떻게 붙는지"로 풀어서 못박는다 — 해당되는 항목만 나온다.
+    ...fitEmphasisLines,
     ...(checklistStyleLines.length
       ? [
           'STYLE THE REMAINING ITEMS EXACTLY AS WRITTEN — each item\'s stated COLOR and garment TYPE are mandatory. They are usually DIFFERENT from the product; do NOT recolor them to match the product and do NOT collapse the outfit into a black/grey/monochrome look:',
@@ -508,7 +571,9 @@ export function buildProductFittingPrompt(
     // 텍스트로만 얹는 보조. 재질 참고 이미지는 아예 생성기에 안 들어오므로(=텍스트만), 여기서
     // "색·패턴·디자인·기장은 오직 제품 이미지에서만" 을 최우선으로 못박아 혼용을 원천 차단한다.
     `- PRIMARY VISUAL SOURCE (highest priority, overrides every other reference): Image ${productImageNumber}${extraProductImageNumbers.length ? ` (and the other-angle product photo${extraProductImageNumbers.length > 1 ? 's' : ''} ${extraProductImageNumbers.join(', ')})` : ''} is the ONE AND ONLY source for the garment's COLOR, PATTERN/PRINT, overall DESIGN, LENGTH, and SILHOUETTE${colorOverrideNote?.trim() ? ' (EXCEPT color, if a MANDATORY SOLD COLORWAY OVERRIDE is specified above — that wins for color only; pattern/design/length/silhouette still come from this photo)' : ''}. These four things come exclusively from the product photo — no textual note and no other reference may change the color, invent a pattern, or alter the design/length. If the product photo shows a plain solid fabric, the output MUST be plain and solid.`,
-    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}${productNotesLine}${extraAngleLine}${materialLine}${poseAnchorLine}`,
+    // (2026-07-22) 핏은 판매자 지시(KEY FIT)가 있으면 여기서 추정값을 아예 빼서 두 번째 충돌
+    // 지점을 없앤다 — 예전엔 이 줄의 "Fit: regular"가 상단의 "머슬핏 타이트"를 되돌리고 있었다.
+    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; ${hasFitSpec ? 'Fit: see KEY FIT in the checklist above (seller spec — authoritative)' : `Fit: ${garmentAnalysis.fitType}`}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}${productNotesLine}${extraAngleLine}${materialLine}${poseAnchorLine}`,
     // 재질/원단은 "만졌을 때의 표면 느낌"으로만 반영 — 그 자체가 색이나 무늬를 바꾸면 안 된다.
     `- MATERIAL/TEXTURE IS SURFACE-FEEL ONLY: the "Material / Surface texture / Light reaction" fields above describe how the fabric FEELS and reflects light (weave/knit hand, thickness, matte/sheen). Apply them ONLY as the surface finish on top of the product's actual look — they must NOT change the color, must NOT become a visible repeating pattern or print, and must NOT alter the design. A weave/knit structure is fabric texture, NOT a decorative motif — never render it as a printed pattern across the garment.`,
     `- CRITICAL COLOR RULE: ${

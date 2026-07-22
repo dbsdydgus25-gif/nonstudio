@@ -13,7 +13,12 @@ import { after } from 'next/server';
 import OpenAI, { toFile } from 'openai';
 import { analyzeGarment, generateStylingSuggestion, verifyGarmentRender, type StyleHintsBySlot } from '@/lib/garment-agent';
 import { buildProductFittingPrompt, buildDefectCorrectionBlock, DEFAULT_STUDIO_BACKGROUND, pickRandomPoses, type SourcedCategory } from '@/lib/fitting-prompts';
-import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
+import {
+  createPendingGeneration,
+  markGenerationCompleted,
+  markGenerationFailed,
+  isGenerationCanceled,
+} from '@/lib/generation-store';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { getModelProfile, getModelIdentityImage, buildBodySpecFromProfile } from '@/lib/model-profile';
 import { getSessionUserId } from '@/lib/auth';
@@ -423,6 +428,9 @@ export async function POST(req: Request) {
           ): Promise<{ buffer: Buffer; mimeType: string } | null> => {
             const { generationId, imageBase64, colorVariant, poseInstruction } = unit;
             try {
+              // (2026-07-22) 사용자가 중단했으면 이 컷은 생성하지 않는다 — 색상×포즈로 건수가
+              // 많은 파이프라인이라 여기서 걸러지는 양이 곧 절약되는 비용이다.
+              if (await isGenerationCanceled(generationId)) return null;
               // (2026-07-17) 기준 사진(poseAnchorImage)이 있으면 그 사진 자체가 이미 검증된
               // "완성본"이라 재질/각도/스타일 참고 사진들은 중복 정보다 — 오히려 한 번에 너무
               // 많은 이미지(제품4+재질4+스타일참고+기준+배경 10장 이상)를 넣으면 gpt-image-2가

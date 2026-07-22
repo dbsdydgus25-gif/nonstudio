@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { FittingResultViewer, type HistoryItem } from './FittingResultViewer';
 import type { SourcedCategory } from '@/lib/fitting-prompts';
 import { pollGenerationStatuses } from '@/lib/poll-generations';
+import { useCancelableRun, isCanceledError } from '@/lib/use-cancelable-run';
 import { downloadResultImage } from '@/lib/download-image';
 import { fileToCompressedDataUrl } from '@/lib/client-image';
 
@@ -96,6 +97,8 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   const [isBatchDownloading, setIsBatchDownloading] = useState(false);
 
   const [currentResult, setCurrentResult] = useState<{ imageUrl: string; prompt: string; revisedPrompt?: string; generationId?: string | null } | null>(null);
+
+  const { begin, trackIds, finish, cancel, isCanceling, cancelNote } = useCancelableRun();
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
   useEffect(() => {
@@ -304,9 +307,15 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         return;
       }
 
-      // 상세페이지에 적힌 한글 특징(머슬핏/골지/니트 소재 등)을 앞에 두고, 분석한 소재·핏을 덧붙인다.
+      // 상세페이지에 적힌 한글 특징(머슬핏/골지/니트 소재 등)을 앞에 두고, 분석한 소재·기장·디테일을 덧붙인다.
       // 페이지 원문이 가장 정확한 근거이므로 우선한다.
-      const notes = [productText?.trim(), d.material, d.fitType ? `${d.fitType} 핏` : '', d.length, d.details]
+      //
+      // (2026-07-22) d.fitType은 일부러 넣지 않는다. 예전엔 `${d.fitType} 핏`을 같이 붙였는데,
+      // 사진만 보고 추정한 값이라 상세페이지 원문과 정면충돌했다 — 실제로 "머슬핏, 팔이랑 목 부분
+      // 타이트함"이라고 적힌 제품에 "regular 핏"이 나란히 붙어서, 생성 결과가 헐렁하게 나왔다.
+      // 핏 값은 어차피 garmentAnalysis.fitType으로 생성기에 따로 전달되므로 여기서는 중복이고,
+      // 사용자가 편집하는 지시문 안에 모순되는 추정치를 섞는 건 손해만 있다.
+      const notes = [productText?.trim(), d.material, d.length, d.details]
         .filter((v?: string) => typeof v === 'string' && v.trim())
         .join(' / ')
         .slice(0, 1500);
@@ -368,6 +377,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       return;
     }
 
+    const signal = begin();
     setIsRunning(true);
     setStageMsg(extractColors ? '색상 옵션 추출 및 렌더링 중 (색상별 병렬 생성, 최대 2분)' : '제품 분석 및 렌더링 중 (최대 2분)');
     setCurrentResult(null);
@@ -465,6 +475,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         label: j.label,
         status: 'pending' as const,
       }));
+      trackIds(jobs.map((j) => j.generationId));
       setColorJobs(jobs);
 
       const finalItems = await pollGenerationStatuses(
@@ -483,6 +494,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             setCurrentResult((prev) => prev ?? { imageUrl: firstDone.imageUrl!, prompt: firstDone.prompt || '', generationId: firstDone.id });
           }
         },
+        { signal },
       );
 
       const succeeded = finalItems.filter((i) => i.status === 'completed' && i.imageUrl);
@@ -504,8 +516,10 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         ...prev,
       ]);
     } catch (err: any) {
-      alert(err.message || '오류가 발생했습니다.');
+      // 중단은 사용자가 의도한 동작이므로 에러 알럿을 띄우지 않는다.
+      if (!isCanceledError(err)) alert(err.message || '오류가 발생했습니다.');
     } finally {
+      finish();
       setIsRunning(false);
     }
   };
@@ -1136,6 +1150,18 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             `AI 제품 피팅 생성 — 전신 ${poseCount}장${productImages.length > 1 ? ` (참고 사진 ${productImages.length}장 종합)` : ''}`
           )}
         </button>
+        {isRunning && (
+          <button
+            onClick={cancel}
+            disabled={isCanceling}
+            className="w-full py-3 rounded-xl border border-gray-200 hover:border-gray-400 text-[13px] font-medium text-gray-500 hover:text-gray-900 transition disabled:opacity-40"
+          >
+            {isCanceling ? '중단하는 중...' : '생성 중단'}
+          </button>
+        )}
+        {cancelNote && (
+          <p className="text-[11px] text-gray-500 leading-relaxed px-1 pt-1">{cancelNote}</p>
+        )}
       </section>
 
       {/* 결과 */}

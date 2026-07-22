@@ -17,7 +17,12 @@ import OpenAI, { toFile } from 'openai';
 import { FULLBODY_POSES, pickRandomPoses } from '@/lib/fitting-prompts';
 import { getDefaultBackgroundReferenceImage } from '@/lib/background-reference';
 import { getPoseReferenceImage } from '@/lib/pose-reference';
-import { createPendingGeneration, markGenerationCompleted, markGenerationFailed } from '@/lib/generation-store';
+import {
+  createPendingGeneration,
+  markGenerationCompleted,
+  markGenerationFailed,
+  isGenerationCanceled,
+} from '@/lib/generation-store';
 import { downscaleImage, withImageRetry, runWithConcurrency } from '@/lib/image-utils';
 import { resultImageToBuffer } from '@/lib/image-source';
 
@@ -186,7 +191,17 @@ async function runSingleVariation(
 
 export async function POST(req: Request) {
   try {
-    const { sourceImageBase64, variationCount, openaiApiKey, draftMode, customPoseTexts, customBackgroundImageBase64 } = await req.json();
+    const {
+      sourceImageBase64,
+      variationCount,
+      openaiApiKey,
+      draftMode,
+      customPoseTexts,
+      // (2026-07-22) 컷별 "이 자세로" 참고 사진 — 텍스트 지시만으로는 각도/프레이밍이 흔들려서,
+      // 사진이 있으면 프리셋 참고 사진 대신 이걸 쓴다.
+      customPoseImagesBase64,
+      customBackgroundImageBase64,
+    } = await req.json();
 
     if (!sourceImageBase64) {
       return NextResponse.json({ success: false, error: 'AI 피팅 결과 사진 또는 직접 업로드한 사진이 필요합니다.' }, { status: 400 });
@@ -202,30 +217,44 @@ export async function POST(req: Request) {
     const customTexts: string[] = Array.isArray(customPoseTexts)
       ? customPoseTexts.slice(0, count).map((t: unknown) => (typeof t === 'string' ? t.trim() : ''))
       : [];
+    const customPoseImages: string[] = Array.isArray(customPoseImagesBase64)
+      ? customPoseImagesBase64.slice(0, count).map((v: unknown) => (typeof v === 'string' ? v.trim() : ''))
+      : [];
 
-    // 커스텀 자세가 없는 슬롯 개수만큼만 프리셋 풀에서 무작위로 뽑고, 순서대로 채워 넣는다.
-    const emptySlotCount = Array.from({ length: count }, (_, i) => customTexts[i] || '').filter((t) => !t).length;
+    // (2026-07-22) 자세 참고 사진만 올리고 텍스트는 비워둘 수 있어야 한다 — 사진이 있는데도
+    // 프리셋 랜덤 포즈를 뽑아버리면 사진과 정면으로 충돌한다. 그래서 "텍스트 또는 사진"이
+    // 있으면 그 슬롯은 커스텀으로 본다.
+    const isCustomSlot = (i: number) => !!customTexts[i] || !!customPoseImages[i];
+
+    // 커스텀이 아닌 슬롯 개수만큼만 프리셋 풀에서 무작위로 뽑고, 순서대로 채워 넣는다.
+    const emptySlotCount = Array.from({ length: count }, (_, i) => i).filter((i) => !isCustomSlot(i)).length;
     const randomPosesForEmptySlots = pickRandomPoses(emptySlotCount);
     let randomCursor = 0;
-    const poses: Array<{ pose: (typeof FULLBODY_POSES)[number]; poseNumber: number | null }> = Array.from(
-      { length: count },
-      (_, i) => {
-        const custom = customTexts[i];
-        if (custom) {
+    const poses: Array<{ pose: (typeof FULLBODY_POSES)[number]; poseNumber: number | null; slotIndex: number }> =
+      Array.from({ length: count }, (_, i) => {
+        if (isCustomSlot(i)) {
+          const text = customTexts[i];
           return {
-            pose: { id: 'custom', label: count > 1 ? `커스텀 자세 ${i + 1}` : '커스텀 자세', poseInstruction: custom },
+            pose: {
+              id: 'custom',
+              label: count > 1 ? `커스텀 자세 ${i + 1}` : '커스텀 자세',
+              // 사진만 올린 경우엔 참고 사진 자체가 지시가 된다.
+              poseInstruction:
+                text ||
+                'Match the body pose, camera angle, and framing shown in the pose reference image exactly.',
+            },
             poseNumber: null,
+            slotIndex: i,
           };
         }
         const picked = randomPosesForEmptySlots[randomCursor];
         randomCursor += 1;
-        return picked;
-      },
-    );
+        return { ...picked, slotIndex: i };
+      });
 
     // 포즈마다 "처리 중" 행을 먼저 만들어 id를 즉시 반환한다 — 실제 생성은 아래 after()에서 진행.
     const jobs = await Promise.all(
-      poses.map(async ({ pose, poseNumber }) => ({
+      poses.map(async ({ pose, poseNumber, slotIndex }) => ({
         generationId: await createPendingGeneration({
           pipeline: 'restyle',
           modeOrCategory: 'variation',
@@ -233,6 +262,7 @@ export async function POST(req: Request) {
           prompt: pose.poseInstruction,
         }),
         pose,
+        slotIndex,
         poseNumber,
       })),
     );
@@ -254,11 +284,19 @@ export async function POST(req: Request) {
         : getDefaultBackgroundReferenceImage();
 
       // 전체 병렬 대신 3개씩 배치 — 이미지 API 분당 한도(429)로 일부 포즈만 성공하는 것 방지
-      await runWithConcurrency(jobs, 3, async ({ generationId, pose, poseNumber }) => {
+      await runWithConcurrency(jobs, 3, async ({ generationId, pose, poseNumber, slotIndex }) => {
           try {
-            // 사용자가 public/reference_poses/pose_{N}.png 에 포즈 참고 사진을 넣어두면 자동으로 같이 참고한다.
-            // 커스텀 자세(poseNumber=null)는 프리셋 번호가 없으므로 건너뛴다.
-            const poseReferenceImage = poseNumber ? getPoseReferenceImage(poseNumber) : null;
+            // (2026-07-22) 사용자가 중단했으면 남은 컷은 아예 생성하지 않는다 — 4컷을 3개씩
+            // 나눠 돌기 때문에, 뒤쪽 배치는 여기서 걸러져 그만큼 비용이 절약된다.
+            if (await isGenerationCanceled(generationId)) return;
+            // 자세 참고 사진 우선순위: 사용자가 이 컷에 직접 올린 사진 > 프리셋 번호에 대응하는
+            // public/reference_poses/pose_{N}.png. 커스텀 자세(poseNumber=null)엔 프리셋이 없다.
+            const uploadedPoseImage = customPoseImages[slotIndex];
+            const poseReferenceImage = uploadedPoseImage
+              ? await resultImageToBuffer(uploadedPoseImage)
+              : poseNumber
+                ? getPoseReferenceImage(poseNumber)
+                : null;
             const { imageUrl } = await runSingleVariation(openai, sourceBuf, sourceMime, pose.poseInstruction, backgroundReferenceImage, poseReferenceImage, draftMode ? 'low' : 'medium', pose.id === 'custom', isCustomLocation);
             const { buffer: outBuf, mimeType: outMime } = await resultImageToBuffer(imageUrl);
             await markGenerationCompleted(generationId, { outputBuffer: outBuf, outputMimeType: outMime, prompt: pose.poseInstruction });

@@ -5,6 +5,7 @@ import { ImageUploader } from './ImageUploader';
 import { FittingResultViewer, type HistoryItem } from './FittingResultViewer';
 import type { SourcedCategory } from '@/lib/fitting-prompts';
 import { pollGenerationStatuses } from '@/lib/poll-generations';
+import { useCancelableRun, isCanceledError } from '@/lib/use-cancelable-run';
 
 interface RestyleSectionProps {
   geminiKey: string;
@@ -44,6 +45,8 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
 
   const [currentResult, setCurrentResult] = useState<{ imageUrl: string; prompt: string; revisedPrompt?: string; generationId?: string | null } | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+
+  const { begin, trackIds, finish, cancel, isCanceling, cancelNote } = useCancelableRun();
 
   // 페이지를 나갔다 들어와도 이전 결과를 볼 수 있도록 Supabase에서 히스토리를 불러온다
   useEffect(() => {
@@ -88,6 +91,7 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
       return;
     }
 
+    const signal = begin();
     setIsRunning(true);
     setStageMsg('사진 분석 중 (의류 · 포즈)');
     setCurrentResult(null);
@@ -133,7 +137,8 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
 
       setStageMsg('모델 렌더링 중 (최대 90초)');
 
-      const [finalItem] = await pollGenerationStatuses([startData.generationId], () => {});
+      trackIds([startData.generationId]);
+      const [finalItem] = await pollGenerationStatuses([startData.generationId], () => {}, { signal });
 
       if (finalItem.status === 'failed') {
         throw new Error(finalItem.errorMessage || 'AI 피팅 처리에 실패했습니다.');
@@ -152,8 +157,10 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
         ]);
       }
     } catch (err: any) {
-      alert(err.message || '오류가 발생했습니다.');
+      // 중단은 사용자가 의도한 동작이므로 에러 알럿을 띄우지 않는다.
+      if (!isCanceledError(err)) alert(err.message || '오류가 발생했습니다.');
     } finally {
+      finish();
       setIsRunning(false);
     }
   };
@@ -281,6 +288,18 @@ export function RestyleSection({ geminiKey, openaiKey, onNeedKeys, onSendToVaria
             'AI 피팅 생성 — 전신 1장'
           )}
         </button>
+        {isRunning && (
+          <button
+            onClick={cancel}
+            disabled={isCanceling}
+            className="w-full py-3 rounded-xl border border-gray-200 hover:border-gray-400 text-[13px] font-medium text-gray-500 hover:text-gray-900 transition disabled:opacity-40"
+          >
+            {isCanceling ? '중단하는 중...' : '생성 중단'}
+          </button>
+        )}
+        {cancelNote && (
+          <p className="text-[11px] text-gray-500 leading-relaxed px-1 pt-1">{cancelNote}</p>
+        )}
       </section>
 
       {/* 결과 — history.length도 조건에 포함해야 새로 생성 안 해도 이전 결과를 바로 볼 수 있음 */}
