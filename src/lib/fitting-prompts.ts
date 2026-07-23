@@ -408,6 +408,21 @@ function buildTextureEmphasisLine(productNotes: string): string {
   return '';
 }
 
+// (2026-07-23) gpt-image-2는 신발 스타일에 크루삭스를 습관적으로 곁들이는 경향이 강한데,
+// 쪼리/플립플랍(엄지발가락 사이에 끈이 지나가는 형태)은 구조상 양말과 physically 양립 불가능함
+// — "베이지 계열 쪼리"라고 명확히 지시해도 흰 양말이 나오는 신고가 실측 확인됨. 사용자가 직접
+// 양말을 요청한 게 아니라면, 쪼리/플립플랍류가 감지됐을 때 양말을 명시적으로 금지한다.
+function buildFootwearEmphasisLine(shoesText: string): string {
+  const n = shoesText.toLowerCase();
+  const has = (...keys: string[]) => keys.some((k) => n.includes(k.toLowerCase()));
+  const isThongSandal = has('쪼리', '조리', '플립플랍', '플립플롭', 'flip-flop', 'flip flop', 'thong sandal');
+  const requestsSocks = has('양말', '삭스', 'sock');
+  if (isThongSandal && !requestsSocks) {
+    return 'KEY FOOTWEAR RULE — this is a THONG-STYLE SANDAL (a strap passes between the big toe and second toe): bare feet only, NO socks. Socks are physically impossible to wear with a toe-strap sandal (there is nowhere for the strap to go) — do not default to adding crew socks out of habit.';
+  }
+  return '';
+}
+
 // ─────────────────────────────────────────────────────────────────
 // AI 제품 피팅 (신규, 2026-07-09) — 착용 사진 없이 "제품 단독 이미지"만으로
 // 윤용현 모델(PERSONAL_BODY_SPEC + 아이덴티티 참고 사진)이 그 제품을 입은 화보를 생성한다.
@@ -626,6 +641,14 @@ export function buildProductFittingPrompt(
   const hasHardwareNote = hasFitSpec && hasHardwareSpec(productNotes!.trim());
   const textureEmphasisLine = hasFitSpec ? buildTextureEmphasisLine(productNotes!.trim()) : '';
 
+  // 신발 슬롯 지시(쪼리/플립플랍 등)에서 양말 병용 불가 여부를 감지 — 소싱 카테고리가 신발이면
+  // "신발" 자체가 제품 스펙(garmentAnalysis)에서 오므로 이 스타일링 슬롯 검사는 대상이 아니다.
+  const shoesStyleText = styledSlotOrder.includes('shoes')
+    ? userSlotMandates?.shoes?.trim() ||
+      (typeof stylingSuggestion.shoes === 'string' ? stylingSuggestion.shoes.trim() : '')
+    : '';
+  const footwearEmphasisLine = shoesStyleText ? buildFootwearEmphasisLine(shoesStyleText) : '';
+
   const priorityChecklistBlock = [
     '=== OUTFIT & POSE — HIGHEST-PRIORITY CHECKLIST (read and obey this FIRST; these exact instructions are the ones most often missed, so they come before everything else) ===',
     `SOURCED PRODUCT (this is the ${CATEGORY_PRESERVE_LABEL[category]} the model actually wears; full spec in PRODUCT FIDELITY below): ${garmentAnalysis.color}${hasFitSpec ? '' : `, ${garmentAnalysis.fitType} fit`}.${hasFitSpec ? ` KEY FIT — THIS IS THE SELLER'S OWN SPEC AND IS THE ONLY AUTHORITY ON HOW THE GARMENT FITS. Obey it exactly, and ignore any conflicting fit impression you form from the photo (shop photos are often shot loose on a different body): ${productNotes!.trim()}` : ''}${colorOverrideNote?.trim() ? ` MANDATORY SOLD COLORWAY OVERRIDE: ${colorOverrideNote.trim()} — this is a deliberate choice of a real colorway this product is sold in, not a guess; render the SAME garment (identical construction, texture, fit) recolored to this colorway instead of the reference photo's color. This is the ONE exception to the color rule below.` : ''}`,
@@ -638,6 +661,7 @@ export function buildProductFittingPrompt(
           'STYLE THE REMAINING ITEMS EXACTLY AS WRITTEN — each item\'s stated COLOR and garment TYPE are mandatory. They are usually DIFFERENT from the product; do NOT recolor them to match the product and do NOT collapse the outfit into a black/grey/monochrome look:',
           ...checklistStyleLines,
           'COLOR & TYPE ARE NON-NEGOTIABLE: read each item\'s exact words and match them literally — 베이지(beige) sandals are BEIGE not black; 갈색(brown) bag is BROWN not black; 워싱 와이드 데님(washed wide denim) is blue washed wide-leg denim, NOT black slacks and NOT a side-stripe trouser. Verify every styled item\'s color and type against the words above before finalizing.',
+          ...(footwearEmphasisLine ? [footwearEmphasisLine] : []),
         ]
       : []),
     `POSE (obey exactly): ${userAdditions.trim() || 'clean, confident commercial standing pose, facing camera'}`,
@@ -682,7 +706,7 @@ export function buildProductFittingPrompt(
     hasHardwareNote
       ? `- CRITICAL BUTTON/HARDWARE COUNT RULE: the seller has specified exact hardware details in the KEY FIT spec above — that spec is the ONLY authority on the count, type, and color of buttons/snaps/zippers/other hardware, and wins over anything the photo seems to show. Use the reference photo${materialImageNumbers.length ? ` and the close-up reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')})` : ''} only to confirm placement and spacing style, not to override the stated count/type/color. Every button must sit directly on the actual fabric placket opening with a real, visible buttonhole/gap beneath it — never place a button on a closed, seamless section of the knit/fabric where there is no opening, and never render two buttons stacked or duplicated at the same spot. The button placket must look structurally coherent, like a real garment construction photo.`
       : `- CRITICAL BUTTON/HARDWARE COUNT RULE: before finalizing, actually count the buttons, snaps, zippers, or other hardware visible in ${materialImageNumbers.length ? `the close-up material reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')}) — this is the clearest, most zoomed-in view and is the authoritative source for the exact count and spacing` : `Image ${productImageNumber}`}. The output must show that exact same count in the exact same positions — neither more nor fewer. This is a common failure mode: do not casually add an extra button or omit one out of habit. Every button must sit directly on the actual fabric placket opening with a real, visible buttonhole/gap beneath it — never place a button on a closed, seamless section of the knit/fabric where there is no opening, and never render two buttons stacked or duplicated at the same spot. The button placket must look structurally coherent, like a real garment construction photo.`,
-    `- CRITICAL SEAM/POCKET/PATCH RULE: the "Details" spec above lists the exact seam/panel lines, pocket type+location, and logo/patch placement found by directly inspecting the real product photos. Treat this list as a checklist — reproduce each item at its stated location, in the stated quantity, and invent NOTHING beyond what is listed (no extra pocket, no extra patch, no seam line that isn't described). A single patch mentioned once must appear exactly once, at the location described — never mirrored onto both sides or duplicated. This is a common failure mode when the model isn't given a clear reference photo of the construction, so double-check the reference image(s) directly rather than defaulting to a generic version of this garment type.`,
+    `- CRITICAL SEAM/POCKET/PATCH RULE: the "Details" spec above lists the exact seam/panel lines, pocket type+location, and logo/patch placement AND APPEARANCE found by directly inspecting the real product photos. Treat this list as a checklist — reproduce each item at its stated location, in the stated quantity, and invent NOTHING beyond what is listed (no extra pocket, no extra patch, no seam line that isn't described). A single patch mentioned once must appear exactly once, at the location described — never mirrored onto both sides or duplicated. CRITICAL — the patch/logo's own COLOR and design must match the spec exactly (e.g. if it says "navy woven patch with white text," render navy with white text, NOT a different color, NOT a different brand mark, NOT blank/generic tag) — a correctly-placed patch in the wrong color or a made-up logo design is just as much a failure as a missing one. This is a common failure mode when the model isn't given a clear reference photo of the construction, so double-check the reference image(s) directly rather than defaulting to a generic version of this garment type.`,
     // (2026-07-21) 상의 전용 구조 지도 — 목/소매/밑단. 이 세 부위는 마감(골지 밴드/일반 시접)과
     // 대조 트림 유무가 서로 달라서 가장 자주 틀린다(실제 사고: 목·소매엔 흑백 휘프스티치, 밑단은
     // 대조 스티치 없는 골지 밴드인데 뭉개짐). 하의용 다리/포켓 행은 상의에 무의미하므로 빼고
@@ -714,7 +738,7 @@ export function buildProductFittingPrompt(
             `  BACK pockets: ${garmentAnalysis.constructionMap.backPockets}`,
             `  Side seams: ${garmentAnalysis.constructionMap.sideSeams}`,
             `  ASYMMETRY CHECKLIST (one-side-only details — the single most commonly failed part of this task): ${garmentAnalysis.constructionMap.asymmetryChecklist}`,
-            `  RENDERING RULE for this map: decide the pose's camera-facing side FIRST (front-facing pose → render ONLY the FRONT waistband/left-leg/right-leg lines above; back-facing pose → render ONLY the BACK waistband/left-leg/right-leg/pockets lines above — never mix rows from both). A feature listed under "wearer-LEFT" must end up on the wearer's actual left leg and a feature under "wearer-RIGHT" on the wearer's actual right leg — these are two DIFFERENT features on two DIFFERENT legs, never merge them onto one leg and never put both on the same side. Remember the mirror rule when placing on the image: in a front-facing shot, the wearer's LEFT leg appears on the RIGHT side of the image; in a back-facing shot, the wearer's left leg appears on the left side of the image. A row that says "none" must be rendered with that zone plain/empty, and a row that says "not visible" must be rendered as the plainest reasonable continuation with no invented decoration.`,
+            `  RENDERING RULE for this map: decide the pose's camera-facing side FIRST (front-facing pose → render ONLY the FRONT waistband/left-leg/right-leg lines above; back-facing pose → render ONLY the BACK waistband/left-leg/right-leg/pockets lines above — never mix rows from both). For a turned/3-quarter/profile pose where BOTH a sliver of front and a sliver of back are simultaneously in frame (e.g. a side-back angle), render EACH visible sliver according to ITS OWN matching line — the small strip of front waistband still follows the FRONT waistband line (e.g. flat, no elastic, belt loops) even while the larger back portion in the same shot follows the BACK waistband line (e.g. elastic gathered) — do NOT smooth the whole waistband into one uniform treatment just because most of the frame shows one side; the front-to-back transition at the side seam is where the construction visibly changes. A feature listed under "wearer-LEFT" must end up on the wearer's actual left leg and a feature under "wearer-RIGHT" on the wearer's actual right leg — these are two DIFFERENT features on two DIFFERENT legs, never merge them onto one leg and never put both on the same side. Remember the mirror rule when placing on the image: in a front-facing shot, the wearer's LEFT leg appears on the RIGHT side of the image; in a back-facing shot, the wearer's left leg appears on the left side of the image. A row that says "none" must be rendered with that zone plain/empty, and a row that says "not visible" must be rendered as the plainest reasonable continuation with no invented decoration.`,
             `  ASYMMETRY RENDERING RULE: every item in the ASYMMETRY CHECKLIST exists on EXACTLY ONE leg/side of the garment. Rendering it on both legs is a FAILED output. For each checklist item: put it on the stated wearer's side, then actively verify the OPPOSITE leg is plain, with no copy, echo, or mirrored version of that detail. Symmetric pairs (e.g. "two back pockets, one per side") are listed outside the checklist and are the ONLY details allowed to appear on both sides.`,
           ].join('\n'),
         ]
