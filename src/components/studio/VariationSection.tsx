@@ -286,7 +286,7 @@ export function VariationSection({ openaiKey, onNeedKeys, incomingImage, onConsu
           <div>
             <div className="text-[13px] font-semibold text-gray-900 tracking-tight">프레이밍</div>
             <div className="text-[11px] text-gray-400 mt-0.5">
-              클로즈업은 위 사진의 옷 부위를 확대한 디테일컷 — 원단 짜임 · 스티치가 선명하게 나옵니다 (고화질로 생성)
+              클로즈업은 위 사진의 옷 부위를 확대한 디테일컷 — 원단 짜임 · 스티치가 선명하게 나옵니다
             </div>
           </div>
           <div className="flex items-center gap-2">

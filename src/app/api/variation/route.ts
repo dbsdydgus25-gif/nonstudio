@@ -308,10 +308,11 @@ export async function POST(req: Request) {
     }
 
     const resolvedFraming: 'full' | 'close' = framing === 'close' ? 'close' : 'full';
-    // 클로즈업은 원단 짜임까지 보이는 게 목적이라 해상도가 곧 존재 이유 — low로 뽑으면 뭉개져서
-    // 돈만 버린다. 초안 모드를 켰더라도 low 대신 medium까지만 낮춘다. (AI 제품 피팅과 동일 정책)
+    // 클로즈업은 뭉개지면 안 되므로 low로는 안 내려가되(초안 모드여도 medium), high로는 올리지
+    // 않는다 — 타이트 크롭 자체가 원단 픽셀을 크게 늘려 medium으로도 질감이 살고, high는 시간만
+    // 크게 늘린다("너무 오래 걸린다" 신고 반영). AI 제품 피팅과 동일 정책.
     const resolvedQuality: 'low' | 'medium' | 'high' =
-      resolvedFraming === 'close' ? (draftMode ? 'medium' : 'high') : draftMode ? 'low' : 'medium';
+      resolvedFraming === 'close' ? 'medium' : draftMode ? 'low' : 'medium';
 
     const count = Math.min(4, Math.max(1, Number(variationCount) || 4));
     // (2026-07-15) 컷마다 자세를 따로 지정할 수 있도록 배열로 받는다 — 인덱스가 비어있으면

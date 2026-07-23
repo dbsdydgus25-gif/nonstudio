@@ -216,11 +216,13 @@ export async function POST(req: Request) {
 
     const sourcedCategory = category as SourcedCategory;
     const resolvedFraming: 'full' | 'close' = framing === 'close' ? 'close' : 'full';
-    // (2026-07-23) 클로즈업은 "원단 짜임·스티치·팔 솜털까지 보이는 디테일컷"이 목적이라
-    // 해상도가 곧 결과물의 존재 이유다 — low로 뽑으면 뭉개져서 돈만 버린다. 그래서 클로즈업은
-    // high로 올리고, 초안 모드를 켰더라도 low 대신 medium까지만 낮춘다.
+    // (2026-07-23) 클로즈업은 뭉개지면 안 되므로 low로는 안 내려간다(초안 모드여도 medium 유지).
+    // 처음엔 high로 올렸다가 "너무 오래 걸린다"는 신고를 받고 medium으로 되돌렸다 — 애초에
+    // 타이트 크롭 자체가 원단에 픽셀을 훨씬 많이 배분해서 medium이라도 전신 대비 질감이 크게
+    // 살아나고, high는 시간을 크게 늘리는 대비 이득이 작았다(무엇보다 검증 오탐 재생성과 겹쳐
+    // 타임아웃을 유발했다). 최고 화질이 정말 필요하면 나중에 별도 토글로 뺀다.
     const resolvedQuality: 'low' | 'medium' | 'high' =
-      resolvedFraming === 'close' ? (draftMode ? 'medium' : 'high') : draftMode ? 'low' : 'medium';
+      resolvedFraming === 'close' ? 'medium' : draftMode ? 'low' : 'medium';
 
     // (2026-07-19) 선택 사이즈를 productNotes에 접붙여 기존 "치수→여유분 추론" 로직(productNotesLine)을
     // 그대로 재사용한다. 실측치가 있으면 그 숫자를 근거로, 없으면 라벨만 참고로 넘어간다.
@@ -549,6 +551,7 @@ export async function POST(req: Request) {
                   [imageBase64, ...(first.otherAngles || [])],
                   styleChecklist,
                   effectiveProductNotes,
+                  resolvedFraming,
                 );
                 if (!verdict.pass && verdict.defects.length > 0 && !hasTimeForCorrectionRetry()) {
                   // 남은 시간이 부족하면 재생성을 포기하고 첫 결과를 그대로 저장한다 —

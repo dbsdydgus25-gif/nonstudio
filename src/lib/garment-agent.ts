@@ -806,6 +806,13 @@ export async function verifyGarmentRender(
   styleChecklist: Array<{ label: string; text: string }> = [],
   /** 소싱 제품의 핵심 핏 지시(예: "목 꽉 맞음, 크롭, 머슬핏") — 목이 헐렁하게 나오는 등 핏 무시 검사용 */
   keyFit: string = '',
+  /**
+   * (2026-07-23) 클로즈업 여부. 클로즈업은 소싱 제품 부위만 타이트하게 잘라낸 컷이라
+   * 다리/밑단/포켓/하의/신발이 프레임 밖인 게 정상인데, 검증이 그걸 "누락"으로 잡아
+   * 불합격 처리하면 (1) 불필요한 재생성으로 시간이 2배가 되고 (2) 프레임에도 없는 걸
+   * 고치려다 오히려 결과를 망친다. 'close'면 "프레임에 실제로 보이는 것만 판정"하도록 한다.
+   */
+  framing: 'full' | 'close' = 'full',
 ): Promise<GarmentRenderVerdict> {
   const parts: any[] = [];
 
@@ -845,7 +852,7 @@ POSE INSTRUCTION GIVEN TO THE GENERATOR (may be Korean): "${poseInstruction || '
 ${keyFit ? `\nSOURCED PRODUCT KEY FIT (may be Korean): "${keyFit}"` : ''}
 ${styleChecklist.length ? `\nSTYLING THE MODEL WAS SUPPOSED TO WEAR (each line's COLOR and garment TYPE are mandatory; may be Korean):\n${styleChecklist.map((s) => `- ${s.label}: ${s.text}`).join('\n')}` : ''}
 
-INSPECTION PROCEDURE:
+${framing === 'close' ? `THIS IS A CLOSE-UP CROP — the shot is intentionally cropped tight on the sourced product (e.g. only the chest/torso for a top, only the legs for a bottom). Legs, feet, hem, waistband, bottoms, shoes, and any zone outside the crop are EXPECTED to be absent. NEVER report an item as a defect merely because it is out of frame or not visible in this crop — judge ONLY what is actually inside the frame. Do not fail the pose/turn direction, and do not run the styling check (bottoms/shoes are out of frame). Focus your inspection on the fabric texture, the closures/hardware count, and the construction of the visible garment area.\n` : ''}INSPECTION PROCEDURE:
 1. Decide which side of the garment the GENERATED photo shows (front/back/side) using garment anatomy (fly = front; back pockets/elastic gathering = back).
 2. MIRROR RULE for reading the GENERATED photo: if it shows the FRONT, the wearer's LEFT is on the VIEWER'S RIGHT; if it shows the BACK, the wearer's left is on the viewer's left.
 3. For EVERY item in the ASYMMETRY CHECKLIST that should be visible from this view: (a) is it present? (b) is it on the correct wearer's side? (c) is the OPPOSITE side clean — no duplicate, echo, or mirrored copy? A checklist item rendered on BOTH legs is an automatic FAIL.
@@ -854,7 +861,7 @@ INSPECTION PROCEDURE:
 6. If the pose instruction specifies a turn/facing direction (e.g. 왼쪽 = model's left turn, 오른쪽 = model's right turn, 뒤 = back view): does the GENERATED body orientation actually match it? "왼쪽으로 돌아" means the model rotates toward the MODEL'S OWN left. If the direction is clearly opposite or ignored (e.g. frontal standing when a turn was required), that is a FAIL.
 6.5 EDGE CHECK (tops) — compare the GENERATED garment's three edges against the NECKLINE / SLEEVE CUFFS / BOTTOM HEM lines above. They are finished differently from each other, so check each separately: (a) is the finish type right (ribbed band vs plain hem vs raw edge)? (b) is a contrast trim/stitch present on exactly the edges that name one, and ABSENT on the edges that say no contrast stitching? (c) do the trim's colors/stitch style match? A contrast stitch copied onto the hem when the hem should be plain, a missing ribbed hem band, or a missing neckline/cuff trim are all FAILS — report the specific edge and the required correction.
 6.6 CLOSURE COUNT CHECK — read the CLOSURES / HARDWARE line above, then COUNT the buttons/snaps/zippers actually visible in the GENERATED photo and compare the numbers literally. A different count (one extra or one missing), a button placket invented on a garment whose closures line says "none — pullover", a missing zipper, or hardware in the wrong colour/material are all FAILS. Report the exact required count, e.g. "render exactly 5 front buttons, not 6". Only count closures that would be visible in this crop/view — do not fail an item that is simply out of frame.
-${styleChecklist.length ? `7. STYLING CHECK — for EACH styling line above, look at the corresponding item in the GENERATED photo and verify BOTH its color and its garment type match the words. This is a common, high-priority failure: if the line says 베이지/beige and the item is black, or 갈색/brown and it is black, or 워싱 데님/washed denim and it is plain black slacks, that is a FAIL. Do NOT accept the outfit being recolored to a black/grey/monochrome look to match the product. Report each mismatch as a correction naming the item, the wrong color/type seen, and the required one.` : ''}
+${styleChecklist.length && framing !== 'close' ? `7. STYLING CHECK — for EACH styling line above, look at the corresponding item in the GENERATED photo and verify BOTH its color and its garment type match the words. This is a common, high-priority failure: if the line says 베이지/beige and the item is black, or 갈색/brown and it is black, or 워싱 데님/washed denim and it is plain black slacks, that is a FAIL. Do NOT accept the outfit being recolored to a black/grey/monochrome look to match the product. Report each mismatch as a correction naming the item, the wrong color/type seen, and the required one.` : ''}
 ${keyFit ? `8. FIT CHECK — verify the sourced product's fit matches the KEY FIT words. In particular a "tight/꽉 맞음/타이트" neckline must hug the neck high and close; a loose, wide, or dropped neckline that exposes the collarbone/trapezius is a FAIL. Report the required fit correction.` : ''}
 
 Report pass=true ONLY if every applicable check passes. Each defect must be a self-contained corrective instruction the image generator can follow.
