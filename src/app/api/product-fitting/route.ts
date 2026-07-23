@@ -139,6 +139,7 @@ export async function POST(req: Request) {
     const {
       productImagesBase64,
       materialImagesBase64,
+      infoImagesBase64,
       category,
       geminiApiKey,
       openaiApiKey,
@@ -160,6 +161,9 @@ export async function POST(req: Request) {
       productImagesBase64: string[];
       /** (2026-07-14) 재질/텍스처 클로즈업 참고 사진 — 색상 아닌 원단/버튼/스티치 디테일 전용, 별도 슬롯 */
       materialImagesBase64?: string[];
+      /** (2026-07-23) 분석 전용 이미지(사이즈표/스와치/텍스트 카드) — 소재/사이즈 텍스트를 읽는
+       * 데만 쓰고 생성기(gpt-image-2)엔 절대 안 넣는다. 링크 임포터가 역할 판별해 따로 준다. */
+      infoImagesBase64?: string[];
       category: string;
       geminiApiKey: string;
       openaiApiKey: string;
@@ -417,7 +421,13 @@ export async function POST(req: Request) {
             productText?.trim() || undefined, // rawSpecs — 링크 상세페이지의 핏/재질 특징 텍스트
             sourcedCategory,
             openaiApiKey,
-            materialImagesBase64?.length ? materialImagesBase64 : undefined,
+            // 재질 참고 + info(사이즈표/텍스트 카드)를 분석에 함께 넘긴다 — analyzeGarment는
+            // 이 이미지들을 "소재/질감/텍스트를 읽는 용도"로만 쓰고 색/실루엣엔 반영하지 않으므로,
+            // 텍스트 카드가 섞여도 안전하다. 생성기엔 여기 이미지들이 절대 안 들어간다.
+            (() => {
+              const forAnalysis = [...(materialImagesBase64 || []), ...(infoImagesBase64 || [])];
+              return forAnalysis.length ? forAnalysis.slice(0, 6) : undefined;
+            })(),
           );
 
           // (2026-07-23) 분석이 실패(Gemini 한도 초과 등)하면 여기서 즉시 멈춘다.
@@ -457,8 +467,12 @@ export async function POST(req: Request) {
           // 배경은 예외 없이 고정 흰색 스튜디오 (요구사항)
           stylingSuggestion.background = DEFAULT_STUDIO_BACKGROUND;
 
+          // (2026-07-23) 생성기에 넣는 "다른 각도" 참고 컷은 최대 2장으로 제한한다 — 분석(analyzeGarment)은
+          // first.otherAngles를 전부 읽지만, gpt-image-2에 참고 이미지를 6~8장씩 밀어넣으면
+          // 서로 다른 컷을 뒤섞어 "완전히 다른 옷"이 나오는 게 실측 확인됐다(대표님 신고). 생성 정확도는
+          // 깨끗한 대표컷 1장 + 보조 1~2장일 때 가장 높다.
           const otherAngleImagesDownscaled = await Promise.all(
-            (first.otherAngles || []).map(async (b64) => {
+            (first.otherAngles || []).slice(0, 2).map(async (b64) => {
               const parsed = parseBase64Image(b64);
               return downscaleImage(parsed.buffer, parsed.mimeType);
             }),

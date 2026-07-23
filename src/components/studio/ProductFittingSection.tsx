@@ -97,6 +97,9 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   // 밀려서 무시되는 게 실측 확인됐다.
   const [productImageColors, setProductImageColors] = useState<string[]>([]);
   const [materialImageColors, setMaterialImageColors] = useState<string[]>([]);
+  // (2026-07-23) 분석 전용 이미지(사이즈표/스와치/텍스트 카드) — 소재/사이즈 텍스트를 읽는 데만
+  // 쓰고 생성기엔 절대 안 넣는다. 링크 임포터가 역할 판별해서 따로 준다(생성 편집 원본 오염 방지).
+  const [infoImages, setInfoImages] = useState<string[]>([]);
   // 링크 상세페이지에서 뽑은 제품명·특징 텍스트 — 분석(rawSpecs)에 넘겨 머슬핏/골지 같은 특징을 살린다
   const [linkProductText, setLinkProductText] = useState('');
   // 초안 품질(low) — medium 대비 약 1/4 비용, 코디/색상 확인용
@@ -245,6 +248,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       // 각 파트에 자동으로 꽂혀서 색/핏은 제품컷 기준, 질감/사이즈는 상세컷 기준으로 분석됨.
       const productImgs: string[] = data.productImages || [];
       const materialImgs: string[] = data.materialImages || [];
+      const infoImgs: string[] = data.infoImages || [];
       const prodColors: string[] = data.productImageColors || [];
       const matColors: string[] = data.materialImageColors || [];
       // 링크로 가져올 땐 기존 목록에 덧붙이지 않고 교체한다 — 색상 인덱스가 어긋나면
@@ -253,6 +257,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       setProductImageColors(prodColors.slice(0, 8));
       setMaterialImages(materialImgs.slice(0, 4));
       setMaterialImageColors(matColors.slice(0, 4));
+      setInfoImages(infoImgs.slice(0, 6));
       // <select>에서 뽑은 정확한 사이즈 옵션이 있으면 바로 채운다 (없으면 아래 자동 분석으로 보완)
       const linkSizes: Array<{ label: string; measurements?: string }> = data.sizeOptions || [];
       if (linkSizes.length) setSizeOptions(linkSizes);
@@ -274,7 +279,15 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       });
 
       // 상세페이지 내용(소재·특징·사이즈표)을 이어서 자동 분석해 "제품 핏 · 디테일 지시"까지 채운다.
-      void autoFillFromAnalysis(productImgs.slice(0, 8), materialImgs.slice(0, 4), extra, data.title, pText);
+      // info 이미지(사이즈표/텍스트 카드)도 분석용으로 함께 넘긴다 — "Cotton 75% Rayon 25%" 같은
+      // 소재 텍스트가 그 카드 안에 있는 경우가 많다(생성엔 안 쓰지만 분석엔 유용).
+      void autoFillFromAnalysis(
+        productImgs.slice(0, 8),
+        [...materialImgs, ...infoImgs].slice(0, 6),
+        extra,
+        data.title,
+        pText,
+      );
     } catch (err: any) {
       setImportMsg({ kind: 'blocked', text: err?.message || '링크 처리 중 오류가 발생했습니다.' });
     } finally {
@@ -431,6 +444,8 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         body: JSON.stringify({
           productImagesBase64: effectiveProductImages,
           materialImagesBase64: materialImages.length ? materialImages : undefined,
+          // 분석 전용(사이즈표/스와치/텍스트 카드) — 서버가 소재/사이즈 텍스트 읽는 데만 쓰고 생성기엔 안 넣음
+          infoImagesBase64: infoImages.length ? infoImages : undefined,
           category,
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
