@@ -163,11 +163,22 @@ function extractProductText(html: string, title: string): string {
   return out.join(' / ').slice(0, 800);
 }
 
+// (2026-07-23) 페이지의 <select>를 이름/id/class 힌트 없이 무차별로 다 긁으면, 언어선택
+// (한국어/English), 통화, 정렬순서, 수량선택(1,2,3...) 같은 상품과 무관한 드롭다운까지
+// 색상/사이즈로 잘못 분류되는 게 실측 확인됨 — 사이트마다 재현되는 흔한 버그였다.
+// select 태그 자체의 속성으로 걸러내는 게 1차 방어, 값 내용으로 걸러내는 게 2차 방어.
+const NON_PRODUCT_SELECT_ATTR_RE = /\b(lang|language|locale|currency|money|sort|order|display|per_?page|qty|quantity|amount|count|page)\b/i;
+const JUNK_VALUE_RE =
+  /^(한국어|한글|영어|english|日本語|일본어|中文|중국어|krw|usd|jpy|eur|cny|인기순|최신순|등록순|낮은가격순?|높은가격순?|리뷰순|추천순|판매량순|낮은가격|높은가격)$/i;
+
 /** 상품 옵션 <select>(색상/사이즈)에서 실제 옵션 값을 뽑는다. 카페24 등 대부분 자사몰에 통함. */
 function extractOptions(html: string): { colors: string[]; sizes: Array<{ label: string }> } {
   const groups: string[][] = [];
-  for (const sel of html.matchAll(/<select[^>]*>([\s\S]*?)<\/select>/gi)) {
-    const body = sel[1];
+  for (const sel of html.matchAll(/<select([^>]*)>([\s\S]*?)<\/select>/gi)) {
+    const attrs = sel[1] || '';
+    if (NON_PRODUCT_SELECT_ATTR_RE.test(attrs)) continue; // 언어/통화/정렬/수량 select는 애초에 제외
+
+    const body = sel[2];
     const values = Array.from(body.matchAll(/<option[^>]*>([^<]+)<\/option>/gi))
       .map((m) => m[1].trim())
       .filter(
@@ -177,14 +188,32 @@ function extractOptions(html: string): { colors: string[]; sizes: Array<{ label:
           !/선택|필수|옵션을|please|choose|^\s*$/i.test(v) &&
           v.length <= 24,
       );
-    if (values.length >= 1 && values.length <= 15) groups.push(values);
+    if (values.length >= 1 && values.length <= 15 && !values.some((v) => JUNK_VALUE_RE.test(v))) {
+      groups.push(values);
+    }
   }
 
   const SIZE_RE = /^(XXS|XS|S|M|L|XL|XXL|XXXL|F|FREE|\d{1,3}(?:호|inch|"|cm)?)$/i;
+  // "S(어깨42 가슴52 총장65)"처럼 사이즈 뒤에 실측 치수를 괄호로 병기하는 카페24류 표기 —
+  // SIZE_RE는 완전일치만 보므로 이 형태를 사이즈로 인식 못 하고 통째로 색상 버킷에 떨어져
+  // "판매 색상에 치수가 섞여 들어간다"는 실제 신고와 정확히 일치했다. 사이즈 라벨 + 괄호로
+  // 시작하는 값도 사이즈로 인정한다.
+  const SIZE_WITH_MEASUREMENTS_RE =
+    /^(XXS|XS|S|M|L|XL|XXL|XXXL|F|FREE|\d{1,3}(?:호|inch|"|cm)?)\s*[(（]/i;
   const colors = new Set<string>();
   const sizes = new Set<string>();
   for (const g of groups) {
-    const sizeLike = g.filter((v) => SIZE_RE.test(v)).length;
+    // 수량선택("1","2","3"...) 방지 — 단위 없는 순수 숫자가 1부터 연속으로 이어지면
+    // 사이즈표가 아니라 수량 드롭다운일 확률이 매우 높다(28/30/32/34처럼 실제 사이즈는
+    // 보통 1씩 증가하지 않는다). 이런 그룹은 색상도 사이즈도 아니므로 통째로 버린다.
+    const bareNums = g.map((v) => (/^\d{1,2}$/.test(v) ? Number(v) : null));
+    const isQuantitySelect =
+      bareNums.every((n) => n !== null) &&
+      bareNums[0] === 1 &&
+      bareNums.every((n, i) => i === 0 || n === (bareNums[i - 1] as number) + 1);
+    if (isQuantitySelect) continue;
+
+    const sizeLike = g.filter((v) => SIZE_RE.test(v) || SIZE_WITH_MEASUREMENTS_RE.test(v)).length;
     if (sizeLike >= Math.ceil(g.length * 0.6)) g.forEach((v) => sizes.add(v));
     else g.forEach((v) => colors.add(v));
   }
