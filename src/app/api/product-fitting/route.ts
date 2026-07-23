@@ -349,54 +349,84 @@ export async function POST(req: Request) {
       const hasTimeForCorrectionRetry = () => Date.now() - routeStartedAt < RETRY_DEADLINE_MS;
 
       const openai = new OpenAI({ apiKey: openaiApiKey });
-      // 참고 이미지도 다운스케일 — job마다 반복 업로드되므로 절감 효과가 색상 수만큼 곱해진다
-      const rawBackground = getDefaultBackgroundReferenceImage();
-      const backgroundReferenceImage = rawBackground
-        ? await downscaleImage(rawBackground.buffer, rawBackground.mimeType)
-        : null;
-      // 모델 정보(참고 이미지 + 체형 스펙)는 "모델 정보" 페이지에서 편집하는 프로필에서 로드
-      const modelProfile = await getModelProfile(uid);
-      const rawIdentity = await getModelIdentityImage(uid);
-      const identityReferenceImage = rawIdentity ? await downscaleImage(rawIdentity.buffer, rawIdentity.mimeType) : null;
-      const bodySpec = buildBodySpecFromProfile(modelProfile);
 
-      // (2026-07-19) 전신 컷에서는 재질 참고 사진을 생성기(gpt-image-2)에 이미지로 넣지 않는다 —
-      // 제품 이미지가 색/디자인/기장/실루엣의 유일한 주(主) 기준이고, 재질 참고는 "원단/질감을
-      // 분석해 설명(텍스트)으로 얹는" 보조 역할이다. 재질 클로즈업을 생성기에 직접 넣으면
-      // 확대된 짜임이 옷 전체의 패턴으로, 다른 조명의 색이 색상으로 오염돼 색·패턴이 틀어졌다.
-      //
-      // (2026-07-23) 단, 클로즈업 프레이밍에서는 정반대다 — 화면 대부분을 원단이 채우므로
-      // 텍스트 설명("smooth cotton knit")만으로는 실제 짜임을 절대 재현 못 하고, 실제로
-      // "재질이 아예 다르게 나온다"는 신고가 있었다. 위 부작용(확대 짜임이 전체 패턴이 됨)은
-      // 애초에 전신 컷에서 스케일이 안 맞아 생긴 것이라, 크롭 배율이 실제로 비슷한 클로즈업에선
-      // 해당되지 않는다. 그래서 클로즈업일 때만 재질 사진을 생성기에 함께 넣는다.
-      const materialImagesDownscaled =
-        resolvedFraming === 'close' && materialImagesBase64?.length
-          ? await Promise.all(
-              materialImagesBase64.slice(0, 3).map(async (b64) => {
-                const parsed = parseBase64Image(b64);
-                return downscaleImage(parsed.buffer, parsed.mimeType);
-              }),
-            )
-          : [];
-
-      // (2026-07-17) 소싱 제품이 아닌 슬롯(예: 상의) "이렇게 입혀줘" 참고 사진 — 슬롯당 최대
-      // 3장, 색상/포즈와 무관하게 공통이라 한 번만 다운스케일한다. SLOT_ORDER 고정 순서로
-      // buildProductFittingPrompt의 번호 배정과 반드시 같은 순서를 유지해야 한다.
+      // (2026-07-23) 이 준비 단계(배경/모델 정보/재질/스타일참고 로드)는 색상×포즈 전체에
+      // 공통으로 쓰이는 자원이라 색상별 try/catch(아래) 바깥에 있다 — 원래는 보호되지 않아서,
+      // 여기서 예외가 나면 이미 만들어둔 pending 행들이 아무 처리도 안 되고 영원히 pending으로
+      // 남는 문제가 있었다(신고: "시간이 오래 걸린다"의 또 다른 원인). 이제 실패하면 이 요청에
+      // 속한 모든 컷을 명확한 사유로 실패 처리하고 끝낸다.
+      let backgroundReferenceImage: { buffer: Buffer; mimeType: string } | null = null;
+      let identityReferenceImage: { buffer: Buffer; mimeType: string } | null = null;
+      let bodySpec = '';
+      let materialImagesDownscaled: Array<{ buffer: Buffer; mimeType: string }> = [];
       const SLOT_ORDER: SourcedCategory[] = ['top', 'bottom', 'shoes', 'accessory'];
       const styleReferenceCountsBySlot: Partial<Record<SourcedCategory, number>> = {};
       const styleReferenceImagesFlat: Array<{ buffer: Buffer; mimeType: string }> = [];
-      for (const slot of SLOT_ORDER) {
-        const imgs = (styleReferenceImagesBySlot?.[slot] || []).slice(0, 3);
-        if (imgs.length === 0) continue;
-        styleReferenceCountsBySlot[slot] = imgs.length;
-        const downs = await Promise.all(
-          imgs.map(async (b64) => {
-            const parsed = parseBase64Image(b64);
-            return downscaleImage(parsed.buffer, parsed.mimeType);
-          }),
-        );
-        styleReferenceImagesFlat.push(...downs);
+
+      try {
+        // 참고 이미지도 다운스케일 — job마다 반복 업로드되므로 절감 효과가 색상 수만큼 곱해진다
+        const rawBackground = getDefaultBackgroundReferenceImage();
+        backgroundReferenceImage = rawBackground
+          ? await downscaleImage(rawBackground.buffer, rawBackground.mimeType)
+          : null;
+        // 모델 정보(참고 이미지 + 체형 스펙)는 "모델 정보" 페이지에서 편집하는 프로필에서 로드
+        const modelProfile = await getModelProfile(uid);
+        const rawIdentity = await getModelIdentityImage(uid);
+        identityReferenceImage = rawIdentity ? await downscaleImage(rawIdentity.buffer, rawIdentity.mimeType) : null;
+        // (2026-07-23) 이 앱은 "모델 정보"에 등록된 얼굴 참고 사진으로 매 생성마다 동일 인물을
+        // 재현하는 게 핵심 가치인데, 이 사진을 못 읽어와도(Storage 오류 등) 지금까지는 조용히
+        // "체형 텍스트 스펙만으로 진행"해버렸다 — 텍스트 스펙엔 얼굴 관련 내용이 전혀 없어서
+        // gpt-image-2가 완전히 다른 사람 얼굴을 지어내는 결과로 이어졌다(신고: "이 모델은
+        // 누구세요?"). 얼굴이 등록돼 있어야 하는 게 이 서비스의 전제이므로, 못 읽어왔으면
+        // 조용히 넘어가지 말고 여기서 명확히 실패시켜 비용만 날리는 일이 없도록 한다.
+        if (!identityReferenceImage) {
+          throw new Error(
+            '등록된 모델 참고 사진을 불러오지 못해 생성을 중단했습니다. 이대로 진행하면 등록한 모델과 다른 사람 얼굴로 나옵니다. "모델 정보" 페이지에서 참고 사진이 정상적으로 저장돼 있는지 확인한 뒤 다시 시도해주세요.',
+          );
+        }
+        bodySpec = buildBodySpecFromProfile(modelProfile);
+
+        // (2026-07-19) 전신 컷에서는 재질 참고 사진을 생성기(gpt-image-2)에 이미지로 넣지 않는다 —
+        // 제품 이미지가 색/디자인/기장/실루엣의 유일한 주(主) 기준이고, 재질 참고는 "원단/질감을
+        // 분석해 설명(텍스트)으로 얹는" 보조 역할이다. 재질 클로즈업을 생성기에 직접 넣으면
+        // 확대된 짜임이 옷 전체의 패턴으로, 다른 조명의 색이 색상으로 오염돼 색·패턴이 틀어졌다.
+        //
+        // (2026-07-23) 단, 클로즈업 프레이밍에서는 정반대다 — 화면 대부분을 원단이 채우므로
+        // 텍스트 설명("smooth cotton knit")만으로는 실제 짜임을 절대 재현 못 하고, 실제로
+        // "재질이 아예 다르게 나온다"는 신고가 있었다. 위 부작용(확대 짜임이 전체 패턴이 됨)은
+        // 애초에 전신 컷에서 스케일이 안 맞아 생긴 것이라, 크롭 배율이 실제로 비슷한 클로즈업에선
+        // 해당되지 않는다. 그래서 클로즈업일 때만 재질 사진을 생성기에 함께 넣는다.
+        materialImagesDownscaled =
+          resolvedFraming === 'close' && materialImagesBase64?.length
+            ? await Promise.all(
+                materialImagesBase64.slice(0, 3).map(async (b64) => {
+                  const parsed = parseBase64Image(b64);
+                  return downscaleImage(parsed.buffer, parsed.mimeType);
+                }),
+              )
+            : [];
+
+        // (2026-07-17) 소싱 제품이 아닌 슬롯(예: 상의) "이렇게 입혀줘" 참고 사진 — 슬롯당 최대
+        // 3장, 색상/포즈와 무관하게 공통이라 한 번만 다운스케일한다. SLOT_ORDER 고정 순서로
+        // buildProductFittingPrompt의 번호 배정과 반드시 같은 순서를 유지해야 한다.
+        for (const slot of SLOT_ORDER) {
+          const imgs = (styleReferenceImagesBySlot?.[slot] || []).slice(0, 3);
+          if (imgs.length === 0) continue;
+          styleReferenceCountsBySlot[slot] = imgs.length;
+          const downs = await Promise.all(
+            imgs.map(async (b64) => {
+              const parsed = parseBase64Image(b64);
+              return downscaleImage(parsed.buffer, parsed.mimeType);
+            }),
+          );
+          styleReferenceImagesFlat.push(...downs);
+        }
+      } catch (err: any) {
+        console.error('[api/product-fitting][after] 준비 단계 실패 — 전체 요청 실패 처리:', err);
+        for (const job of jobs) {
+          await markGenerationFailed(job.generationId, err?.message || 'AI 제품 피팅 준비 중 오류가 발생했습니다.');
+        }
+        return;
       }
 
       // planIdx로 묶어서, 색상당 분석(재질/코디)은 한 번만 수행하고 그 결과를 포즈 컷마다 재사용한다.

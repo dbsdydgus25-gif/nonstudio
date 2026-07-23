@@ -190,6 +190,14 @@ export async function POST(req: Request) {
         // PERSONAL_BODY_SPEC) 그대로 동작.
         const modelProfile = await getModelProfile(uid);
         const identityReferenceImage = await getModelIdentityImage(uid);
+        // (2026-07-23) AI 제품 피팅과 동일한 이유로 여기도 하드 게이트 — 얼굴 참고 사진을 못
+        // 읽어왔는데 조용히 진행하면 체형 텍스트 스펙만으로 gpt-image-2가 완전히 다른 사람
+        // 얼굴을 지어낸다("이 모델은 누구세요?" 신고와 동일한 실패 양상).
+        if (!identityReferenceImage) {
+          throw new Error(
+            '등록된 모델 참고 사진을 불러오지 못해 생성을 중단했습니다. 이대로 진행하면 등록한 모델과 다른 사람 얼굴로 나옵니다. "모델 정보" 페이지에서 참고 사진이 정상적으로 저장돼 있는지 확인한 뒤 다시 시도해주세요.',
+          );
+        }
 
         const prompt = buildRestylePrompt(
           sourcedCategory,
