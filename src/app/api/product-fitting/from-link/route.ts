@@ -167,16 +167,46 @@ function extractProductText(html: string, title: string): string {
 // (한국어/English), 통화, 정렬순서, 수량선택(1,2,3...) 같은 상품과 무관한 드롭다운까지
 // 색상/사이즈로 잘못 분류되는 게 실측 확인됨 — 사이트마다 재현되는 흔한 버그였다.
 // select 태그 자체의 속성으로 걸러내는 게 1차 방어, 값 내용으로 걸러내는 게 2차 방어.
-const NON_PRODUCT_SELECT_ATTR_RE = /\b(lang|language|locale|currency|money|sort|order|display|per_?page|qty|quantity|amount|count|page)\b/i;
+// 단어 경계(\b)가 꼭 필요하다 — 카페24 상품 옵션 select 자체의 속성에 "option_sort_no"
+// 처럼 "sort"가 언더스코어로 붙어 들어있어서, 경계 없이 부분 문자열로만 보면 진짜 상품
+// 옵션 select까지 걸러져버리는 걸 실측으로 확인했다(언더스코어는 정규식 \w라 경계가 안 생김).
+const NON_PRODUCT_SELECT_ATTR_RE =
+  /\b(lang|locale|currency|money|sort|order|display|per_?page|qty|quantity|amount|count|page|country|shipping)\b/i;
+// (2026-07-23 수정) 그런데 실제 bymono.com(카페24) HTML을 직접 떠서 보니, 언어선택 select의
+// class가 "xans-layout-multishopshippinglanguagelist"처럼 다른 단어와 공백 없이 붙어있어서
+// 위의 \b 기반 정규식이 "language"를 못 잡고 그대로 통과시켜버렸다. 반대로 이건 카페24가
+// 언어/배송국가 선택 위젯에 항상 쓰는 매우 특정적인 클래스 접두어라 오탐 위험이 없으므로,
+// 이 조합만 예외적으로 경계 없이 부분 문자열로 별도 검사한다.
+const NON_PRODUCT_SELECT_SUBSTR_RE = /language|multishopshipping/i;
 const JUNK_VALUE_RE =
-  /^(한국어|한글|영어|english|日本語|일본어|中文|중국어|krw|usd|jpy|eur|cny|인기순|최신순|등록순|낮은가격순?|높은가격순?|리뷰순|추천순|판매량순|낮은가격|높은가격)$/i;
+  /^(한국어|한글|영어|english|日本語|일본어|中文|중국어|krw|usd|jpy|eur|cny|인기순|최신순|등록순|낮은가격순?|높은가격순?|리뷰순|추천순|판매량순|낮은가격|높은가격|language\s*[:：].*|lang\s*[:：].*|언어\s*[:：].*|shipping\s*to\s*[:：].*)$/i;
+
+// 카페24는 상품 옵션 select에 option_title="Color"/"Size" 같은 명시적 속성을 이미 심어둔다
+// (실측: <select ... option_title="Color" name="option1" ...>, option_title="Size" ...>).
+// 이건 텍스트 패턴으로 색상/사이즈를 추측하는 것보다 훨씬 확실한 신호이므로, 있으면 최우선
+// 신뢰한다 — "FREE[30-34]"처럼 괄호/대괄호 형태를 다 나열해도 못 맞히는 정규식 추측이 필요 없다.
+const COLOR_TITLE_RE = /^(color|colour|색상|칼라|컬러)$/i;
+const SIZE_TITLE_RE = /^(size|사이즈|치수)$/i;
 
 /** 상품 옵션 <select>(색상/사이즈)에서 실제 옵션 값을 뽑는다. 카페24 등 대부분 자사몰에 통함. */
 function extractOptions(html: string): { colors: string[]; sizes: Array<{ label: string }> } {
-  const groups: string[][] = [];
+  const groups: Array<{ values: string[]; forcedRole: 'color' | 'size' | null }> = [];
   for (const sel of html.matchAll(/<select([^>]*)>([\s\S]*?)<\/select>/gi)) {
     const attrs = sel[1] || '';
-    if (NON_PRODUCT_SELECT_ATTR_RE.test(attrs)) continue; // 언어/통화/정렬/수량 select는 애초에 제외
+
+    const titleMatch = attrs.match(/option_title\s*=\s*"([^"]*)"/i);
+    const title = titleMatch?.[1] || '';
+    const forcedRole: 'color' | 'size' | null = COLOR_TITLE_RE.test(title)
+      ? 'color'
+      : SIZE_TITLE_RE.test(title)
+        ? 'size'
+        : null;
+
+    // option_title로 카페24가 색상/사이즈라고 명시한 select는 언어/통화 등 오탐 필터를
+    // 건너뛴다 — 카페24 자체 태그가 확실한 신호이므로 이후의 추측성 제외 규칙보다 우선한다.
+    if (!forcedRole && (NON_PRODUCT_SELECT_ATTR_RE.test(attrs) || NON_PRODUCT_SELECT_SUBSTR_RE.test(attrs))) {
+      continue; // 언어/통화/정렬/수량 select는 애초에 제외
+    }
 
     const body = sel[2];
     const values = Array.from(body.matchAll(/<option[^>]*>([^<]+)<\/option>/gi))
@@ -189,20 +219,29 @@ function extractOptions(html: string): { colors: string[]; sizes: Array<{ label:
           v.length <= 24,
       );
     if (values.length >= 1 && values.length <= 15 && !values.some((v) => JUNK_VALUE_RE.test(v))) {
-      groups.push(values);
+      groups.push({ values, forcedRole });
     }
   }
 
   const SIZE_RE = /^(XXS|XS|S|M|L|XL|XXL|XXXL|F|FREE|\d{1,3}(?:호|inch|"|cm)?)$/i;
-  // "S(어깨42 가슴52 총장65)"처럼 사이즈 뒤에 실측 치수를 괄호로 병기하는 카페24류 표기 —
-  // SIZE_RE는 완전일치만 보므로 이 형태를 사이즈로 인식 못 하고 통째로 색상 버킷에 떨어져
-  // "판매 색상에 치수가 섞여 들어간다"는 실제 신고와 정확히 일치했다. 사이즈 라벨 + 괄호로
-  // 시작하는 값도 사이즈로 인정한다.
+  // "S(어깨42 가슴52 총장65)"처럼 사이즈 뒤에 실측 치수를 괄호/대괄호로 병기하는 카페24류
+  // 표기 — SIZE_RE는 완전일치만 보므로 이 형태를 사이즈로 인식 못 하고 통째로 색상 버킷에
+  // 떨어져 "판매 색상에 치수가 섞여 들어간다"는 실제 신고와 정확히 일치했다. 사이즈 라벨 +
+  // 괄호/대괄호로 시작하는 값도 사이즈로 인정한다.
   const SIZE_WITH_MEASUREMENTS_RE =
-    /^(XXS|XS|S|M|L|XL|XXL|XXXL|F|FREE|\d{1,3}(?:호|inch|"|cm)?)\s*[(（]/i;
+    /^(XXS|XS|S|M|L|XL|XXL|XXXL|F|FREE|\d{1,3}(?:호|inch|"|cm)?)\s*[(（[]/i;
   const colors = new Set<string>();
   const sizes = new Set<string>();
-  for (const g of groups) {
+  for (const { values: g, forcedRole } of groups) {
+    if (forcedRole === 'color') {
+      g.forEach((v) => colors.add(v));
+      continue;
+    }
+    if (forcedRole === 'size') {
+      g.forEach((v) => sizes.add(v));
+      continue;
+    }
+
     // 수량선택("1","2","3"...) 방지 — 단위 없는 순수 숫자가 1부터 연속으로 이어지면
     // 사이즈표가 아니라 수량 드롭다운일 확률이 매우 높다(28/30/32/34처럼 실제 사이즈는
     // 보통 1씩 증가하지 않는다). 이런 그룹은 색상도 사이즈도 아니므로 통째로 버린다.
