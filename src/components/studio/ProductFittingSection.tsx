@@ -413,6 +413,12 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     // 브라운/차콜 사진 여러 장의 시각 정보에 밀려 무시되는 게 실측 확인됨(GRAY 선택 → 브라운 출력).
     // 판별된 컬러웨이가 일치하는 컷을 우선 사용하고, 제품컷에 없으면 상세컷에서라도 찾아 쓴다.
     let effectiveProductImages = productImages;
+    // (2026-07-23) materialImages(재질 참고 사진)는 여러 색상 사진이 뒤섞여 스크래핑되는 경우가
+    // 흔한데(예: 카키/블랙 두 컬러웨이가 같은 상세페이지에 다 있음), 지금까지 이 배열을 색상과
+    // 무관하게 통째로 서버에 보내고 있어서 — 카키를 생성하는데 블랙 재질 사진이 참고 이미지로
+    // 같이 들어가 "완전 다른 옷"이 나오는 문제가 실측 확인됐다. 색상을 지정했으면 재질 사진도
+    // 똑같이 그 색(또는 색 판별이 안 된 사진)만 걸러서 보낸다.
+    let effectiveMaterialImages = materialImages;
     let colorNote = '';
     if (colorOverride) {
       const matchProduct = productImages.filter(
@@ -429,6 +435,9 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         // 그 색 사진이 아예 없으면 기존 사진 + 색상 지시 텍스트로 진행(정직하게 알림)
         colorNote = ` (${colorOverride} 색상 사진이 없어 텍스트 지시로만 반영 — 색이 다르게 나올 수 있음)`;
       }
+      effectiveMaterialImages = materialImages.filter(
+        (_, i) => !materialImageColors[i] || materialImageColors[i].toLowerCase() === colorOverride.toLowerCase(),
+      );
     }
     if (colorNote) setStageMsg((prev) => prev + colorNote);
 
@@ -443,7 +452,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           productImagesBase64: effectiveProductImages,
-          materialImagesBase64: materialImages.length ? materialImages : undefined,
+          materialImagesBase64: effectiveMaterialImages.length ? effectiveMaterialImages : undefined,
           // 분석 전용(사이즈표/스와치/텍스트 카드) — 서버가 소재/사이즈 텍스트 읽는 데만 쓰고 생성기엔 안 넣음
           infoImagesBase64: infoImages.length ? infoImages : undefined,
           category,

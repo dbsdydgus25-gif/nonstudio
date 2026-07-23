@@ -274,7 +274,7 @@ export function buildRestylePrompt(
   // 설명하는 문구가 전혀 없으면 gpt-image-2가 그 사진의 신발/코디까지 통째로 따라 그려서
   // NEW STYLING 지시(이번에 새로 지정한 하의/신발)를 무시하는 문제가 있었다 — 용도를 명확히 한정한다.
   const identityReferenceLine = hasIdentityReferenceImage
-    ? '\n- One of the additional input images is a FACE / BODY SHAPE / SKIN TONE reference ONLY. Match the same face, body proportions, and skin tone shown there. Do NOT copy the clothing, shoes, bag, or any accessory worn in that reference photo — completely ignore its outfit. The outfit for THIS generation is defined entirely by the SOURCED PRODUCT FIDELITY and NEW STYLING sections below, which take full priority over anything worn in that reference photo.'
+    ? '\n- One of the additional input images is a FACE / BODY SHAPE / SKIN TONE reference ONLY. Match the same face, body proportions, and skin tone shown there. Do NOT copy the clothing, shoes, bag, accessory, or background/location shown in that reference photo — completely ignore its outfit and whatever real place it was actually photographed in. The outfit for THIS generation is defined entirely by the SOURCED PRODUCT FIDELITY and NEW STYLING sections below, and the background is defined entirely by the Background line above — both take full priority over anything worn or shown behind the person in that reference photo.'
     : '';
 
   return [
@@ -501,8 +501,11 @@ export function buildProductFittingPrompt(
     ? `- Background: Image ${backgroundImageNumber} shows the EXACT target studio backdrop and lighting setup (soft frontal light, gentle top-down falloff, seamless cyclorama floor curve). Reproduce this exact background, light direction, and shadow softness on the subject. (${stylingSuggestion.background})`
     : `- Background: ${stylingSuggestion.background}`;
 
+  // (2026-07-23) 이 줄은 Image 1의 "옷"은 무시하라고 했지만 "배경"은 무시하라는 말이 없었다 —
+  // 사용자가 등록한 모델 사진이 실제 장소/배경을 두고 찍힌 경우, 그 배경이 그대로 새어나올 수
+  // 있었다(배경은 DEFAULT_STUDIO_BACKGROUND로 별도 강제되므로 Image 1의 배경은 절대 참고하면 안 됨).
   const identityBlock = hasIdentityReferenceImage
-    ? `Image 1 shows THE model — the exact person who must appear in the output. Keep Image 1's face, skin tone, and body identical. Do NOT copy any clothing or accessory from Image 1; the outfit is defined entirely by the PRODUCT and NEW STYLING sections below.`
+    ? `Image 1 shows THE model — the exact person who must appear in the output. Keep Image 1's face, skin tone, and body identical. Do NOT copy any clothing, accessory, or background from Image 1; the outfit is defined entirely by the PRODUCT and NEW STYLING sections below, and the background is defined entirely by the Background line below — completely ignore whatever location or scene Image 1 was actually photographed in.`
     : 'Generate the model described in the MODEL section below.';
 
   // (2026-07-22) 소싱 제품이 아우터일 때 — "상의" 슬롯은 별도 카테고리가 아니라 이 아우터
