@@ -498,7 +498,14 @@ export async function POST(req: Request) {
               // 많은 이미지(제품4+재질4+스타일참고+기준+배경 10장 이상)를 넣으면 gpt-image-2가
               // 헷갈려서 재질/구조를 뭉개는 문제가 실제로 재현됨. 기준 사진이 있을 땐 원본
               // 참고 사진들을 비우고 [모델, 제품 대표컷, 기준사진, 배경]만 남겨 집중시킨다.
-              const otherAngleForThisCall = poseAnchorImage ? [] : otherAngleImagesDownscaled;
+              // (2026-07-23 수정) 다만 완전히 비우면 비대칭 포켓/패치 같은 디테일의 유일한
+              // 사진 근거가 사라져서, 2번째 포즈부터 패치가 조용히 좌우 대칭으로 뭉개지는
+              // 문제가 실측 확인됨(대표님 신고: "두번 돌리니까 아예 다른게 나와버리고"). 다
+              // 지우는 대신 실제 사진 1장만은 남겨 비대칭 디테일의 근거를 유지한다 — 이미지
+              // 수는 최소한만 늘려(+1) 위 "10장 이상" 문제를 재현하지 않는 선을 지킨다.
+              const otherAngleForThisCall = poseAnchorImage
+                ? otherAngleImagesDownscaled.slice(0, 1)
+                : otherAngleImagesDownscaled;
               // 재질 참고 이미지 — 전신 컷에선 빈 배열(위 주석 참고), 클로즈업에선 원단 재현의
               // 핵심 근거라 함께 넣는다. 기준 사진이 있을 땐 그쪽이 이미 확정본이라 생략.
               const materialForThisCall = poseAnchorImage ? [] : materialImagesDownscaled;
@@ -578,6 +585,9 @@ export async function POST(req: Request) {
                   console.warn('[api/product-fitting][after] 자동 검증 불합격 — 교정 재생성 1회 시도:', verdict.defects);
                   try {
                     const retryPrompt = `${buildDefectCorrectionBlock(verdict.defects)}\n\n${prompt}`;
+                    // (2026-07-23) 결함이 확정된 재시도이므로, 기준 사진만으론 못 고친 문제를
+                    // 실제 제품 사진으로 다시 대조해야 한다 — 이번 1회에 한해 실제 각도 사진을
+                    // 다 살려서 넣는다(첫 시도에서 아꼈던 이미지 수를 여기서만 되돌린다).
                     const retryUrl = await runSingleProductFitting(
                       openai,
                       imageBase64,
@@ -585,8 +595,8 @@ export async function POST(req: Request) {
                       identityReferenceImage,
                       backgroundReferenceImage,
                       resolvedQuality,
-                      otherAngleForThisCall,
-                      materialForThisCall,
+                      otherAngleImagesDownscaled,
+                      materialImagesDownscaled,
                       styleRefForThisCall,
                       poseAnchorImage,
                     );
