@@ -226,8 +226,8 @@ function buildGarmentFidelityBlock(category: SourcedCategory, garmentAnalysis: G
   return `
 - The ${CATEGORY_PRESERVE_LABEL[category]} visible in the input photo IS the real sourced product. Faithfully reproduce its color, fabric texture, fit, and silhouette — this is the hero item and must be recognizable as the same product — but you have freedom to adjust how it drapes on the reshaped body.
 - Reference spec of the sourced item — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.
-- CRITICAL FABRIC RULE: reproduce ONLY the surface texture described above — do NOT invent, add, or embellish any decorative pattern, print, jacquard motif, embossed design, paisley, damask, moire, or graphic texture that is not explicitly listed. If the fabric is a plain solid-color knit/weave, render it perfectly plain and uniform with only natural fabric grain or knit-loop texture — absolutely no added print or pattern of any kind.
-- The fabric surface must look like an actual photograph of a real garment — flat, clean, with only natural soft folds/wrinkles from body movement and gravity. Do NOT render any algorithmic or "AI-texture-filter" look: no fine repeating micro-pattern, no engraved/embossed swirl texture, no synthetic noise grain, no digital fabric-simulation artifacts. A plain knit or weave should look boringly plain, like a studio product photo, not like a rendered material map.
+- CRITICAL FABRIC RULE: do NOT invent a FLAT decorative print (jacquard, paisley, damask, moire, graphic) that is not listed, and do not change the color. BUT if the surface texture above names genuine three-dimensional weave relief (seersucker pucker, waffle, corduroy wale, ribbing, crinkle, slub, terry loop), render it as real raised-and-recessed structure with its own self-shadowing — do NOT flatten it into a smooth surface. A genuinely plain solid knit/weave stays perfectly plain with only natural grain; a genuinely puckered/textured fabric must visibly pucker and ripple in three dimensions.
+- The fabric surface must look like an actual photograph of a real garment, with natural soft folds/wrinkles from body movement and gravity, plus whatever genuine woven relief the real fabric has (seersucker pucker, waffle, ribbing, etc. — render that as real cloth structure). Do NOT render any algorithmic or "AI-texture-filter" look: no engraved/embossed decorative SWIRL motif that isn't the real weave, no synthetic noise grain, no digital fabric-simulation artifacts. A genuinely plain smooth fabric should look boringly plain like a studio product photo; a genuinely textured/puckered fabric should show that real texture — the point is to match the real fabric, not to force everything flat.
 - SCOPE OF THIS RULE (do not over-apply): this fidelity requirement applies ONLY to the ${CATEGORY_PRESERVE_LABEL[category]}'s own color/print/texture — it does NOT mean preserving the rest of the original photo. The body shape, pose, background, and every other garment/accessory MUST still be changed exactly as instructed in the other sections below (MODEL BODY RESHAPE, POSE & FRAMING, NEW STYLING) — do not keep the original room, original pose, or original bottom/shoes just because this section asks for fidelity on one item. Use the input photo only as a color/texture reference for this ONE item, not as a template to copy wholesale.
 `.trim();
 }
@@ -388,6 +388,24 @@ function hasHardwareSpec(productNotes: string): boolean {
   return ['단추', '버튼', '지퍼', 'zipper', 'button', '스냅', '후크', 'hook', 'snap', '벨크로'].some((k) =>
     n.includes(k.toLowerCase()),
   );
+}
+
+/**
+ * (2026-07-23) 사용자가 "시어서커/자글자글/쿨링/크링클" 같은 3D 표면 질감을 직접 적었을 때,
+ * 그걸 최우선 체크리스트로 끌어올려 평평하게 뭉개지지 않게 한다. 실사례: 시어서커 셔츠가
+ * 매끈한 포플린 + 프린트 세로줄처럼 나옴(요철이 사라짐). buildFitEmphasisLines와 같은
+ * "감지된 것만 한 줄" 패턴 — 없으면 아무 것도 추가하지 않는다.
+ */
+function buildTextureEmphasisLine(productNotes: string): string {
+  const n = productNotes.toLowerCase();
+  const has = (...keys: string[]) => keys.some((k) => n.includes(k.toLowerCase()));
+  if (has('시어서커', 'seersucker', '자글자글', '오돌토돌', '쭈글', '크링클', 'crinkle', '워싱 크링클', '쿨링', '시원한', '자가드 요철')) {
+    return 'KEY TEXTURE — this fabric has real THREE-DIMENSIONAL puckered/crinkled relief (seersucker-type): render it as a genuinely puckered, rippled, airy summer weave with raised ridges and recessed bands casting soft self-shadows. Do NOT flatten it into smooth ironed poplin, and if it has stripes, render them as part of the raised texture, not flat printed lines.';
+  }
+  if (has('와플', 'waffle', '골지', '립', 'ribbed', '코듀로이', 'corduroy', '골덴', '누빔', 'quilted', '테리', 'terry', '슬럽', 'slub', '워싱 주름')) {
+    return 'KEY TEXTURE — this fabric has real three-dimensional surface relief (waffle/ribbing/corduroy/quilting/terry/slub as noted): render that raised-and-recessed structure with real self-shadowing, do NOT flatten it into a smooth surface.';
+  }
+  return '';
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -603,12 +621,15 @@ export function buildProductFittingPrompt(
   const hasFitSpec = !!productNotes?.trim();
   const fitEmphasisLines = hasFitSpec ? buildFitEmphasisLines(productNotes!.trim()) : [];
   const hasHardwareNote = hasFitSpec && hasHardwareSpec(productNotes!.trim());
+  const textureEmphasisLine = hasFitSpec ? buildTextureEmphasisLine(productNotes!.trim()) : '';
 
   const priorityChecklistBlock = [
     '=== OUTFIT & POSE — HIGHEST-PRIORITY CHECKLIST (read and obey this FIRST; these exact instructions are the ones most often missed, so they come before everything else) ===',
     `SOURCED PRODUCT (this is the ${CATEGORY_PRESERVE_LABEL[category]} the model actually wears; full spec in PRODUCT FIDELITY below): ${garmentAnalysis.color}${hasFitSpec ? '' : `, ${garmentAnalysis.fitType} fit`}.${hasFitSpec ? ` KEY FIT — THIS IS THE SELLER'S OWN SPEC AND IS THE ONLY AUTHORITY ON HOW THE GARMENT FITS. Obey it exactly, and ignore any conflicting fit impression you form from the photo (shop photos are often shot loose on a different body): ${productNotes!.trim()}` : ''}${colorOverrideNote?.trim() ? ` MANDATORY SOLD COLORWAY OVERRIDE: ${colorOverrideNote.trim()} — this is a deliberate choice of a real colorway this product is sold in, not a guess; render the SAME garment (identical construction, texture, fit) recolored to this colorway instead of the reference photo's color. This is the ONE exception to the color rule below.` : ''}`,
     // 한글 핏 용어를 "몸에 어떻게 붙는지"로 풀어서 못박는다 — 해당되는 항목만 나온다.
     ...fitEmphasisLines,
+    // 시어서커/자글자글 같은 3D 표면 질감 — 감지됐을 때만 최우선으로 못박아 평평하게 안 뭉개지게.
+    ...(textureEmphasisLine ? [textureEmphasisLine] : []),
     ...(checklistStyleLines.length
       ? [
           'STYLE THE REMAINING ITEMS EXACTLY AS WRITTEN — each item\'s stated COLOR and garment TYPE are mandatory. They are usually DIFFERENT from the product; do NOT recolor them to match the product and do NOT collapse the outfit into a black/grey/monochrome look:',
@@ -646,7 +667,7 @@ export function buildProductFittingPrompt(
     // 지점을 없앤다 — 예전엔 이 줄의 "Fit: regular"가 상단의 "머슬핏 타이트"를 되돌리고 있었다.
     `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; ${hasFitSpec ? 'Fit: see KEY FIT in the checklist above (seller spec — authoritative)' : `Fit: ${garmentAnalysis.fitType}`}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}${productNotesLine}${extraAngleLine}${materialLine}${poseAnchorLine}`,
     // 재질/원단은 "만졌을 때의 표면 느낌"으로만 반영 — 그 자체가 색이나 무늬를 바꾸면 안 된다.
-    `- MATERIAL/TEXTURE IS SURFACE-FEEL ONLY: the "Material / Surface texture / Light reaction" fields above describe how the fabric FEELS and reflects light (weave/knit hand, thickness, matte/sheen). Apply them ONLY as the surface finish on top of the product's actual look — they must NOT change the color, must NOT become a visible repeating pattern or print, and must NOT alter the design. A weave/knit structure is fabric texture, NOT a decorative motif — never render it as a printed pattern across the garment.`,
+    `- MATERIAL/TEXTURE — RENDER REAL 3D RELIEF, DON'T INVENT FLAT PRINTS: the "Material / Surface texture / Light reaction" fields above describe how the fabric FEELS and reflects light. Two different things must be handled oppositely: (1) a FLAT printed/dyed decorative motif (jacquard, paisley, damask, graphic) must NOT be invented — do not turn a weave into a printed pattern, and do not change the color. (2) But genuine THREE-DIMENSIONAL woven relief that the real fabric actually has — seersucker pucker (자글자글/오돌토돌 crinkled raised ridges), crinkle/wrinkle finish, waffle, corduroy wale, ribbing, slub, terry loop — MUST be rendered as real raised-and-recessed surface structure with its own micro-shadows and highlights, NOT flattened into a smooth surface. If the texture field describes seersucker or a puckered/crinkled/rippled surface, the garment must visibly pucker and ripple in three dimensions (the fabric is NOT flat ironed poplin); if it says the stripes are formed by that puckered texture, render them as raised ridges catching light, not as flat printed lines on smooth cloth.`,
     `- CRITICAL COLOR RULE: ${
       colorOverrideNote?.trim()
         ? `render the MANDATORY SOLD COLORWAY OVERRIDE color specified above, NOT the color shown in Image ${productImageNumber} — the reference photo's own color is superseded by that explicit override.`
@@ -654,7 +675,7 @@ export function buildProductFittingPrompt(
           ? `the "${colorVariant}" colorway`
           : `the color shown in Image ${productImageNumber}`
     }${colorOverrideNote?.trim() ? '' : ' is the actual product color being sold — match it precisely, do not shift the hue, saturation, or brightness. Do NOT pull color from any other image or from the texture description.'}`,
-    `- CRITICAL FABRIC RULE: reproduce ONLY the texture visible in Image ${productImageNumber} — do NOT invent, add, or embellish any decorative pattern, print, or embossed design that is not on the real product. A plain fabric must look boringly plain, like a studio product photo.`,
+    `- CRITICAL FABRIC RULE: reproduce the exact surface visible in Image ${productImageNumber} — do NOT invent a FLAT decorative print (jacquard, paisley, graphic) that isn't there, and do NOT change the color. But DO reproduce any real three-dimensional weave relief the product genuinely has (seersucker pucker, waffle, corduroy, ribbing, crinkle): match how much the real surface puckers/ripples, with real self-shadowing — do NOT iron it flat into a smooth poplin. A genuinely plain-smooth fabric stays plain; a genuinely textured/puckered fabric must look textured/puckered.`,
     hasHardwareNote
       ? `- CRITICAL BUTTON/HARDWARE COUNT RULE: the seller has specified exact hardware details in the KEY FIT spec above — that spec is the ONLY authority on the count, type, and color of buttons/snaps/zippers/other hardware, and wins over anything the photo seems to show. Use the reference photo${materialImageNumbers.length ? ` and the close-up reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')})` : ''} only to confirm placement and spacing style, not to override the stated count/type/color. Every button must sit directly on the actual fabric placket opening with a real, visible buttonhole/gap beneath it — never place a button on a closed, seamless section of the knit/fabric where there is no opening, and never render two buttons stacked or duplicated at the same spot. The button placket must look structurally coherent, like a real garment construction photo.`
       : `- CRITICAL BUTTON/HARDWARE COUNT RULE: before finalizing, actually count the buttons, snaps, zippers, or other hardware visible in ${materialImageNumbers.length ? `the close-up material reference image${materialImageNumbers.length > 1 ? 's' : ''} (Image ${materialImageNumbers.join(', ')}) — this is the clearest, most zoomed-in view and is the authoritative source for the exact count and spacing` : `Image ${productImageNumber}`}. The output must show that exact same count in the exact same positions — neither more nor fewer. This is a common failure mode: do not casually add an extra button or omit one out of habit. Every button must sit directly on the actual fabric placket opening with a real, visible buttonhole/gap beneath it — never place a button on a closed, seamless section of the knit/fabric where there is no opening, and never render two buttons stacked or duplicated at the same spot. The button placket must look structurally coherent, like a real garment construction photo.`,
