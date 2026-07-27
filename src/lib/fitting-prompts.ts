@@ -355,8 +355,15 @@ function buildFitEmphasisLines(productNotes: string): string[] {
   const lines: string[] = [];
 
   if (has('머슬핏', '머슬 핏', 'muscle fit', 'musclefit')) {
+    // (2026-07-27) "머슬핏"은 옷의 핏(재단이 몸에 딱 붙는 정도)을 말하는 패션 용어인데, 이전
+    // 문구가 "pecs"/"biceps" 같은 근육 부위 단어를 직접 써서 gpt-image-2가 "옷을 타이트하게"가
+    // 아니라 "몸 자체에 근육/덩치를 더 키워라"로 오해하는 사고가 실제 재현됨(같은 배치 안에서도
+    // 색상별로 몸이 갑자기 커지는 등 랜덤하게 발생). MODEL LOCK이 이미 "muscle definition은
+    // 절대 랜덤화 금지"라고 못박고 있는데, 이 문구가 더 앞쪽(최우선 체크리스트)에서 근육
+    // 단어로 그걸 무력화시키고 있었다. 근육 부위 단어를 빼고 "옷의 재단/실루엣" 얘기로만
+    // 한정하고, 몸 자체는 절대 안 바뀐다는 걸 이 줄 안에서 명시적으로 재확인시킨다.
     lines.push(
-      '- MUSCLE FIT (mandatory): the garment is cut close to the body through the chest, shoulders, and upper arms. The fabric follows the contour of the pecs, shoulders, and biceps with no slack — you can read the shape of the torso through it. It must NOT hang loose, billow, or drape away from the body anywhere.',
+      "- MUSCLE FIT (mandatory — this describes the GARMENT'S CUT ONLY, not the wearer's body): the fabric is cut close through the chest, shoulders, and upper arms with NO slack, so the garment's own silhouette follows whatever body shape is already there — it must not hang loose, billow, or drape away from the body anywhere. This is purely about how tightly the CLOTH is tailored. Do NOT enlarge the wearer's muscles, add mass, or otherwise change their physique to justify this fit — the body itself (per the MODEL section) stays EXACTLY as defined, identical to every other generation; only the garment gets tighter.",
     );
   }
   if (has('목') && tight) {
