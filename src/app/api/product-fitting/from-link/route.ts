@@ -264,6 +264,30 @@ function extractOptions(html: string): { colors: string[]; sizes: Array<{ label:
   };
 }
 
+// (2026-07-27) 브라우저의 fetch()가 아니라 서버 쪽 fetch(Fetch 표준)의 res.text()는 실제
+// 페이지 인코딩과 무관하게 항상 UTF-8로 디코딩한다 — classssup.com처럼 아직 EUC-KR로
+// 서빙하는(주로 오래된/구형 카페24·독립몰) 사이트에서 상품명·옵션이 전부 깨진 문자로
+// 나오는 문제가 실측 확인됨. 응답 헤더의 charset, 없으면 <meta charset> 태그를 직접 읽어
+// 실제 인코딩으로 디코딩한다.
+function decodeHtmlBody(res: Response, buf: ArrayBuffer): string {
+  const headerCharset = res.headers.get('content-type')?.match(/charset=([^;]+)/i)?.[1]?.trim().toLowerCase();
+  // charset 선언은 항상 ASCII 범위 안에 있으므로, 태그를 찾을 땐 안전하게 latin1로 미리 읽는다.
+  const sniffText = Buffer.from(buf.slice(0, 4096)).toString('latin1');
+  const metaCharset =
+    sniffText.match(/<meta[^>]+charset=["']?([a-zA-Z0-9_-]+)/i)?.[1]?.trim().toLowerCase();
+  const raw = headerCharset || metaCharset || 'utf-8';
+  // 흔한 표기 편차 정규화 — TextDecoder가 인식하는 라벨로 맞춘다.
+  const normalized = /^(euc-?kr|ks_?c_?5601[-_]?1987?|ksc5601|cp949|x-windows-949|windows-949)$/i.test(raw)
+    ? 'euc-kr'
+    : raw;
+  try {
+    return new TextDecoder(normalized).decode(buf);
+  } catch {
+    // 인식 못 하는 인코딩이면 UTF-8로 폴백 (기존 동작 유지, 최소한 크래시는 안 남)
+    return new TextDecoder('utf-8').decode(buf);
+  }
+}
+
 async function downloadImage(url: string, referer: string): Promise<string | null> {
   try {
     const res = await fetch(url, { headers: browserHeaders(referer), signal: AbortSignal.timeout(12000) });
@@ -387,7 +411,7 @@ export async function POST(req: Request) {
         reason: '링크를 여는 데 실패했습니다(차단 또는 시간 초과). 상세 이미지를 저장해 직접 올려주세요.',
       });
     }
-    const html = await res.text();
+    const html = decodeHtmlBody(res, await res.arrayBuffer());
 
     const block = detectBlock(res.status, html);
     if (block) {
