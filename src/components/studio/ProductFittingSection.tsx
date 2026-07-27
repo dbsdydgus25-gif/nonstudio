@@ -97,6 +97,12 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   // 밀려서 무시되는 게 실측 확인됐다.
   const [productImageColors, setProductImageColors] = useState<string[]>([]);
   const [materialImageColors, setMaterialImageColors] = useState<string[]>([]);
+  // (2026-07-27) 색상별 선택 갤러리 — 제품컷을 전부 보여주고 대표님이 직접 큐레이션.
+  // excludedImageIdx: 생성에서 제외할 제품컷 인덱스(기본 전부 포함).
+  // repOverrideByColor: 색상별 "대표컷"(생성 편집 원본) 인덱스를 대표님이 직접 지정한 경우.
+  //   지정 안 하면 그 색의 첫 포함 컷이 자동 대표. key = 소문자 컬러웨이('' = 색상 미판별).
+  const [excludedImageIdx, setExcludedImageIdx] = useState<Set<number>>(new Set());
+  const [repOverrideByColor, setRepOverrideByColor] = useState<Record<string, number>>({});
   // (2026-07-23) 분석 전용 이미지(사이즈표/스와치/텍스트 카드) — 소재/사이즈 텍스트를 읽는 데만
   // 쓰고 생성기엔 절대 안 넣는다. 링크 임포터가 역할 판별해서 따로 준다(생성 편집 원본 오염 방지).
   const [infoImages, setInfoImages] = useState<string[]>([]);
@@ -265,6 +271,9 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       const colorOpts: string[] = data.colorOptions || [];
       setLinkColorOptions(colorOpts);
       setColorOverride(null);
+      // 새로 가져오면 선택 상태 초기화 — 전부 포함, 대표컷 자동
+      setExcludedImageIdx(new Set());
+      setRepOverrideByColor({});
       const pText: string = data.productText || '';
       setLinkProductText(pText);
       const extra = [
@@ -563,6 +572,28 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     }
   };
 
+  // (2026-07-27) 색상별 선택 갤러리 파생 헬퍼 — 제품컷을 색상별로 필터/큐레이션.
+  const colorKeyOf = (i: number) => (productImageColors[i] || '').toLowerCase();
+  const activeColorKey = colorOverride ? colorOverride.toLowerCase() : null;
+  // 색상 탭이 켜지면 그 색 컷 + 색상 미판별 컷만 노출("버건디 누르면 버건디만"). 꺼지면 전부.
+  const visibleProductIdxs = productImages
+    .map((_, i) => i)
+    .filter((i) => !activeColorKey || colorKeyOf(i) === activeColorKey || colorKeyOf(i) === '');
+  const isIncluded = (i: number) => !excludedImageIdx.has(i);
+  // 색상별 대표컷(생성 편집 원본): 대표님이 지정했으면 그것, 아니면 그 색의 첫 포함 컷.
+  const repIdxForColor = (key: string): number => {
+    const ov = repOverrideByColor[key];
+    if (ov != null && ov < productImages.length && isIncluded(ov) && colorKeyOf(ov) === key) return ov;
+    return productImages.findIndex((_, i) => colorKeyOf(i) === key && isIncluded(i));
+  };
+  const toggleExcluded = (i: number) =>
+    setExcludedImageIdx((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+
   return (
     <div className="max-w-4xl mx-auto px-8 py-10 space-y-10">
       {/* 제품 이미지 업로드 (색상 옵션 포함 다중) */}
@@ -605,7 +636,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             {linkColorOptions.length > 0 && (
               <div className="space-y-1.5 pt-1">
                 <span className="text-[10px] font-semibold text-gray-500">
-                  판매 색상 — 고르면 <b>그 색 사진만</b> 골라서 생성합니다 (숫자 = 그 색 사진 장수)
+                  판매 색상 — 고르면 아래 갤러리가 <b>그 색 컷만</b> 보이고, 그 색으로 생성합니다 (숫자 = 그 색 사진 장수)
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {linkColorOptions.map((c) => {
@@ -645,11 +676,27 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             사진에 배경·옷걸이·사람이 같이 나온다면, 사진에 마우스를 올리면 나오는 <b className="text-gray-600">정리하기</b>를 눌러보세요 —
             배경만 지우고 디자인은 그대로 유지한 컷으로 바꿔서, 절개선·포켓·패치 위치를 다음 단계가 더 정확히 읽게 도와줍니다 (사진 1장당 별도 생성 1회 소요, 선택 사항).
           </p>
+          {productImages.length > 0 && (
+            <p className="text-[11px] text-gray-500 leading-relaxed">
+              가져온 제품컷을 <b className="text-gray-700">직접 골라서</b> 쓸 수 있어요 — 우상단 <b>체크</b>를 끄면 그 컷은 생성에서 제외,
+              <b> 대표</b>를 누르면 그 색의 <b>기준 컷</b>(생성 원본)이 됩니다. 좋은 컷만 남길수록 정확도가 올라갑니다.
+              {activeColorKey && <span className="text-gray-400"> (지금 <b>{colorOverride}</b>만 표시 중)</span>}
+            </p>
+          )}
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-            {productImages.map((img, i) => {
+            {visibleProductIdxs.map((i) => {
+              const img = productImages[i];
               const isCleaning = cleaningIndex?.kind === 'product' && cleaningIndex.index === i;
+              const included = isIncluded(i);
+              const ck = colorKeyOf(i);
+              const isRep = repIdxForColor(ck) === i && included;
               return (
-                <div key={i} className="relative aspect-[3/4] rounded-lg overflow-hidden border border-gray-200 group bg-gray-50">
+                <div
+                  key={i}
+                  className={`relative aspect-[3/4] rounded-lg overflow-hidden border group bg-gray-50 transition ${
+                    isRep ? 'border-gray-900 ring-1 ring-gray-900' : 'border-gray-200'
+                  } ${included ? '' : 'opacity-40 grayscale'}`}
+                >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={img} alt={`제품 ${i + 1}`} className="w-full h-full object-contain" />
                   {isCleaning && (
@@ -657,12 +704,16 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                       <span className="w-5 h-5 border-2 border-gray-200 border-t-gray-900 rounded-full animate-spin" />
                     </div>
                   )}
+                  {/* 포함/제외 체크 — 하드 삭제 대신 비파괴 토글(색상 인덱스 어긋남·되돌리기 불가 방지) */}
                   <button
                     type="button"
-                    onClick={() => setProductImages((prev) => prev.filter((_, idx) => idx !== i))}
-                    className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 text-white text-[11px] opacity-0 group-hover:opacity-100 transition"
+                    onClick={() => toggleExcluded(i)}
+                    title={included ? '생성에서 제외' : '생성에 포함'}
+                    className={`absolute top-1.5 right-1.5 w-6 h-6 rounded-full text-[12px] flex items-center justify-center transition ${
+                      included ? 'bg-gray-900 text-white' : 'bg-white/90 text-gray-400 border border-gray-300'
+                    }`}
                   >
-                    ✕
+                    {included ? '✓' : ''}
                   </button>
                   <button
                     type="button"
@@ -672,9 +723,19 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                   >
                     정리하기
                   </button>
-                  <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-medium tracking-wide">
-                    {i === 0 ? '대표' : extractColors ? `색상 ${i + 1}` : `각도 ${i + 1}`}
-                  </span>
+                  {/* 대표 지정 — 눌러서 그 색의 기준 컷으로. 이미 대표면 초록 배지. */}
+                  <button
+                    type="button"
+                    onClick={() => setRepOverrideByColor((prev) => ({ ...prev, [ck]: i }))}
+                    disabled={!included}
+                    className={`absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide transition ${
+                      isRep
+                        ? 'bg-gray-900 text-white'
+                        : 'bg-black/50 text-white/90 opacity-0 group-hover:opacity-100 disabled:opacity-0'
+                    }`}
+                  >
+                    {isRep ? '대표' : '대표 지정'}
+                  </button>
                   {/* 링크로 가져온 컷은 판별된 컬러웨이를 표시 — 선택 색상과 다른 컷을 한눈에 구분 */}
                   {productImageColors[i] && (
                     <span
@@ -692,7 +753,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                 </div>
               );
             })}
-            {productImages.length < 6 && (
+            {!activeColorKey && productImages.length < 20 && (
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
