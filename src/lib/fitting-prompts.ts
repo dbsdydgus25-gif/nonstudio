@@ -412,13 +412,21 @@ function buildTextureEmphasisLine(productNotes: string): string {
 // 쪼리/플립플랍(엄지발가락 사이에 끈이 지나가는 형태)은 구조상 양말과 physically 양립 불가능함
 // — "베이지 계열 쪼리"라고 명확히 지시해도 흰 양말이 나오는 신고가 실측 확인됨. 사용자가 직접
 // 양말을 요청한 게 아니라면, 쪼리/플립플랍류가 감지됐을 때 양말을 명시적으로 금지한다.
+// (2026-07-27) "뮬(mule)"처럼 뒤가 트인(백리스) 실루엣은 gpt-image-2가 그 브랜드/모델명의
+// 뮬 버전을 정확히 몰라서(작은 로고 글씨와 같은 종류의 한계) 그냥 일반 풀슈즈 실루엣으로
+// 그려버리는 신고가 실측 확인됨("아디다스 삼바 뮬"이 일반 삼바 스니커즈로 나옴). 브랜드/
+// 모델명은 몰라도 "백리스"라는 일반 개념은 명시적으로 강조하면 도움이 된다.
 function buildFootwearEmphasisLine(shoesText: string): string {
   const n = shoesText.toLowerCase();
   const has = (...keys: string[]) => keys.some((k) => n.includes(k.toLowerCase()));
   const isThongSandal = has('쪼리', '조리', '플립플랍', '플립플롭', 'flip-flop', 'flip flop', 'thong sandal');
+  const isMule = has('뮬', 'mule', '백리스', '슬링백');
   const requestsSocks = has('양말', '삭스', 'sock');
   if (isThongSandal && !requestsSocks) {
     return 'KEY FOOTWEAR RULE — this is a THONG-STYLE SANDAL (a strap passes between the big toe and second toe): bare feet only, NO socks. Socks are physically impossible to wear with a toe-strap sandal (there is nowhere for the strap to go) — do not default to adding crew socks out of habit.';
+  }
+  if (isMule) {
+    return `KEY FOOTWEAR RULE — this is a MULE/BACKLESS silhouette: the heel and the entire back of the foot are OPEN and EXPOSED, with NO enclosed heel counter — the shoe only covers the front/top of the foot, like a slide or backless slip-on. Do NOT render a regular full closed-heel sneaker just because the front upper design (laces, stripes, toe shape) matches a known sneaker model — the back must be genuinely cut away and open.${requestsSocks ? ' Since socks are also specified: the sock is visible wrapping the exposed heel/ankle where the shoe has no back panel — it drapes over bare open heel area, it is not tucked inside an enclosed shoe back.' : ''}`;
   }
   return '';
 }
