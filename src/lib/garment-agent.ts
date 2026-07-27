@@ -22,18 +22,19 @@ const CONSTRUCTION_MAP_SCHEMA = {
     neckline: { type: Type.STRING, description: 'TOPS: the neckline — collar shape (crew/v/mock/polo), the band construction (ribbed band, bound edge, self-fabric), and CRITICALLY whether a contrast trim/stitch runs along it (state the trim colors and stitch style, e.g. "crew neck with narrow ribbed band edged by a black-and-white contrast whipstitch"). "none" if the garment is not a top' },
     sleeveCuffs: { type: Type.STRING, description: 'TOPS: the sleeve hem/cuff — band type (ribbed cuff, plain folded hem, raw edge) and whether the SAME contrast trim/stitch as the neckline appears here or not. Be explicit; this is frequently rendered wrong. "none" if not a top' },
     hem: { type: Type.STRING, description: 'TOPS: the BOTTOM hem of the garment — band type (wide ribbed band, plain hem, drawcord) and whether a contrast trim/stitch is present. If the neckline/cuffs have contrast trim but the hem does NOT, say so explicitly ("plain ribbed hem band, NO contrast stitching"). "none" if not a top' },
+    shoulderConstruction: { type: Type.STRING, description: 'TOPS: the shoulder/armhole seam construction — state which ONE of: raglan (diagonal seam from underarm to neckline, no separate shoulder seam), set-in sleeve (seam follows the natural shoulder edge), or drop-shoulder (shoulder seam sits below the natural shoulder line, on the upper arm). Base this on where the seam line actually falls in the photos, not a guess from the garment\'s general style. "none" if not a top or not visible.' },
     closures: { type: Type.STRING, description: 'ALL closures and hardware, with EXACT COUNTS as digits. Look closely at the photos and literally COUNT them — do not estimate or assume a typical number. State: how many buttons and where they run (e.g. "5 buttons down a full-length center front placket, spaced evenly"), how many are on cuffs/pockets/collar, plus any zipper (state its length/type/pull colour, e.g. "1 full-length gold metal zipper"), snaps, toggles, hooks, or drawcords. Name the hardware colour and material (matte black plastic / gold metal / tortoiseshell / self-fabric covered). If the garment is a pullover with NO closures at all, write exactly "none — pullover, no buttons, no zipper, no closures of any kind". Never invent a placket or button that is not clearly visible in the photos' },
-    frontWaistband: { type: Type.STRING, description: 'Front waistband construction: fly type, buttons/zip, belt loops, whether elastic is visible from front' },
+    frontWaistband: { type: Type.STRING, description: 'BOTTOMS: the front waistband CLOSURE TYPE — state which mechanism is actually visible: elastic (fully elasticated, no fly), drawstring (fabric cord + eyelets, may be combined with elastic), belt loops with a fabric/webbing belt, a buckle/buckle-strap closure, or a zip-fly with button/snap. Also note whether it is fully elastic, partially elastic (elastic at the back only), or rigid/non-stretch. Do not default to "elastic" without checking — a flat waistband with belt loops and no visible stretch gather is NOT elastic.' },
     frontLeftLeg: { type: Type.STRING, description: "Wearer's LEFT leg, front view — ONLY details that exist on this leg and NOT on the other leg (a symmetric pair present on both legs does NOT belong here). \"none\" if this leg has no unique detail" },
     frontRightLeg: { type: Type.STRING, description: "Wearer's RIGHT leg, front view — ONLY details that exist on this leg and NOT on the other leg. \"none\" if this leg has no unique detail" },
-    backWaistband: { type: Type.STRING, description: 'Back waistband construction: elastic gathering, yoke, or none' },
+    backWaistband: { type: Type.STRING, description: 'BOTTOMS: the back waistband CLOSURE TYPE, using the same categories as frontWaistband (elastic/drawstring/belt loops/buckle/zip-fly, and how elasticated it is) — the back often differs from the front (e.g. flat non-stretch front with elastic gathering only at the back). State "none" only if there is genuinely no waistband treatment visible.' },
     backLeftLeg: { type: Type.STRING, description: "Wearer's LEFT leg, back view — ONLY details that exist on this leg and NOT on the other leg (do NOT repeat the shared back-pocket pair here; that belongs in backPockets only). \"none\" if this leg has no unique detail" },
     backRightLeg: { type: Type.STRING, description: "Wearer's RIGHT leg, back view — ONLY details that exist on this leg and NOT on the other leg (do NOT repeat the shared back-pocket pair here). \"none\" if this leg has no unique detail" },
     backPockets: { type: Type.STRING, description: 'The symmetric back pocket pair ONLY: count, shape, placement (e.g. "two large rectangular patch pockets, one per side, upper back"), or "none". A pocket that exists on ONE side only goes in that leg\'s row instead, not here' },
     sideSeams: { type: Type.STRING, description: 'Side seam construction, or "not visible in provided photos" if unseen' },
     asymmetryChecklist: { type: Type.STRING, description: 'EVERY one-side-only detail of this garment, each as "<detail> — wearer\'s <LEFT|RIGHT> <leg/side> ONLY, the opposite side has NO such detail", separated by "; ". Example: "hammer loop — wearer\'s LEFT leg ONLY, the opposite side has NO loop; cargo patch pocket with woven brand patch — wearer\'s RIGHT leg ONLY, the opposite side has NO cargo pocket and NO patch". Write "none — all details are symmetric" if truly nothing is one-sided' },
   },
-  required: ['photoClassification', 'neckline', 'sleeveCuffs', 'hem', 'closures', 'frontWaistband', 'frontLeftLeg', 'frontRightLeg', 'backWaistband', 'backLeftLeg', 'backRightLeg', 'backPockets', 'sideSeams', 'asymmetryChecklist'],
+  required: ['photoClassification', 'neckline', 'sleeveCuffs', 'hem', 'shoulderConstruction', 'closures', 'frontWaistband', 'frontLeftLeg', 'frontRightLeg', 'backWaistband', 'backLeftLeg', 'backRightLeg', 'backPockets', 'sideSeams', 'asymmetryChecklist'],
 };
 
 /** OpenAI 폴백은 responseSchema 강제가 안 되므로, 필드가 빠지거나 문자열째로 와도 안전하게 정규화한다. */
@@ -49,6 +50,7 @@ function normalizeConstructionMap(cm: any): GarmentConstructionMap | undefined {
     neckline: cm.neckline || fallback,
     sleeveCuffs: cm.sleeveCuffs || fallback,
     hem: cm.hem || fallback,
+    shoulderConstruction: cm.shoulderConstruction || fallback,
     closures: cm.closures || fallback,
     frontWaistband: cm.frontWaistband || fallback,
     frontLeftLeg: cm.frontLeftLeg || fallback,
@@ -90,6 +92,8 @@ const GARMENT_ANALYSIS_SCHEMA = {
     details: { type: Type.STRING },
     texture: { type: Type.STRING },
     lightReaction: { type: Type.STRING },
+    stretch: { type: Type.STRING, description: 'Stretch/give of the fabric, inferred from drape, wrinkle pattern, and how the garment sits on the body in the photos (e.g. "stretchy — visible knit rib and body-hugging drape at the waist", "non-stretch — stiff woven twill with sharp fold creases, no give", "slight stretch — cotton blend with a small percentage of elastane, some ease"). Do not guess without visual evidence.' },
+    lining: { type: Type.STRING, description: 'Whether the garment is lined, inferred from a visible inner edge at the hem/cuff/neckline opening or a seller spec mention (e.g. "no lining — single layer, hem edge shows only the outer fabric", "fully lined — visible contrasting lining fabric at the hem opening", "partially lined at the waistband only"). Write "not visible in provided photos — assume unlined" if there is no evidence either way.' },
     chestWidth: { type: Type.STRING, nullable: true },
     length: { type: Type.STRING, nullable: true },
     sizeOptions: {
@@ -106,7 +110,7 @@ const GARMENT_ANALYSIS_SCHEMA = {
     },
     constructionMap: CONSTRUCTION_MAP_SCHEMA,
   },
-  required: ['color', 'material', 'fitType', 'category', 'details', 'texture', 'lightReaction', 'constructionMap'],
+  required: ['color', 'material', 'fitType', 'category', 'details', 'texture', 'lightReaction', 'stretch', 'lining', 'constructionMap'],
 };
 
 function parseBase64(dataUrl: string): { data: string; mimeType: string } {
@@ -201,6 +205,9 @@ CRITICAL RULES:
 7. READ TEXT INSIDE THE IMAGES (critical for Korean 상세페이지). Some provided photos are not clean product shots but long detail-page cuts (상세컷) that contain TEXT baked into the image — fabric composition/혼용률, 소재, care, features/특징, and especially a SIZE CHART (사이즈표: 허리/총장/밑위/허벅지/가슴/어깨/소매 등). You MUST read that embedded Korean/English text and use it: fold material/care/feature text into "material" and "details", and extract every listed size into "sizeOptions". Text printed inside an image is real product data — never skip it because it is "in an image".
 8. SIZE OPTIONS ("sizeOptions" field) — list every sale size you can find, from a size chart in the images OR from the accompanying spec text. Each entry: {label, measurements}. label = the size name shown (S/M/L/FREE/1/30 등). measurements = the verbatim numbers for that size if a chart gives them (e.g. "허리 35 총장 62 밑위 30 허벅지 36.5"), else null. Do NOT invent sizes or numbers — empty array if none is shown. These numbers are used only as a FIT reference later, not printed on the garment.
 6.5 (structural scan caveat) When you report topstitching/seam lines in "details", report ONLY lines that are actually visible in the photos. Do NOT pad the description with generic seams a garment of this type "usually" has — an invented seam line becomes an invented stitch line in the generated image.
+9. STRETCH & LINING ("stretch"/"lining" fields) — infer from VISUAL EVIDENCE, not from garment-type assumptions: stretch shows as body-hugging drape, horizontal knit rib visible at the edges, or fabric bunching/gathering around joints; non-stretch shows as sharp fold creases, a stiff/structured hang, and flat unwrinkled panels. Lining shows as a visible second layer of different fabric/color peeking out at the hem, cuff, or neckline opening — if no such edge is visible and the garment looks like a single flat panel of fabric, it is unlined. State "not visible in provided photos" rather than guessing when genuinely unclear.
+10. SHOULDER CONSTRUCTION (TOPS only, "shoulderConstruction" within constructionMap) — trace where the sleeve-to-body seam actually falls: a diagonal seam running from the underarm straight to the neckline with NO separate shoulder seam = raglan; a seam that follows the natural shoulder edge = set-in; a seam sitting below the natural shoulder line, out on the upper arm = drop-shoulder. Read the seam line in the photo, do not assume from the garment's general silhouette (an oversized tee is not automatically drop-shoulder).
+11. WAISTBAND CLOSURE TYPE (BOTTOMS only, "frontWaistband"/"backWaistband" within constructionMap) — explicitly identify which mechanism is visible: elastic (gathered/ruched fabric, stretches), drawstring (cord + eyelets), belt loops (with or without a visible belt), buckle/buckle-strap, or zip-fly with button/snap. State separately for front and back — many garments are flat/rigid at the front with elastic ONLY at the back. Do not default to "elastic" without checking for gathering texture in the photo.
 
 Return ONLY valid JSON, no markdown, no explanation:
 
@@ -212,10 +219,12 @@ Return ONLY valid JSON, no markdown, no explanation:
   "details": "the full result of the MANDATORY STRUCTURAL SCAN above — every seam/panel line, every pocket (type + exact location), every logo/patch/print (exact location AND exact appearance — patch color, text/graphic color, shape), every closure (type + count + location), stitching, hem style. For denim, also add: vintage washing effects, sandwashed thighs/knees, whiskering at crotch, pocket distressing, hem wear. DO NOT mention brand tags, hangers, or store price cards/strings — those are packaging, not garment construction.",
   "texture": "surface texture description. CRITICAL — state whether the surface is FLAT-and-smooth or has genuine THREE-DIMENSIONAL RELIEF (raised/recessed structure you could feel with a finger), because this is the #1 thing that gets flattened in rendering. Name the specific relief if present: seersucker (자글자글/오돌토돌 puckered crinkled ridges that alternate with flat bands, giving an airy cooling hand), crinkle/wrinkle finish, waffle/honeycomb, corduroy wale, ribbing, slub, boucle, terry loop, cable knit, etc. If it is a striped or checked fabric, EXPLICITLY say whether the lines are FLAT PRINTED/YARN-DYED lines on a smooth surface, OR are formed by the 3D texture itself (e.g. seersucker stripes are puckered raised ridges, NOT printed lines). Describe how pronounced the relief is and how it puckers/ripples. Examples: 'seersucker: vertical yarn-dyed thin stripes where the striped bands pucker into raised crinkled ridges alternating with flatter bands — a lightweight, airy, three-dimensional cotton-blend summer weave, NOT a smooth flat shirting', 'coarse diagonal rigid denim twill weave', 'smooth flat poplin, no relief'.",
   "lightReaction": "how fabric reacts to light (e.g., 'matte finish, no sheen', 'subtle metallic sheen at highlights', 'slight luster, semi-matte'). If the fabric has 3D relief (seersucker/waffle/corduroy/ribbing), note that the raised ridges catch light while the recesses fall into soft self-shadow, giving a dappled, textured light play rather than an even flat sheen.",
+  "stretch": "stretch/give per rule 9 (e.g. 'stretchy — visible knit rib and body-hugging drape', 'non-stretch — stiff woven with sharp fold creases', 'slight stretch — cotton blend, some ease') — never guess without visual evidence",
+  "lining": "lined or not per rule 9 (e.g. 'no lining — single layer', 'fully lined — contrast lining visible at hem opening') — 'not visible in provided photos — assume unlined' if unclear",
   "chestWidth": "estimated chest measurement if visible (e.g., '54cm', '58cm') or null",
   "length": "garment length description (e.g., 'hip length', 'cropped above waist', 'ankle length', '28 inch inseam') or null",
   "sizeOptions": "an ARRAY (per rules 7-8) of {label, measurements} read from size charts/spec text in the images or accompanying text — [] if none. Never invent.",
-  "constructionMap": "an OBJECT (per rule 6) with these required string fields — for TOPS the three edge zones neckline/sleeveCuffs/hem are the most important (rule 6d2): photoClassification, neckline, sleeveCuffs, hem, frontWaistband, frontLeftLeg, frontRightLeg, backWaistband, backLeftLeg, backRightLeg, backPockets, sideSeams, asymmetryChecklist — every field filled using WEARER'S left/right with the mirror rule applied, 'none' for empty zones, 'not visible in provided photos — do not invent' for unseen zones, no detail repeated across rows (rule 6e), and the asymmetry checklist per rule 6f. Every field is mandatory, never omit one."
+  "constructionMap": "an OBJECT (per rule 6) with these required string fields — for TOPS the three edge zones neckline/sleeveCuffs/hem plus shoulderConstruction are the most important (rules 6d2, 10): photoClassification, neckline, sleeveCuffs, hem, shoulderConstruction, frontWaistband, frontLeftLeg, frontRightLeg, backWaistband, backLeftLeg, backRightLeg, backPockets, sideSeams, asymmetryChecklist — every field filled using WEARER'S left/right with the mirror rule applied, waistband fields stating the closure TYPE per rule 11, 'none' for empty zones, 'not visible in provided photos — do not invent' for unseen zones, no detail repeated across rows (rule 6e), and the asymmetry checklist per rule 6f. Every field is mandatory, never omit one."
 }
 `.trim();
 
@@ -313,6 +322,8 @@ export async function analyzeGarment(
       details: parsed.details || 'no additional details',
       texture: parsed.texture || 'standard fabric texture',
       lightReaction: parsed.lightReaction || 'matte finish',
+      stretch: parsed.stretch || 'not visible in provided photos — assume non-stretch woven',
+      lining: parsed.lining || 'not visible in provided photos — assume unlined',
       chestWidth: parsed.chestWidth || undefined,
       length: parsed.length || undefined,
       sizeOptions: normalizeSizeOptions(parsed.sizeOptions),
@@ -334,6 +345,8 @@ CRITICAL RULES:
 4. MANDATORY STRUCTURAL SCAN — before writing "details", look at the garment piece by piece and identify every seam/panel line, every pocket (type: cargo/welt/patch/coin/slit + exact location), every logo/brand patch/embroidery/print (exact location, e.g. "left thigh cargo pocket flap"), every closure (buttons/zippers/drawstrings/toggles/snaps, count + location), topstitching/contrast stitching, and hem style. This applies to EVERY garment type (cargo pants, shorts, jackets, knitwear), not only denim.
 5. For jeans/denim specifically, ALSO be extremely detailed about the washing texture, sandwashed fading on thighs/knees, vertical slub lines, whiskering lines at the crotch, and exact denim twill texture grain — in addition to the structural scan, not instead of it.
 5.5 ONLY report seam/topstitch lines that are actually visible in the photos — never add generic seams the garment "usually" has, because an invented seam becomes an invented stitch line in the output.
+5.6 STRETCH/LINING — infer "stretch" from drape/wrinkle evidence (stretchy = body-hugging drape, visible knit rib; non-stretch = sharp fold creases, stiff hang) and "lining" from a visible second fabric layer at the hem/cuff/neckline opening (state "not visible — assume unlined" if unclear); do not guess from garment type alone.
+5.7 For TOPS, also identify shoulderConstruction (raglan / set-in / drop-shoulder, based on where the sleeve seam actually falls) and for BOTTOMS state the front/back waistband CLOSURE TYPE separately (elastic / drawstring / belt loops / buckle / zip-fly) — many garments differ between front and back.
 7. READ TEXT INSIDE THE IMAGES: some photos are Korean 상세페이지 detail cuts with TEXT baked in (소재/혼용률, 특징, care, and a SIZE CHART 사이즈표). Read that embedded text and fold it into "material"/"details", and extract every listed size into "sizeOptions" ({label, measurements}); measurements = verbatim numbers if a chart gives them (e.g. "허리 35 총장 62"), else null. Never invent sizes/numbers; [] if none.
 6. MANDATORY CONSTRUCTION MAP ("constructionMap" field) — classify each photo as FRONT/BACK/side/close-up using garment anatomy (BOTTOMS: center fly/button+zip = FRONT; patch pockets/yoke/elastic gathering with no fly = BACK. TOPS: placket/graphic/forward collar = FRONT; plain yoke = BACK), stating the cue per photo, then map every zone in the WEARER'S left/right (mirror rule: in a FRONT view the wearer's left appears on the viewer's right; in a BACK view it does not mirror). Write labeled lines: FRONT waistband / FRONT wearer-left leg / FRONT wearer-right leg / BACK waistband / BACK wearer-left leg / BACK wearer-right leg / BACK pockets / SIDE seams. Mark empty zones "none" and unseen zones "not visible in provided photos — do not invent". Asymmetry matters (e.g. patch on one leg only, hammer loop on the other leg only, elastic on the back waistband only). NO DUPLICATION: each physical detail appears in exactly ONE line — symmetric pairs (the two back pockets) go only in the BACK pockets line, never repeated per-leg; per-leg lines list only one-leg-only details. End with an ASYMMETRY CHECKLIST line: every one-side-only detail as "<detail> — wearer's <LEFT|RIGHT> leg ONLY, the opposite side has NO such detail", joined by "; ".
 
@@ -346,6 +359,8 @@ The JSON must follow this exact schema:
   "details": "the full result of the MANDATORY STRUCTURAL SCAN: every seam/panel line, every pocket (type + exact location), every logo/patch/print (exact location AND exact appearance — patch color, text/graphic color, shape), every closure (type + count + location), stitching, hem style. For denim, also add vintage washes/sandwashed thighs/whiskering/pocket distressing/hem wear. DO NOT include hangers, strings, price cards, or store tags.",
   "texture": "fabric texture description (e.g. coarse diagonal rigid denim twill weave, high-contrast wash grain)",
   "lightReaction": "matte" | "subtle sheen" | "glossy",
+  "stretch": "stretch/give inferred from drape and wrinkle pattern in the photos (e.g. 'stretchy — visible knit rib, body-hugging drape', 'non-stretch — stiff woven with sharp fold creases', 'slight stretch — cotton blend, some ease'); do not guess without visual evidence",
+  "lining": "whether lined, inferred from a visible inner edge at hem/cuff/neckline or seller spec text (e.g. 'no lining — single layer', 'fully lined — contrast lining visible at hem'); 'not visible in provided photos — assume unlined' if no evidence either way",
   "sizeOptions": "array of {label, measurements} read from size charts/spec text in the images (rule 7); [] if none; never invent",
   "constructionMap": "the full result of the MANDATORY CONSTRUCTION MAP (rule 6): photo classification with reasoning, then labeled zone-by-zone lines (FRONT waistband / FRONT wearer-left leg / FRONT wearer-right leg / BACK waistband / BACK wearer-left leg / BACK wearer-right leg / BACK pockets / SIDE seams), in WEARER'S left/right with the mirror rule applied, empty zones marked 'none', unseen zones marked 'not visible in provided photos — do not invent'"
 }
@@ -397,6 +412,8 @@ Output raw JSON ONLY. No markdown formatting, no \`\`\`json block. Just the raw 
           details: parsed.details || 'no additional details',
           texture: parsed.texture || 'standard fabric texture',
           lightReaction: parsed.lightReaction || 'matte finish',
+          stretch: parsed.stretch || 'not visible in provided photos — assume non-stretch woven',
+          lining: parsed.lining || 'not visible in provided photos — assume unlined',
           sizeOptions: normalizeSizeOptions(parsed.sizeOptions),
           constructionMap: normalizeConstructionMap(parsed.constructionMap),
         };
@@ -420,6 +437,8 @@ Output raw JSON ONLY. No markdown formatting, no \`\`\`json block. Just the raw 
       details: rawSpecs || 'as shown in the reference garment photo',
       texture: 'textured fabric',
       lightReaction: 'matte finish',
+      stretch: 'unknown — analysis failed',
+      lining: 'unknown — analysis failed',
       analysisFailed: true,
     };
   }

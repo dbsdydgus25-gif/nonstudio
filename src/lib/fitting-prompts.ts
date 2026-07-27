@@ -39,6 +39,14 @@ export interface GarmentAnalysis {
   details: string;          // 디테일 (지퍼, 주머니, 자수 등)
   texture: string;          // 질감 표현
   lightReaction: string;    // 빛 받을 때 표현 (광택, 무광, 셔링 등)
+  /**
+   * (2026-07-27) 대표님이 정리해주신 상세페이지 분석 템플릿("3. 소재/재질" 항목) 반영 —
+   * 신축성/안감 유무는 핏감·주름·안쪽 시접 마감으로 사진에서 추정 가능한데 지금까지
+   * 전용 필드가 없어 details 자유 텍스트에 묻히거나 아예 언급이 빠졌다. material/texture와
+   * 같은 급으로 최상위 필드로 분리.
+   */
+  stretch: string;          // 신축성 유무 (핏감/주름으로 추정)
+  lining: string;           // 안감 유무 및 소재
   chestWidth?: string;      // 가슴 단면
   length?: string;          // 기장
   /**
@@ -78,6 +86,11 @@ export interface GarmentConstructionMap {
   neckline: string;
   sleeveCuffs: string;
   hem: string;
+  /**
+   * (2026-07-27) 상의 전용 — 어깨/암홀 재봉 방식(래글런/셋인/드롭숄더)은 실루엣에 큰 영향을
+   * 주는데 지금까지 물어본 적이 없어 항상 기본값(셋인)으로 뭉개졌다.
+   */
+  shoulderConstruction: string;
   /**
    * (2026-07-23) 여밈/하드웨어 전용 존 — 셔츠·아우터에서 가장 자주 틀리는 부위인데
    * 전용 필드가 없어 free-text(details)에 묻히거나 통째로 누락됐다(실제 사고: 클로즈업에서
@@ -225,7 +238,7 @@ const CATEGORY_PRESERVE_LABEL: Record<SourcedCategory, string> = {
 function buildGarmentFidelityBlock(category: SourcedCategory, garmentAnalysis: GarmentAnalysis): string {
   return `
 - The ${CATEGORY_PRESERVE_LABEL[category]} visible in the input photo IS the real sourced product. Faithfully reproduce its color, fabric texture, fit, and silhouette — this is the hero item and must be recognizable as the same product — but you have freedom to adjust how it drapes on the reshaped body.
-- Reference spec of the sourced item — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.
+- Reference spec of the sourced item — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; Fit: ${garmentAnalysis.fitType}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Stretch: ${garmentAnalysis.stretch}; Lining: ${garmentAnalysis.lining}; Details: ${garmentAnalysis.details}.
 - CRITICAL FABRIC RULE: do NOT invent a FLAT decorative print (jacquard, paisley, damask, moire, graphic) that is not listed, and do not change the color. BUT if the surface texture above names genuine three-dimensional weave relief (seersucker pucker, waffle, corduroy wale, ribbing, crinkle, slub, terry loop), render it as real raised-and-recessed structure with its own self-shadowing — do NOT flatten it into a smooth surface. A genuinely plain solid knit/weave stays perfectly plain with only natural grain; a genuinely puckered/textured fabric must visibly pucker and ripple in three dimensions.
 - The fabric surface must look like an actual photograph of a real garment, with natural soft folds/wrinkles from body movement and gravity, plus whatever genuine woven relief the real fabric has (seersucker pucker, waffle, ribbing, etc. — render that as real cloth structure). Do NOT render any algorithmic or "AI-texture-filter" look: no engraved/embossed decorative SWIRL motif that isn't the real weave, no synthetic noise grain, no digital fabric-simulation artifacts. A genuinely plain smooth fabric should look boringly plain like a studio product photo; a genuinely textured/puckered fabric should show that real texture — the point is to match the real fabric, not to force everything flat.
 - SCOPE OF THIS RULE (do not over-apply): this fidelity requirement applies ONLY to the ${CATEGORY_PRESERVE_LABEL[category]}'s own color/print/texture — it does NOT mean preserving the rest of the original photo. The body shape, pose, background, and every other garment/accessory MUST still be changed exactly as instructed in the other sections below (MODEL BODY RESHAPE, POSE & FRAMING, NEW STYLING) — do not keep the original room, original pose, or original bottom/shoes just because this section asks for fidelity on one item. Use the input photo only as a color/texture reference for this ONE item, not as a template to copy wholesale.
@@ -700,7 +713,7 @@ export function buildProductFittingPrompt(
     `- PRIMARY VISUAL SOURCE (highest priority, overrides every other reference): Image ${productImageNumber}${extraProductImageNumbers.length ? ` (and the other-angle product photo${extraProductImageNumbers.length > 1 ? 's' : ''} ${extraProductImageNumbers.join(', ')})` : ''} is the ONE AND ONLY source for the garment's COLOR, PATTERN/PRINT, overall DESIGN, LENGTH, and SILHOUETTE${colorOverrideNote?.trim() ? ' (EXCEPT color, if a MANDATORY SOLD COLORWAY OVERRIDE is specified above — that wins for color only; pattern/design/length/silhouette still come from this photo)' : ''}. These four things come exclusively from the product photo — no textual note and no other reference may change the color, invent a pattern, or alter the design/length. If the product photo shows a plain solid fabric, the output MUST be plain and solid.`,
     // (2026-07-22) 핏은 판매자 지시(KEY FIT)가 있으면 여기서 추정값을 아예 빼서 두 번째 충돌
     // 지점을 없앤다 — 예전엔 이 줄의 "Fit: regular"가 상단의 "머슬핏 타이트"를 되돌리고 있었다.
-    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; ${hasFitSpec ? 'Fit: see KEY FIT in the checklist above (seller spec — authoritative)' : `Fit: ${garmentAnalysis.fitType}`}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Details: ${garmentAnalysis.details}.${colorVariantLine}${productNotesLine}${extraAngleLine}${materialLine}${poseAnchorLine}`,
+    `- Reference spec — Color: ${garmentAnalysis.color}; Material: ${garmentAnalysis.material}; ${hasFitSpec ? 'Fit: see KEY FIT in the checklist above (seller spec — authoritative)' : `Fit: ${garmentAnalysis.fitType}`}; Surface texture: ${garmentAnalysis.texture}; Light reaction: ${garmentAnalysis.lightReaction}; Stretch: ${garmentAnalysis.stretch}; Lining: ${garmentAnalysis.lining}; Details: ${garmentAnalysis.details}.${colorVariantLine}${productNotesLine}${extraAngleLine}${materialLine}${poseAnchorLine}`,
     // 재질/원단은 "만졌을 때의 표면 느낌"으로만 반영 — 그 자체가 색이나 무늬를 바꾸면 안 된다.
     `- MATERIAL/TEXTURE — RENDER REAL 3D RELIEF, DON'T INVENT FLAT PRINTS: the "Material / Surface texture / Light reaction" fields above describe how the fabric FEELS and reflects light. Two different things must be handled oppositely: (1) a FLAT printed/dyed decorative motif (jacquard, paisley, damask, graphic) must NOT be invented — do not turn a weave into a printed pattern, and do not change the color. (2) But genuine THREE-DIMENSIONAL woven relief that the real fabric actually has — seersucker pucker (자글자글/오돌토돌 crinkled raised ridges), crinkle/wrinkle finish, waffle, corduroy wale, ribbing, slub, terry loop — MUST be rendered as real raised-and-recessed surface structure with its own micro-shadows and highlights, NOT flattened into a smooth surface. If the texture field describes seersucker or a puckered/crinkled/rippled surface, the garment must visibly pucker and ripple in three dimensions (the fabric is NOT flat ironed poplin); if it says the stripes are formed by that puckered texture, render them as raised ridges catching light, not as flat printed lines on smooth cloth.`,
     `- CRITICAL COLOR RULE: ${
@@ -730,6 +743,7 @@ export function buildProductFittingPrompt(
             `  NECKLINE: ${garmentAnalysis.constructionMap.neckline}`,
             `  SLEEVE CUFFS: ${garmentAnalysis.constructionMap.sleeveCuffs}`,
             `  BOTTOM HEM: ${garmentAnalysis.constructionMap.hem}`,
+            `  SHOULDER/ARMHOLE CONSTRUCTION (affects the whole silhouette — reproduce this exact seam type, not a generic default): ${garmentAnalysis.constructionMap.shoulderConstruction}`,
             `  CLOSURES / HARDWARE (exact counts — reproduce this number literally, never a "typical" number): ${garmentAnalysis.constructionMap.closures}`,
             `  Side seams: ${garmentAnalysis.constructionMap.sideSeams}`,
             `  EDGE RENDERING RULE: render each of the three edges exactly as its line describes, and treat them as INDEPENDENT. A contrast trim/stitch belongs ONLY on the edges whose line actually names it — if the neckline and cuffs have a contrast whipstitch but the hem line says a plain band with no contrast stitching, the hem must be rendered plain, with the contrast stitch absent there. Never copy one edge's trim onto another edge, never omit a trim that IS named, and never replace a described ribbed band with a plain raw edge (or vice versa). Match the trim's stated colors and stitch style, and keep the band's stated width/proportion.`,

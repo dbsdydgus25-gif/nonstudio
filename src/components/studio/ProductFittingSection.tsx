@@ -268,7 +268,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       setLinkProductText(pText);
       const extra = [
         colorOpts.length ? `색상 ${colorOpts.length}개(${colorOpts.slice(0, 6).join(', ')})` : '',
-        materialImgs.length ? `재질 참고 ${materialImgs.length}장` : '',
+        materialImgs.length ? `디테일 참고 ${materialImgs.length}장` : '',
         linkSizes.length ? `사이즈 ${linkSizes.length}개` : '',
       ]
         .filter(Boolean)
@@ -864,13 +864,17 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             </div>
           )}
 
-          {/* 재질 참고 사진 — 색상 아닌 원단/버튼/스티치 클로즈업 전용, 위 제품 사진과 분리 분석 */}
+          {/* (2026-07-27) "재질 참고 사진" → "디테일 참고 사진"으로 개명 — 대표님 피드백: 위 제품
+              이미지(색상별 각도 사진들) 자체가 이미 절개선·포켓·소재를 다 보여주므로 "재질만
+              보는 별도 사진"이라는 프레이밍이 오해를 줬음. 이름/설명을 "원단뿐 아니라 절개선·
+              카라·소매·허리밴딩 등 구조 디테일 전체를 이 사진들과 위 제품 사진을 합쳐서 분석"
+              한다는 걸 명확히 하도록 수정. */}
           <div className="pt-2 border-t border-gray-100 space-y-2.5">
             <div>
-              <div className="text-[13px] font-semibold text-gray-900 tracking-tight">재질 참고 사진</div>
+              <div className="text-[13px] font-semibold text-gray-900 tracking-tight">디테일 참고 사진</div>
               <p className="text-[11px] text-gray-400 mt-0.5 leading-relaxed">
-                원단 결 · 단추 · 스티치 같은 디테일 클로즈업이 있으면 추가하세요. 위 제품 사진은 색상 · 핏 위주로,
-                여기 사진은 재질 · 디테일 위주로 따로 분석해서 결과에 함께 반영합니다 (선택, 최대 4장).
+                원단 결 · 단추 · 스티치 · 안감 같은 클로즈업이 있으면 추가하세요. 위 제품 이미지(색상별 각도 사진 포함)와
+                여기 사진을 합쳐서 절개선 · 넥라인 · 소매 · 허리밴딩 · 안감 · 신축성까지 종합 분석합니다 (선택, 최대 4장).
               </p>
             </div>
             <div className="grid grid-cols-4 sm:grid-cols-6 gap-2.5">
@@ -1068,7 +1072,7 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
             <div className="text-[13px] font-semibold text-gray-900 tracking-tight">프레이밍</div>
             <div className="text-[11px] text-gray-400 mt-0.5">
               클로즈업은 소싱한 제품 부위(상의=가슴 · 하의=다리 · 신발=발)만 확대한 디테일컷 — 얼굴은 안 나올 수 있습니다.
-              <b className="text-gray-600">재질 참고 사진도 함께 참고</b>하므로, 원단 클로즈업을 올려두면 정확도가 크게 올라갑니다.
+              <b className="text-gray-600">디테일 참고 사진도 함께 참고</b>하므로, 원단 클로즈업을 올려두면 정확도가 크게 올라갑니다.
             </div>
           </div>
           <div className="flex items-center gap-2">
