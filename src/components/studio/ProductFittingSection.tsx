@@ -453,9 +453,13 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     };
 
     let effectiveProductImages: string[];
-    // (2026-07-23) 디테일(재질) 참고 사진도 색상 지정 시 그 색(또는 색 미판별)만 — 다른 색 디테일
-    // 컷이 섞여 "완전 다른 옷"이 나오던 사고 방지.
-    let effectiveMaterialImages = materialImages;
+    // (2026-07-27) 디테일(재질) 참고 사진은 원단 결·절개선·커프스 같은 "구조 클로즈업"이라
+    // 색상과 무관하게 전 색상 공통이다(예: 이 티셔츠의 회색 롤업 배색은 버건디 컷에서 찍혔지만
+    // 모든 색상에 공통). 그래서 색상으로 필터링하지 않고 항상 공통 참고로 넣는다 — 색상 지정 시
+    // 필터링하면 다른 색을 뽑을 때 구조 근거가 통째로 빠지는 문제가 실측 확인됐다. (색상별로
+    // 갈리는 "제품 착장/누끼 컷"은 위 제품 갤러리에서 이미 색상별로 분리·선택되므로, 예전
+    // "다른 색 제품컷이 재질에 섞여 완전 다른 옷" 사고는 갤러리 큐레이션 단계에서 차단됨.)
+    const effectiveMaterialImages = materialImages;
     let colorNote = '';
 
     if (colorOverride) {
@@ -469,9 +473,6 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
         effectiveProductImages = includedIdxs.map((i) => productImages[i]);
         colorNote = ` (${colorOverride} 선택 컷이 없어 텍스트 색 지시로만 반영 — 색이 다를 수 있음)`;
       }
-      effectiveMaterialImages = materialImages.filter(
-        (_, i) => !materialImageColors[i] || materialImageColors[i].toLowerCase() === ck,
-      );
     } else {
       // 색상 미지정: 포함된 전체 컷, 대표(색상 미판별 그룹) 우선.
       effectiveProductImages = orderRepFirst(includedIdxs, repIdxForColor(''));
