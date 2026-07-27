@@ -253,11 +253,12 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       const matColors: string[] = data.materialImageColors || [];
       // 링크로 가져올 땐 기존 목록에 덧붙이지 않고 교체한다 — 색상 인덱스가 어긋나면
       // "GRAY 골랐는데 브라운 컷이 들어가는" 사고가 나므로 이미지/색상 배열을 항상 짝맞춘다.
-      setProductImages(productImgs.slice(0, 8));
-      setProductImageColors(prodColors.slice(0, 8));
-      setMaterialImages(materialImgs.slice(0, 4));
-      setMaterialImageColors(matColors.slice(0, 4));
-      setInfoImages(infoImgs.slice(0, 6));
+      // (2026-07-27) 캡 상향 — 제품컷을 최대한 다 보여주고 대표님이 색상별로 직접 고르는 구조.
+      setProductImages(productImgs.slice(0, 20));
+      setProductImageColors(prodColors.slice(0, 20));
+      setMaterialImages(materialImgs.slice(0, 12));
+      setMaterialImageColors(matColors.slice(0, 12));
+      setInfoImages(infoImgs.slice(0, 8));
       // <select>에서 뽑은 정확한 사이즈 옵션이 있으면 바로 채운다 (없으면 아래 자동 분석으로 보완)
       const linkSizes: Array<{ label: string; measurements?: string }> = data.sizeOptions || [];
       if (linkSizes.length) setSizeOptions(linkSizes);

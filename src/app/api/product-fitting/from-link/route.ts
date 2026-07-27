@@ -64,7 +64,11 @@ function resolveUrl(u: string, origin: string): string {
 const isJunkUrl = (u: string) =>
   /\.svg(\?|$)|sprite|icon|logo|favicon|blank|placeholder|1x1|pixel|badge|btn_|banner|footer|quick_(top|down)|join_kakao|top_sns|_bn_\d|kakaotalk|\/board\/images\/|notice|popup|close\.(png|gif|jpe?g)|facebook\.com\/tr\?|google-analytics|googletagmanager|doubleclick\.net/i.test(
     u,
-  );
+  ) ||
+  // (2026-07-27) 캡 상향으로 <img> 캐치올이 사이트 스킨 UI 이미지까지 대량으로 긁어옴
+  // (classsup 실측: PC_TOP·all_cate·market98/layout 등). 카페24류 스킨에서 제품 이미지는
+  // /design/·/layout/ 아래 절대 안 들어가고 스킨 폴더가 거기다 — 안전하게 사이트 크롬으로 제외.
+  /\/design\/|\/layout\/|market98|all_cate|pc_top|gnb|_top\.(jpe?g|png|gif)/i.test(u);
 
 /**
  * 이미지 후보를 두 갈래로 분리한다:
@@ -114,8 +118,11 @@ function collectImageUrls(html: string, pageUrl: string): { official: string[]; 
       .filter((u, i, arr) => arr.indexOf(u) === i)
       .slice(0, cap);
 
-  const official = clean(officialSet, 14);
-  const detailOnly = clean(detailSet, 20).filter((u) => !official.includes(u));
+  // (2026-07-27) 캡 상향 — "제품 이미지를 전부 가져와 대표님이 직접 고르는" 구조로 전환.
+  // 예전엔 임의로 몇 장만 잘라와 AI가 자동 선택했는데, gpt-image-2는 글보다 실제 픽셀을
+  // 잘 베끼므로 좋은 참고컷을 많이·정확히 사람이 큐레이션해 넣는 게 정확도의 최대 지렛대다.
+  const official = clean(officialSet, 28);
+  const detailOnly = clean(detailSet, 30).filter((u) => !official.includes(u));
   return { official, detail: detailOnly };
 }
 
@@ -323,21 +330,29 @@ async function downloadImage(url: string, referer: string): Promise<string | nul
  * 있음이 실측 확인됨. Gemini Flash로 한 번에 "이 제품(제목/색상 기준)을 실제로 보여주는가"만
  * 검사해 무관한 이미지를 제거한다. geminiApiKey가 없으면 필터 없이 전부 통과(fail-open).
  */
+type ImageVerdict = { keep: boolean; role: 'garment' | 'fabric' | 'info'; colorway: string };
+
 async function filterRelevantImages(
   images: string[],
   title: string,
   colorOptions: string[],
   geminiApiKey?: string,
-): Promise<Array<{ keep: boolean; role: 'garment' | 'fabric' | 'info'; colorway: string }>> {
+): Promise<ImageVerdict[]> {
   // 분석 실패/키 없음 시 폴백 — 판단을 못 하면 전부 garment로 통과(기존 동작 보존)
-  const passAll = () =>
-    images.map(() => ({ keep: true, role: 'garment' as const, colorway: '' }));
-  if (!geminiApiKey || images.length === 0) return passAll();
-  try {
-    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
-    const parts: any[] = [
-      {
-        text: `These ${images.length} numbered photos (index 0 to ${images.length - 1}, in order) were scraped from a single product's detail page titled "${title || 'unknown'}"${colorOptions.length ? `, sold in these colorways: ${colorOptions.join(', ')}` : ''}. Some may be UNRELATED brand mood shots, a different product, banners/promos, or street photography that does not actually show this garment.
+  const passChunk = (chunk: string[]): ImageVerdict[] =>
+    chunk.map(() => ({ keep: true, role: 'garment' as const, colorway: '' }));
+  if (!geminiApiKey || images.length === 0) return passChunk(images);
+  const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+
+  // (2026-07-27) 캡 상향(제품컷 전부 수집)으로 한 번에 35장까지 올 수 있어, 한 번의 비전 호출에
+  // 다 밀어넣으면 느려지고 인덱스 정렬이 흔들릴 위험이 있다. 12장씩 청크로 나눠 병렬 분류하고
+  // 순서대로 이어붙인다(청크 실패는 그 청크만 fail-open).
+  const CHUNK = 12;
+  const classifyChunk = async (chunk: string[]): Promise<ImageVerdict[]> => {
+    try {
+      const parts: any[] = [
+        {
+          text: `These ${chunk.length} numbered photos (index 0 to ${chunk.length - 1}, in order) were scraped from a single product's detail page titled "${title || 'unknown'}"${colorOptions.length ? `, sold in these colorways: ${colorOptions.join(', ')}` : ''}. Some may be UNRELATED brand mood shots, a different product, banners/promos, or street photography that does not actually show this garment.
 
 For EACH image return three things:
 1. keep — true if it is at all related to THIS product (a photo of the garment worn/flat, a fabric close-up, a size chart, a colorway/spec info card, etc.); false ONLY if it is unrelated scenery/person, a clearly DIFFERENT garment, or a generic banner/promo with no info about this product.
@@ -349,7 +364,7 @@ For EACH image return three things:
 3. colorway — WHICH single colorway of this product the garment in that photo actually is. Judge by the garment's real color${colorOptions.length ? ` and answer with EXACTLY one of these option names: ${colorOptions.join(', ')}` : ''}. If the image is "info" (size chart, text card, or a multi-color swatch/grid showing several colors at once), answer "unknown" — never pick one color off a multi-color sheet.`,
       },
     ];
-    images.forEach((img, i) => {
+    chunk.forEach((img, i) => {
       const [, data] = img.split(',');
       const mimeType = img.match(/data:([^;]+)/)?.[1] || 'image/jpeg';
       parts.push({ text: `Image index ${i}:` });
@@ -391,7 +406,7 @@ For EACH image return three things:
       : [];
     const map = new Map(decisions.map((d) => [d.index, d]));
     // 판정이 없는 이미지는 안전하게 통과(fail-open) — 필터가 실수로 다 지우는 것보다 낫다
-    return images.map((_, i) => {
+    return chunk.map((_, i) => {
       const d = map.get(i);
       const raw = (d?.colorway || '').trim();
       const matched = colorOptions.find((c) => c.toLowerCase() === raw.toLowerCase()) || '';
@@ -401,9 +416,16 @@ For EACH image return three things:
       return { keep: d?.keep ?? true, role, colorway: role === 'info' ? '' : matched };
     });
   } catch (err) {
-    console.warn('[from-link] 이미지 관련성 필터 호출 실패 — 필터 생략:', err);
-    return passAll();
+    console.warn('[from-link] 이미지 관련성 필터 청크 실패 — 이 청크는 생략(전부 통과):', err);
+    return passChunk(chunk);
   }
+  };
+
+  // 12장씩 청크로 나눠 병렬 분류 후 순서대로 이어붙인다.
+  const chunks: string[][] = [];
+  for (let i = 0; i < images.length; i += CHUNK) chunks.push(images.slice(i, i + CHUNK));
+  const chunkResults = await Promise.all(chunks.map((c) => classifyChunk(c)));
+  return chunkResults.flat();
 }
 
 export async function POST(req: Request) {
@@ -459,8 +481,10 @@ export async function POST(req: Request) {
       return out;
     };
 
-    const productImagesRaw = await downloadBucket(official, 8);
-    const materialImagesRaw = await downloadBucket(detail, 6);
+    // (2026-07-27) 캡 상향 — 제품 이미지를 최대한 다 가져와 프론트에서 색상별로 보여주고
+    // 대표님이 직접 선택. downloadImage 내부에서 다운스케일되므로 페이로드는 관리됨.
+    const productImagesRaw = await downloadBucket(official, 20);
+    const materialImagesRaw = await downloadBucket(detail, 15);
 
     // 무관 이미지 필터 + 이미지별 역할(garment/fabric/info)·컬러웨이 판별 — 두 버킷을 합쳐
     // 한 번에 검사(호출 절약)한다. (2026-07-23) 예전엔 URL 출처(official/detail)로만 버킷을
