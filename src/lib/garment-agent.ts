@@ -205,7 +205,7 @@ CRITICAL RULES:
 Return ONLY valid JSON, no markdown, no explanation:
 
 {
-  "color": "exact color name and fading/washing details (e.g., 'vintage sandwashed medium blue denim with natural fading', 'solid pitch black', 'washed charcoal with light vertical streaking')",
+  "color": "exact color name and fading/washing details, followed by an approximate hex code of the garment's dominant color in parentheses (e.g., 'washed olive-brown pigment-dyed cotton with soft fading (~#6f6a4f)', 'solid pitch black (~#111111)', 'washed charcoal with light vertical streaking (~#3a3a3c)'). Read the hex from the actual garment pixels in the photo, not a guess from the color name.",
   "material": "fabric composition (e.g., 'heavyweight rigid 100% cotton denim twill', 'linen-rayon blend')",
   "fitType": "ONE of: oversized, boxy, regular, slim, wide-leg, skinny, straight, unknown",
   "category": "ONE of: top, bottom, outer, dress, shoes, bag, accessory, unknown",
@@ -339,7 +339,7 @@ CRITICAL RULES:
 
 The JSON must follow this exact schema:
 {
-  "color": "highly specific color description and fading pattern (e.g. vintage sandwashed medium blue denim with natural fading, deep charcoal)",
+  "color": "highly specific color description and fading pattern, followed by an approximate hex code of the dominant color in parentheses read from the actual garment pixels (e.g. 'vintage sandwashed medium blue denim with natural fading (~#5a6b82)', 'deep charcoal (~#333336)')",
   "material": "fabric description (e.g. heavyweight rigid 100% cotton denim twill, lightweight cotton blend)",
   "fitType": "slim" | "regular" | "oversized" | "loose" | "wide-leg",
   "category": "top" | "bottom" | "outer" | "dress" | "shoes" | "bag" | "accessory",
