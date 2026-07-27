@@ -57,7 +57,14 @@ function resolveUrl(u: string, origin: string): string {
   return u;
 }
 
-const isJunkUrl = (u: string) => /\.svg(\?|$)|sprite|icon|logo|favicon|blank|placeholder|1x1|pixel|badge|btn_/i.test(u);
+// (2026-07-27) classsup.com 실측: 헤더 로고/SNS 아이콘/카카오 배너/푸터 배너/퀵메뉴 이미지가
+// 이 필터를 다 통과해서 officialSet의 14장 캡을 먼저 채워버리고, 정작 페이지 훨씬 아래
+// 본문(에디터로 삽입된 진짜 원단·카라·소매 클로즈업)이 캡 밖으로 밀려나 "디테일 참고 사진"이
+// 텅 비는 사고가 실측 확인됨. 사이트 UI 크롬(배너/퀵메뉴/카카오/SNS/공지)을 넓게 걸러낸다.
+const isJunkUrl = (u: string) =>
+  /\.svg(\?|$)|sprite|icon|logo|favicon|blank|placeholder|1x1|pixel|badge|btn_|banner|footer|quick_(top|down)|join_kakao|top_sns|_bn_\d|kakaotalk|\/board\/images\/|notice|popup|close\.(png|gif|jpe?g)|facebook\.com\/tr\?|google-analytics|googletagmanager|doubleclick\.net/i.test(
+    u,
+  );
 
 /**
  * 이미지 후보를 두 갈래로 분리한다:
@@ -93,6 +100,12 @@ function collectImageUrls(html: string, pageUrl: string): { official: string[]; 
 
   // 카페24 상세설명(에디봇) 지연로딩 — 사이즈표·재질 클로즈업이 여기 있다
   for (const m of html.matchAll(/ec-data-src=["']([^"']+)["']/gi)) detailSet.add(m[1]);
+  // (2026-07-27) classsup.com 실측: ec-data-src를 안 쓰는 몰은 본문 에디터(NNEditor/스마트에디터
+  // 등, 업로드 경로에 "editor"가 들어감)로 삽입한 이미지가 그냥 평범한 <img src>라서, 위의
+  // 일반 <img> 캐치올(아래)에 officialSet과 뒤섞여 헤더/배너류에 밀려 캡 밖으로 밀려났다.
+  // "업로드 경로에 editor가 포함"이라는 신호를 detail 전용 버킷으로 직접 분리해 우선 확보한다.
+  for (const m of html.matchAll(/https?:\/\/[^"'\\ )]*\/(?:web|design)\/upload\/[^"'\\ )]*editor[^"'\\ )]*\.(?:jpe?g|png|webp|gif)/gi))
+    detailSet.add(m[0]);
 
   const clean = (set: Set<string>, cap: number) =>
     Array.from(set)
