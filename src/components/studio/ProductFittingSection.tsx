@@ -118,6 +118,28 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   const [colorJobs, setColorJobs] = useState<ColorJobItem[]>([]);
   const [isBatchDownloading, setIsBatchDownloading] = useState(false);
 
+  // (2026-07-27) 색상별 선택 갤러리 파생 헬퍼 — handleRun(생성 입력 구성)과 JSX(갤러리) 양쪽에서 씀.
+  const colorKeyOf = (i: number) => (productImageColors[i] || '').toLowerCase();
+  const activeColorKey = colorOverride ? colorOverride.toLowerCase() : null;
+  // 색상 탭이 켜지면 그 색 컷 + 색상 미판별 컷만 노출("버건디 누르면 버건디만"). 꺼지면 전부.
+  const visibleProductIdxs = productImages
+    .map((_, i) => i)
+    .filter((i) => !activeColorKey || colorKeyOf(i) === activeColorKey || colorKeyOf(i) === '');
+  const isIncluded = (i: number) => !excludedImageIdx.has(i);
+  // 색상별 대표컷(생성 편집 원본): 대표님이 지정했으면 그것, 아니면 그 색의 첫 포함 컷.
+  const repIdxForColor = (key: string): number => {
+    const ov = repOverrideByColor[key];
+    if (ov != null && ov < productImages.length && isIncluded(ov) && colorKeyOf(ov) === key) return ov;
+    return productImages.findIndex((_, i) => colorKeyOf(i) === key && isIncluded(i));
+  };
+  const toggleExcluded = (i: number) =>
+    setExcludedImageIdx((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+
   const [currentResult, setCurrentResult] = useState<{ imageUrl: string; prompt: string; revisedPrompt?: string; generationId?: string | null } | null>(null);
 
   const { begin, trackIds, finish, cancel, isCanceling, cancelNote } = useCancelableRun();
@@ -419,36 +441,44 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     setCurrentResult(null);
     setColorJobs([]);
 
-    // (2026-07-21) 색상을 골랐으면 그 색 컷만 생성에 넣는다 — 텍스트로만 "GRAY로 그려라"라고 하면
-    // 브라운/차콜 사진 여러 장의 시각 정보에 밀려 무시되는 게 실측 확인됨(GRAY 선택 → 브라운 출력).
-    // 판별된 컬러웨이가 일치하는 컷을 우선 사용하고, 제품컷에 없으면 상세컷에서라도 찾아 쓴다.
-    let effectiveProductImages = productImages;
-    // (2026-07-23) materialImages(재질 참고 사진)는 여러 색상 사진이 뒤섞여 스크래핑되는 경우가
-    // 흔한데(예: 카키/블랙 두 컬러웨이가 같은 상세페이지에 다 있음), 지금까지 이 배열을 색상과
-    // 무관하게 통째로 서버에 보내고 있어서 — 카키를 생성하는데 블랙 재질 사진이 참고 이미지로
-    // 같이 들어가 "완전 다른 옷"이 나오는 문제가 실측 확인됐다. 색상을 지정했으면 재질 사진도
-    // 똑같이 그 색(또는 색 판별이 안 된 사진)만 걸러서 보낸다.
+    // (2026-07-27) 색상별 선택 갤러리 기반으로 생성 입력을 구성한다 —
+    //  · 대표님이 "제외(체크 해제)"한 컷은 빼고, "대표"로 지정한 컷을 생성 편집 원본(맨 앞)으로.
+    //  · 색상을 골랐으면 그 색 포함 컷만(대표 우선). gpt는 글보다 픽셀을 잘 베끼므로 좋은 컷을
+    //    사람이 골라 넣는 게 정확도의 핵심.
+    // 배열 맨 앞이 서버에서 편집 원본(images[0]), 나머지는 otherAngles로 쓰인다.
+    const includedIdxs = productImages.map((_, i) => i).filter((i) => isIncluded(i));
+    const orderRepFirst = (idxs: number[], repIdx: number) => {
+      const head = repIdx >= 0 && idxs.includes(repIdx) ? [repIdx] : [];
+      return [...head, ...idxs.filter((i) => i !== repIdx)].map((i) => productImages[i]);
+    };
+
+    let effectiveProductImages: string[];
+    // (2026-07-23) 디테일(재질) 참고 사진도 색상 지정 시 그 색(또는 색 미판별)만 — 다른 색 디테일
+    // 컷이 섞여 "완전 다른 옷"이 나오던 사고 방지.
     let effectiveMaterialImages = materialImages;
     let colorNote = '';
+
     if (colorOverride) {
-      const matchProduct = productImages.filter(
-        (_, i) => (productImageColors[i] || '').toLowerCase() === colorOverride.toLowerCase(),
-      );
-      const matchMaterial = materialImages.filter(
-        (_, i) => (materialImageColors[i] || '').toLowerCase() === colorOverride.toLowerCase(),
-      );
-      const matched = [...matchProduct, ...matchMaterial];
-      if (matched.length > 0) {
-        effectiveProductImages = matched;
-        colorNote = ` (${colorOverride} 컷 ${matched.length}장만 사용)`;
+      const ck = colorOverride.toLowerCase();
+      const colorIdxs = includedIdxs.filter((i) => colorKeyOf(i) === ck);
+      if (colorIdxs.length > 0) {
+        effectiveProductImages = orderRepFirst(colorIdxs, repIdxForColor(ck));
+        colorNote = ` (${colorOverride} 선택 컷 ${colorIdxs.length}장, 대표컷 기준)`;
       } else {
-        // 그 색 사진이 아예 없으면 기존 사진 + 색상 지시 텍스트로 진행(정직하게 알림)
-        colorNote = ` (${colorOverride} 색상 사진이 없어 텍스트 지시로만 반영 — 색이 다르게 나올 수 있음)`;
+        // 그 색 포함 컷이 없으면 정직하게 알리고 포함된 전체 컷 + 텍스트 색 지시로 진행
+        effectiveProductImages = includedIdxs.map((i) => productImages[i]);
+        colorNote = ` (${colorOverride} 선택 컷이 없어 텍스트 색 지시로만 반영 — 색이 다를 수 있음)`;
       }
       effectiveMaterialImages = materialImages.filter(
-        (_, i) => !materialImageColors[i] || materialImageColors[i].toLowerCase() === colorOverride.toLowerCase(),
+        (_, i) => !materialImageColors[i] || materialImageColors[i].toLowerCase() === ck,
       );
+    } else {
+      // 색상 미지정: 포함된 전체 컷, 대표(색상 미판별 그룹) 우선.
+      effectiveProductImages = orderRepFirst(includedIdxs, repIdxForColor(''));
     }
+
+    // 안전장치 — 선택이 전부 빠지는 실수를 하면 전체 제품컷으로 폴백(생성 자체는 되게).
+    if (effectiveProductImages.length === 0) effectiveProductImages = productImages;
     if (colorNote) setStageMsg((prev) => prev + colorNote);
 
     // 포즈 1장이면 기존과 동일하게 "자세" 텍스트 하나만, 여러 장이면 컷별 지시 배열을 그대로 전달
@@ -571,28 +601,6 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       setIsRunning(false);
     }
   };
-
-  // (2026-07-27) 색상별 선택 갤러리 파생 헬퍼 — 제품컷을 색상별로 필터/큐레이션.
-  const colorKeyOf = (i: number) => (productImageColors[i] || '').toLowerCase();
-  const activeColorKey = colorOverride ? colorOverride.toLowerCase() : null;
-  // 색상 탭이 켜지면 그 색 컷 + 색상 미판별 컷만 노출("버건디 누르면 버건디만"). 꺼지면 전부.
-  const visibleProductIdxs = productImages
-    .map((_, i) => i)
-    .filter((i) => !activeColorKey || colorKeyOf(i) === activeColorKey || colorKeyOf(i) === '');
-  const isIncluded = (i: number) => !excludedImageIdx.has(i);
-  // 색상별 대표컷(생성 편집 원본): 대표님이 지정했으면 그것, 아니면 그 색의 첫 포함 컷.
-  const repIdxForColor = (key: string): number => {
-    const ov = repOverrideByColor[key];
-    if (ov != null && ov < productImages.length && isIncluded(ov) && colorKeyOf(ov) === key) return ov;
-    return productImages.findIndex((_, i) => colorKeyOf(i) === key && isIncluded(i));
-  };
-  const toggleExcluded = (i: number) =>
-    setExcludedImageIdx((prev) => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i);
-      else next.add(i);
-      return next;
-    });
 
   return (
     <div className="max-w-4xl mx-auto px-8 py-10 space-y-10">
