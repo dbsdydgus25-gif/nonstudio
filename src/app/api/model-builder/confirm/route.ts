@@ -21,7 +21,7 @@ import {
   type ModelBuilderInput,
 } from '@/lib/model-builder';
 import { saveModelProfile, saveIdentityImage, saveViewImage, getModelProfile } from '@/lib/model-profile';
-import { withImageRetry, runWithConcurrency, downscaleImage } from '@/lib/image-utils';
+import { withImageRetry, downscaleImage } from '@/lib/image-utils';
 import { getSessionUserId } from '@/lib/auth';
 
 export const runtime = 'nodejs';
@@ -36,17 +36,24 @@ function parseBase64Image(dataUrl: string): { buffer: Buffer; mimeType: string }
   return { buffer: Buffer.from(dataUrl, 'base64'), mimeType: 'image/png' };
 }
 
+// (2026-07-27) 단일 이미지만 받던 것을 배열로 확장 — 뒤/좌/우 뷰 생성 시 정면 + 이미 확정된
+// 다른 뷰(들)까지 함께 참고시켜 세 뷰 사이의 얼굴/헤어/체형 일관성을 높인다(레퍼런스 보드
+// 기법의 핵심 아이디어 적용 지점 — 자세한 배경은 model-builder.ts의 buildModelViewPrompt 주석 참고).
 async function editImage(
   openai: OpenAI,
-  base: { buffer: Buffer; mimeType: string },
+  bases: Array<{ buffer: Buffer; mimeType: string }>,
   prompt: string,
 ): Promise<{ buffer: Buffer; mimeType: string }> {
-  const down = await downscaleImage(base.buffer, base.mimeType);
-  const file = await toFile(down.buffer, `base.${down.mimeType.split('/')[1] || 'png'}`, { type: down.mimeType });
+  const files = await Promise.all(
+    bases.map(async (base, i) => {
+      const down = await downscaleImage(base.buffer, base.mimeType);
+      return toFile(down.buffer, `base_${i}.${down.mimeType.split('/')[1] || 'png'}`, { type: down.mimeType });
+    }),
+  );
   const res: any = await withImageRetry(() =>
     (openai.images as any).edit({
       model: 'gpt-image-2',
-      image: file,
+      image: files,
       prompt: prompt.slice(0, 12000),
       n: 1,
       size: '1024x1536',
@@ -116,14 +123,23 @@ export async function POST(req: Request) {
         const draft = parseBase64Image(draftImageBase64);
 
         // 1) 고품질 정면 — 초안을 베이스로 같은 인물을 재생성
-        const front = await editImage(openai, draft, buildModelFrontFinalPrompt(input));
+        const front = await editImage(openai, [draft], buildModelFrontFinalPrompt(input));
         await saveIdentityImage(uid, front.buffer, front.mimeType);
 
-        // 2) 뒤/좌/우 3컷 — 확정 정면을 베이스로 (동시 3개, 429 재시도 포함)
-        await runWithConcurrency(['back', 'left', 'right'] as const, 3, async (view) => {
-          const img = await editImage(openai, front, buildModelViewPrompt(view));
-          await saveViewImage(uid, view, img.buffer, img.mimeType);
-        });
+        // 2) 뒤→좌→우 순서로 체이닝 — 이전에는 정면 1장만 보고 3컷을 완전히 독립적으로(병렬)
+        // 생성해서 서로 얼굴/헤어가 미세하게 달라지는 문제가 있었다. 이제 좌/우를 만들 때
+        // 정면 + 이미 확정된 뷰까지 함께 참고시켜 세 뷰 사이의 동일성을 서로 대조하게 한다
+        // (레퍼런스 보드 기법 적용 — 자세한 배경은 buildModelViewPrompt 주석 참고). 체이닝이라
+        // 병렬(runWithConcurrency)은 못 쓰고 순차 실행이지만, 모델 설정은 1회성 작업이라
+        // 늘어난 지연시간보다 일관성 향상이 더 중요하다.
+        const back = await editImage(openai, [front], buildModelViewPrompt('back'));
+        await saveViewImage(uid, 'back', back.buffer, back.mimeType);
+
+        const left = await editImage(openai, [front, back], buildModelViewPrompt('left', ['back']));
+        await saveViewImage(uid, 'left', left.buffer, left.mimeType);
+
+        const right = await editImage(openai, [front, back, left], buildModelViewPrompt('right', ['back', 'left']));
+        await saveViewImage(uid, 'right', right.buffer, right.mimeType);
 
         const current = await getModelProfile(uid);
         await saveModelProfile(uid, {

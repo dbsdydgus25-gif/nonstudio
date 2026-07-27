@@ -234,36 +234,72 @@ export function buildPhotoSynthesisPrompt(input: PhotoModelInput, photoCount: nu
     .join('\n');
 }
 
-/** 사진 기반 모델의 뒤/좌/우 뷰 — 업로드한 실제 사진과 같은 옷/분위기를 유지한 채 회전만 */
-export function buildPhotoViewPrompt(view: 'back' | 'left' | 'right'): string {
+/**
+ * 사진 기반 모델의 뒤/좌/우 뷰 — 업로드한 실제 사진과 같은 옷/분위기를 유지한 채 회전만.
+ * (2026-07-27) buildModelViewPrompt와 동일한 이유로 이전 확정 뷰를 추가 참고 이미지로 받는다 —
+ * 자세한 배경은 그쪽 주석 참고.
+ */
+export function buildPhotoViewPrompt(
+  view: 'back' | 'left' | 'right',
+  otherConfirmedViews: Array<'back' | 'left' | 'right'> = [],
+): string {
   const viewLine =
     view === 'back'
       ? 'Show a full BACK view — the camera sees the back of the head, back, and legs. Do not show the face.'
       : view === 'left'
         ? 'Show a full LEFT-SIDE profile view — body rotated 90 degrees to the left, face in true side profile.'
         : 'Show a full RIGHT-SIDE profile view — body rotated 90 degrees to the right, face in true side profile.';
+  const consistencyNote = otherConfirmedViews.length
+    ? `\nThe additional input image${otherConfirmedViews.length > 1 ? 's' : ''} (after the primary photo) show${otherConfirmedViews.length > 1 ? '' : 's'} this SAME real person's already-confirmed ${otherConfirmedViews.join('/')} view${otherConfirmedViews.length > 1 ? 's' : ''} — use ${otherConfirmedViews.length > 1 ? 'them' : 'it'} ONLY to cross-check that the face, hairstyle, skin tone, and body build stay perfectly identical to what was already confirmed. Do NOT copy ${otherConfirmedViews.length > 1 ? 'their' : 'its'} camera angle or pose — the angle for THIS output is set entirely by the instruction below.`
+    : '';
   return [
-    'The input image is a real photograph of the fitting model. Generate the SAME real person — identical face, hairstyle, skin, body and proportions, wearing the SAME clothing, in the same kind of setting and lighting.',
+    'The first input image is a real photograph of the fitting model. Generate the SAME real person — identical face, hairstyle, skin, body and proportions, wearing the SAME clothing, in the same kind of setting and lighting.',
     viewLine,
+    consistencyNote,
     'Standing straight, arms relaxed naturally at the sides. FULL BODY head to toe, nothing cropped. Exactly ONE person, one single frame.',
     NATURALNESS_CLAUSE,
     'Reproduce the real person faithfully — do NOT beautify, smooth, or exaggerate. Photorealistic, natural skin texture. No CGI, no collage, no text.',
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
-/** 확정 단계 — 정면 확정본에서 뒤/좌/우 뷰를 뽑는 프롬프트 (images.edit 용) */
-export function buildModelViewPrompt(view: 'back' | 'left' | 'right'): string {
+/**
+ * 확정 단계 — 정면 확정본에서 뒤/좌/우 뷰를 뽑는 프롬프트 (images.edit 용)
+ *
+ * (2026-07-27) 예전엔 뒤/좌/우 3장을 정면 1장만 보고 완전히 독립적으로(병렬) 생성했다 —
+ * gpt-image-2는 seed가 없어서 3번의 독립 생성이 서로 조금씩 다른 얼굴/헤어/체형으로
+ * 흘렀다(대표님이 참고하신 "레퍼런스 보드" 기법의 핵심 아이디어 — 여러 각도를 한 번에
+ * 참고시켜야 일관성이 잡힌다 — 를 우리 파이프라인에 실제로 적용할 지점). AI 제품 피팅과
+ * 달리 여기는 "참고할 실물 사진"이 애초에 1장뿐이라 이 기법이 실제로 도움이 되는 경우다.
+ * 이제 뒤→좌→우 순서로 체이닝해서, 좌/우를 만들 때 정면뿐 아니라 이미 확정된 이전
+ * 뷰(들)까지 함께 참고 이미지로 넣어 얼굴/헤어/체형 일관성을 서로 대조하게 만든다.
+ * `otherConfirmedViews`가 있으면 그게 정면 다음 이미지들이라는 걸 명시하고, 그 사진들의
+ * "각도/포즈"는 절대 따라하지 말고(이번 뷰의 각도는 아래 지시가 유일한 기준) 오직
+ * 얼굴·헤어·피부·체형의 동일성 대조용으로만 쓰라고 스코프를 제한한다.
+ */
+export function buildModelViewPrompt(
+  view: 'back' | 'left' | 'right',
+  otherConfirmedViews: Array<'back' | 'left' | 'right'> = [],
+): string {
   const viewLine =
     view === 'back'
       ? 'Turn the person to show a full BACK view — the camera sees the back of the head, back, and legs. Do not show the face.'
       : view === 'left'
         ? 'Turn the person to show a full LEFT-SIDE profile view — body rotated 90 degrees so the left side faces the camera, face in true side profile looking straight ahead (not at the camera).'
         : 'Turn the person to show a full RIGHT-SIDE profile view — body rotated 90 degrees so the right side faces the camera, face in true side profile looking straight ahead (not at the camera).';
+  const consistencyNote = otherConfirmedViews.length
+    ? `\nThe additional input image${otherConfirmedViews.length > 1 ? 's' : ''} (after the front photo) show${otherConfirmedViews.length > 1 ? '' : 's'} this SAME person's already-confirmed ${otherConfirmedViews.join('/')} view${otherConfirmedViews.length > 1 ? 's' : ''} — use ${otherConfirmedViews.length > 1 ? 'them' : 'it'} ONLY to cross-check that the face shape, hairstyle, skin tone, and body build stay perfectly identical to what was already confirmed. Do NOT copy ${otherConfirmedViews.length > 1 ? 'their' : 'its'} camera angle or pose — the angle for THIS output is set entirely by the instruction below.`
+    : '';
   return [
-    'The input image shows a virtual fitting model standing facing the camera. Generate the SAME person — identical face shape, hairstyle, skin tone, body proportions, and the exact same outfit (plain black short-sleeve t-shirt, plain black shorts, barefoot) — photographed in the same white studio, same lighting.',
+    'The input images show a virtual fitting model: the first image is the confirmed FRONT view, standing facing the camera.',
+    'Generate the SAME person — identical face shape, hairstyle, skin tone, body proportions, and the exact same outfit (plain black short-sleeve t-shirt, plain black shorts, barefoot) — photographed in the same white studio, same lighting.',
     viewLine,
+    consistencyNote,
     'Standing straight, arms relaxed naturally at the sides. FULL BODY head to toe, nothing cropped. Exactly ONE person, one single frame.',
     `Background: ${DEFAULT_STUDIO_BACKGROUND}`,
     'Photorealistic, natural skin texture. No CGI, no collage, no text.',
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }

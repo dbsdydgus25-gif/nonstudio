@@ -17,7 +17,7 @@ import {
   type PhotoModelInput,
 } from '@/lib/model-builder';
 import { saveModelProfile, saveIdentityImage, saveViewImage, getModelProfile } from '@/lib/model-profile';
-import { withImageRetry, runWithConcurrency, downscaleImage } from '@/lib/image-utils';
+import { withImageRetry, downscaleImage } from '@/lib/image-utils';
 import { getSessionUserId } from '@/lib/auth';
 
 export const runtime = 'nodejs';
@@ -32,17 +32,23 @@ function parseBase64Image(dataUrl: string): { buffer: Buffer; mimeType: string }
   return { buffer: Buffer.from(dataUrl, 'base64'), mimeType: 'image/png' };
 }
 
+// (2026-07-27) 단일 이미지만 받던 것을 배열로 확장 — model-builder/confirm/route.ts의 editImage와
+// 동일한 이유(레퍼런스 보드 기법 적용 — 뒤/좌/우를 체이닝해 서로 대조시켜 일관성 향상).
 async function editView(
   openai: OpenAI,
-  base: { buffer: Buffer; mimeType: string },
+  bases: Array<{ buffer: Buffer; mimeType: string }>,
   prompt: string,
 ): Promise<{ buffer: Buffer; mimeType: string }> {
-  const down = await downscaleImage(base.buffer, base.mimeType);
-  const file = await toFile(down.buffer, `base.${down.mimeType.split('/')[1] || 'png'}`, { type: down.mimeType });
+  const files = await Promise.all(
+    bases.map(async (base, i) => {
+      const down = await downscaleImage(base.buffer, base.mimeType);
+      return toFile(down.buffer, `base_${i}.${down.mimeType.split('/')[1] || 'png'}`, { type: down.mimeType });
+    }),
+  );
   const res: any = await withImageRetry(() =>
     (openai.images as any).edit({
       model: 'gpt-image-2',
-      image: file,
+      image: files,
       prompt: prompt.slice(0, 12000),
       n: 1,
       size: '1024x1536',
@@ -142,10 +148,15 @@ export async function POST(req: Request) {
           await saveIdentityImage(uid, front.buffer, front.mimeType);
         }
 
-        await runWithConcurrency(['back', 'left', 'right'] as const, 3, async (view) => {
-          const img = await editView(openai, front, buildPhotoViewPrompt(view));
-          await saveViewImage(uid, view, img.buffer, img.mimeType);
-        });
+        // 뒤→좌→우 체이닝 — 자세한 배경은 model-builder/confirm/route.ts의 동일 주석 참고.
+        const back = await editView(openai, [front], buildPhotoViewPrompt('back'));
+        await saveViewImage(uid, 'back', back.buffer, back.mimeType);
+
+        const left = await editView(openai, [front, back], buildPhotoViewPrompt('left', ['back']));
+        await saveViewImage(uid, 'left', left.buffer, left.mimeType);
+
+        const right = await editView(openai, [front, back, left], buildPhotoViewPrompt('right', ['back', 'left']));
+        await saveViewImage(uid, 'right', right.buffer, right.mimeType);
 
         const current = await getModelProfile(uid);
         await saveModelProfile(uid, { ...current, builderStatus: 'ready', builderError: null });
