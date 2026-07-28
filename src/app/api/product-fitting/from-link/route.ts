@@ -330,7 +330,7 @@ async function downloadImage(url: string, referer: string): Promise<string | nul
  * 있음이 실측 확인됨. Gemini Flash로 한 번에 "이 제품(제목/색상 기준)을 실제로 보여주는가"만
  * 검사해 무관한 이미지를 제거한다. geminiApiKey가 없으면 필터 없이 전부 통과(fail-open).
  */
-type ImageVerdict = { keep: boolean; role: 'garment' | 'fabric' | 'info'; colorway: string };
+type ImageVerdict = { keep: boolean; role: 'garment' | 'fabric' | 'info'; colorway: string; hasPerson: boolean };
 
 async function filterRelevantImages(
   images: string[],
@@ -340,7 +340,7 @@ async function filterRelevantImages(
 ): Promise<ImageVerdict[]> {
   // 분석 실패/키 없음 시 폴백 — 판단을 못 하면 전부 garment로 통과(기존 동작 보존)
   const passChunk = (chunk: string[]): ImageVerdict[] =>
-    chunk.map(() => ({ keep: true, role: 'garment' as const, colorway: '' }));
+    chunk.map(() => ({ keep: true, role: 'garment' as const, colorway: '', hasPerson: false }));
   if (!geminiApiKey || images.length === 0) return passChunk(images);
   const ai = new GoogleGenAI({ apiKey: geminiApiKey });
 
@@ -361,7 +361,8 @@ For EACH image return three things:
    - "fabric" = a close-up of the fabric surface / a construction detail (stitching, button, weave) — one garment, zoomed in.
    - "info" = anything that is NOT a clean single-garment shot even though it relates to the product: a size chart, a text-heavy spec/marketing card, a "컬러뷰/color view" swatch sheet, a grid/collage showing SEVERAL garments or SEVERAL colors together, an "overview" card with feature bullets. These carry useful text but must NEVER be used to redraw the garment.
    Be strict: if an image shows more than one garment, or is mostly text, or is a color-swatch lineup, it is "info", not "garment" — even if a garment is visible in it.
-3. colorway — WHICH single colorway of this product the garment in that photo actually is. Judge by the garment's real color${colorOptions.length ? ` and answer with EXACTLY one of these option names: ${colorOptions.join(', ')}` : ''}. If the image is "info" (size chart, text card, or a multi-color swatch/grid showing several colors at once), answer "unknown" — never pick one color off a multi-color sheet.`,
+3. colorway — WHICH single colorway of this product the garment in that photo actually is. Judge by the garment's real color${colorOptions.length ? ` and answer with EXACTLY one of these option names: ${colorOptions.join(', ')}` : ''}. If the image is "info" (size chart, text card, or a multi-color swatch/grid showing several colors at once), answer "unknown" — never pick one color off a multi-color sheet.
+4. hasPerson — true if any part of a real human (face, or a body wearing the garment) is visible in the photo; false for flat-lay, ghost-mannequin, or pure fabric/hardware close-ups with no person at all.`,
       },
     ];
     chunk.forEach((img, i) => {
@@ -389,8 +390,9 @@ For EACH image return three things:
                   keep: { type: Type.BOOLEAN },
                   role: { type: Type.STRING, enum: ['garment', 'fabric', 'info'] },
                   colorway: { type: Type.STRING, description: 'One of the listed colorway names, or "unknown"' },
+                  hasPerson: { type: Type.BOOLEAN },
                 },
-                required: ['index', 'keep', 'role', 'colorway'],
+                required: ['index', 'keep', 'role', 'colorway', 'hasPerson'],
               },
             },
           },
@@ -399,11 +401,8 @@ For EACH image return three things:
       },
     });
     const parsed = JSON.parse(response.text?.trim() || '{}');
-    const decisions: Array<{ index: number; keep: boolean; role?: string; colorway?: string }> = Array.isArray(
-      parsed.decisions,
-    )
-      ? parsed.decisions
-      : [];
+    const decisions: Array<{ index: number; keep: boolean; role?: string; colorway?: string; hasPerson?: boolean }> =
+      Array.isArray(parsed.decisions) ? parsed.decisions : [];
     const map = new Map(decisions.map((d) => [d.index, d]));
     // 판정이 없는 이미지는 안전하게 통과(fail-open) — 필터가 실수로 다 지우는 것보다 낫다
     return chunk.map((_, i) => {
@@ -413,7 +412,7 @@ For EACH image return three things:
       const role: 'garment' | 'fabric' | 'info' =
         d?.role === 'fabric' || d?.role === 'info' ? d.role : 'garment';
       // info(스와치/텍스트/그리드)는 색상을 특정할 수 없으므로 항상 unknown 취급 — 색상 필터 오염 방지
-      return { keep: d?.keep ?? true, role, colorway: role === 'info' ? '' : matched };
+      return { keep: d?.keep ?? true, role, colorway: role === 'info' ? '' : matched, hasPerson: d?.hasPerson ?? false };
     });
   } catch (err) {
     console.warn('[from-link] 이미지 관련성 필터 청크 실패 — 이 청크는 생략(전부 통과):', err);
@@ -509,6 +508,9 @@ export async function POST(req: Request) {
     const materialImages = materialKept.map((x) => x.img);
     const productImageColors = productKept.map((x) => x.v.colorway);
     const materialImageColors = materialKept.map((x) => x.v.colorway);
+    // (2026-07-28) 이 컷에 실제 사람(다른 판매처 모델 등)이 찍혀 있는지 — 프론트가 생성 입력으로
+    // 쓸 보조컷을 고를 때 인물 없는 컷을 우선하도록. 대표컷 1장이 사람 착용샷인 건 정상(항상 그래왔음).
+    const productImageHasPerson = productKept.map((x) => x.v.hasPerson);
     // 분석 전용 — 사이즈표/소재 텍스트("Cotton 75% Rayon 25%" 등)를 읽는 데만 쓰고 생성기엔 안 넣는다
     const infoImages = infoKept.map((x) => x.img);
 
@@ -532,6 +534,8 @@ export async function POST(req: Request) {
       // 이미지별 판별된 컬러웨이(빈 문자열 = 판별 불가) — 프론트가 선택 색상에 맞는 컷만 쓰도록
       productImageColors,
       materialImageColors,
+      // 대표컷 외 보조(otherAngles) 후보 선택 시 인물 사진을 뒤로 미루기 위한 플래그
+      productImageHasPerson,
       title,
       description,
       // 제품명·설명 불릿에서 뽑은 특징 텍스트(머슬핏/골지/니트 소재 등) — 분석의 rawSpecs로 쓰인다

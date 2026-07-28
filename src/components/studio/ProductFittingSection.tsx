@@ -97,6 +97,9 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
   // 밀려서 무시되는 게 실측 확인됐다.
   const [productImageColors, setProductImageColors] = useState<string[]>([]);
   const [materialImageColors, setMaterialImageColors] = useState<string[]>([]);
+  // (2026-07-28) 이 컷에 실제 사람(다른 판매처 모델 등)이 찍혀 있는지 — otherAngles 보조컷을
+  // 고를 때 인물 없는 컷을 우선해 정체성 오염(다른 얼굴이 섞이는 사고)을 줄인다.
+  const [productImageHasPerson, setProductImageHasPerson] = useState<boolean[]>([]);
   // (2026-07-27) 색상별 선택 갤러리 — 제품컷을 전부 보여주고 대표님이 직접 큐레이션.
   // excludedImageIdx: 생성에서 제외할 제품컷 인덱스(기본 전부 포함).
   // repOverrideByColor: 색상별 "대표컷"(생성 편집 원본) 인덱스를 대표님이 직접 지정한 경우.
@@ -279,11 +282,13 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
       const infoImgs: string[] = data.infoImages || [];
       const prodColors: string[] = data.productImageColors || [];
       const matColors: string[] = data.materialImageColors || [];
+      const prodHasPerson: boolean[] = data.productImageHasPerson || [];
       // 링크로 가져올 땐 기존 목록에 덧붙이지 않고 교체한다 — 색상 인덱스가 어긋나면
       // "GRAY 골랐는데 브라운 컷이 들어가는" 사고가 나므로 이미지/색상 배열을 항상 짝맞춘다.
       // (2026-07-27) 캡 상향 — 제품컷을 최대한 다 보여주고 대표님이 색상별로 직접 고르는 구조.
       setProductImages(productImgs.slice(0, 20));
       setProductImageColors(prodColors.slice(0, 20));
+      setProductImageHasPerson(prodHasPerson.slice(0, 20));
       setMaterialImages(materialImgs.slice(0, 12));
       setMaterialImageColors(matColors.slice(0, 12));
       setInfoImages(infoImgs.slice(0, 8));
@@ -449,7 +454,15 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
     const includedIdxs = productImages.map((_, i) => i).filter((i) => isIncluded(i));
     const orderRepFirst = (idxs: number[], repIdx: number) => {
       const head = repIdx >= 0 && idxs.includes(repIdx) ? [repIdx] : [];
-      return [...head, ...idxs.filter((i) => i !== repIdx)].map((i) => productImages[i]);
+      // (2026-07-28) 대표컷 외 보조컷(otherAngles, 서버에서 최대 2장만 실제 생성에 씀)은 인물이
+      // 없는 컷(원단/디테일)을 앞쪽으로 — 다른 판매처 모델 얼굴이 여러 장 섞여 들어가면 정체성이
+      // 오염되는 사고가 실측 확인됐다(대표컷 1장이 착장샷인 건 정상, 문제는 "추가로 더" 섞이는 것).
+      const rest = idxs.filter((i) => i !== repIdx);
+      const stableSorted = rest
+        .map((i, order) => ({ i, order }))
+        .sort((a, b) => Number(!!productImageHasPerson[a.i]) - Number(!!productImageHasPerson[b.i]) || a.order - b.order)
+        .map((x) => x.i);
+      return [...head, ...stableSorted].map((i) => productImages[i]);
     };
 
     let effectiveProductImages: string[];
@@ -745,6 +758,13 @@ export function ProductFittingSection({ geminiKey, openaiKey, onNeedKeys, onSend
                   >
                     {isRep ? '대표' : '대표 지정'}
                   </button>
+                  {/* (2026-07-28) 다른 판매처 모델이 찍힌 컷 표시 — 여러 장 섞이면 정체성 오염 위험이라
+                      대표컷 외엔 자동으로 뒤로 밀리지만(orderRepFirst), 큐레이션 시 참고하도록 노출 */}
+                  {productImageHasPerson[i] && (
+                    <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[9px] font-semibold tracking-wide bg-amber-500/90 text-white">
+                      인물
+                    </span>
+                  )}
                   {/* 링크로 가져온 컷은 판별된 컬러웨이를 표시 — 선택 색상과 다른 컷을 한눈에 구분 */}
                   {productImageColors[i] && (
                     <span
