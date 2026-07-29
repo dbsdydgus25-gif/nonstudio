@@ -3,8 +3,8 @@
 import React from 'react';
 
 interface SidebarProps {
-  activePage: 'fitting' | 'restyle' | 'product' | 'video' | 'model' | 'history';
-  onPageChange: (page: 'fitting' | 'restyle' | 'product' | 'video' | 'model' | 'history') => void;
+  activePage: 'fitting' | 'restyle' | 'product' | 'video' | 'lookbook' | 'model' | 'history';
+  onPageChange: (page: 'fitting' | 'restyle' | 'product' | 'video' | 'lookbook' | 'model' | 'history') => void;
   onOpenApiKeys: () => void;
   geminiKey: string;
   openaiKey: string;
@@ -61,10 +61,18 @@ const Icon = {
       <path d="m15 11 5-3v8l-5-3z" />
     </svg>
   ),
+  lookbook: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-[18px] h-[18px]">
+      <rect x="3" y="4" width="8" height="8" rx="1.2" />
+      <rect x="13" y="4" width="8" height="8" rx="1.2" />
+      <rect x="3" y="14" width="8" height="6" rx="1.2" />
+      <rect x="13" y="14" width="8" height="6" rx="1.2" />
+    </svg>
+  ),
 };
 
 type NavItem = {
-  id: 'restyle' | 'product' | 'fitting' | 'video' | 'model' | 'history';
+  id: 'restyle' | 'product' | 'fitting' | 'video' | 'lookbook' | 'model' | 'history';
   label: string;
   desc: string;
   icon: React.ReactNode;
@@ -77,6 +85,7 @@ const STUDIO_ITEMS: NavItem[] = [
   { id: 'product', label: 'AI 제품 피팅', desc: '제품 사진만으로 착용 화보 제작', icon: Icon.product },
   { id: 'fitting', label: 'AI 바리에이션', desc: '확정 룩 유지, 포즈 다양화', icon: Icon.variation },
   { id: 'video', label: 'AI 영상', desc: '착용 컷을 움직이는 GIF로', icon: Icon.video },
+  { id: 'lookbook', label: 'AI 룩북', desc: '기준컷 확보 + 포즈 프리셋 배치 생성', icon: Icon.lookbook },
 ];
 
 const LIBRARY_ITEMS: NavItem[] = [

@@ -6,6 +6,7 @@ import { RestyleSection } from '@/components/studio/RestyleSection';
 import { ProductFittingSection } from '@/components/studio/ProductFittingSection';
 import { VariationSection } from '@/components/studio/VariationSection';
 import { VideoSection } from '@/components/studio/VideoSection';
+import { LookbookSection } from '@/components/studio/LookbookSection';
 import { ModelProfileSection } from '@/components/studio/ModelProfileSection';
 import { HistorySection } from '@/components/studio/HistorySection';
 import { ApiKeyModal } from '@/components/studio/ApiKeyModal';
@@ -22,7 +23,7 @@ export default function StudioPage() {
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
 
   // Navigation — 'restyle' = AI 피팅, 'product' = AI 제품 피팅, 'fitting' = AI 바리에이션, 'video' = AI 영상
-  const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'product' | 'video' | 'model' | 'history'>('restyle');
+  const [activePage, setActivePage] = useState<'fitting' | 'restyle' | 'product' | 'video' | 'lookbook' | 'model' | 'history'>('restyle');
 
   // 가상 모델 확정 여부 — 모델이 없으면 생성 서비스(피팅/제품 피팅/바리에이션)는 잠금
   const [modelReady, setModelReady] = useState(false);
@@ -160,7 +161,7 @@ export default function StudioPage() {
         activePage={activePage}
         onPageChange={(p) => {
           // 모델 미확정 상태에선 생성 서비스 진입을 막고 모델 만들기로 유도
-          if (!modelReady && (p === 'restyle' || p === 'product' || p === 'fitting')) {
+          if (!modelReady && (p === 'restyle' || p === 'product' || p === 'fitting' || p === 'lookbook')) {
             setActivePage('model');
             return;
           }
@@ -193,6 +194,11 @@ export default function StudioPage() {
               <>
                 <h1 className="text-[13px] font-semibold text-gray-900 tracking-tight">AI 바리에이션</h1>
                 <p className="text-[10px] text-gray-400">확정 룩을 그대로 유지한 채 포즈만 다양화</p>
+              </>
+            ) : activePage === 'lookbook' ? (
+              <>
+                <h1 className="text-[13px] font-semibold text-gray-900 tracking-tight">AI 룩북</h1>
+                <p className="text-[10px] text-gray-400">기준컷 확보 + 포즈 프리셋 배치 생성</p>
               </>
             ) : activePage === 'model' ? (
               <>
@@ -244,6 +250,8 @@ export default function StudioPage() {
             incomingImage={videoSourceImage}
             onConsumeIncomingImage={() => setVideoSourceImage(null)}
           />
+        ) : activePage === 'lookbook' ? (
+          <LookbookSection geminiKey={geminiKey} openaiKey={openaiKey} onNeedKeys={() => setIsKeyModalOpen(true)} />
         ) : activePage === 'model' ? (
           <ModelProfileSection
             geminiKey={geminiKey}
