@@ -52,13 +52,18 @@ export function buildCleanAngleShotPrompt(
   garmentAnalysis: GarmentAnalysis,
   angle: CleanAngle,
   colorOverride?: string,
+  /** 앞면 결과를 앵커로 함께 넣는 경우 — 기장/품/톤을 그 컷에 맞추게 한다 */
+  hasAnchor = false,
 ): string {
   const color = colorOverride?.trim() || garmentAnalysis.color;
+  const anchorLine = hasAnchor
+    ? `\n\nCONSISTENCY ANCHOR: the SECOND attached image is the already-approved FRONT view of this exact same garment, generated for this same set. Treat it as the ground truth for overall proportions: the total length, body width, sleeve length, shoulder width, hem line, fabric tone and the size/placement of any contrast trim MUST match it exactly. This shot is the same physical garment simply rotated — only the viewing angle changes, nothing about the garment itself.`
+    : '';
   return `=== TASK: CLEAN PRODUCT-ONLY REFERENCE SHOT (NO PERSON) ===
 
 Using the attached real reference photos of this ${CATEGORY_LABEL[category]} as ground truth for color/material/construction ONLY, produce a single clean studio product photograph of the garment ALONE — no person, no face, no visible mannequin head/limbs. Use whichever presentation renders most naturally for this garment type: an invisible ("ghost") mannequin form showing the garment's true 3D shape, or a neatly arranged flat lay — either is acceptable as long as NO person or mannequin body part is visible.
 
-${ANGLE_INSTRUCTION[angle]}
+${ANGLE_INSTRUCTION[angle]}${anchorLine}
 
 Background: pure seamless white studio background, soft even product-photography lighting, no props, no harsh shadows, no text overlay.
 
@@ -72,6 +77,49 @@ Garment spec (authoritative — follow exactly, do not default to a generic vers
 - Details: ${garmentAnalysis.details}${buildConstructionSummary(garmentAnalysis.constructionMap)}
 
 If any reference photo shows a person wearing this garment, completely ignore that person (face, body, pose) and the scene/background behind them — extract ONLY the garment's real color, material, and construction from what they're wearing. Do not blend or reference any human features from those photos in the output.`;
+}
+
+/**
+ * 소싱 제품이 아닌 나머지 슬롯(하의/신발 등)을 무엇으로 입힐지 정하는 블록.
+ * (2026-07-29) 처음엔 이 지시가 아예 없어서 "나머지 옷은 AI가 매번 알아서" 정해졌고,
+ * 그러면 같은 배치 안에서도 컷마다 하의/신발이 바뀌어 룩북으로 못 쓴다(대표님 지적:
+ * "다른 옷은 어떻게 착용할 건데?"). 대표님이 지정하면 그대로, 안 하면 아래 중립 기본값으로
+ * 고정한다 — 핵심은 "매번 달라지지 않는 것"이라 기본값도 명시적으로 못박는다.
+ */
+const SLOT_LABEL_EN: Record<SourcedCategory, string> = {
+  top: 'top',
+  bottom: 'bottom (pants/skirt)',
+  outer: 'outerwear',
+  shoes: 'shoes',
+  accessory: 'accessory',
+};
+
+/** 지정이 없을 때 쓰는 중립 기본 코디 — 소싱 제품이 주인공이 되도록 조용한 아이템으로 */
+const DEFAULT_STYLING: Record<SourcedCategory, string> = {
+  top: 'a plain white crew-neck cotton t-shirt, regular fit, tucked naturally',
+  bottom: 'plain black straight-leg trousers, clean drape, no visible branding',
+  outer: 'no outerwear — do not add a jacket, cardigan, or coat',
+  shoes: 'plain white low-top leather sneakers, clean and unbranded',
+  accessory: 'no accessories — no bag, hat, jewellery, or watch',
+};
+
+function buildStylingLines(
+  sourced: SourcedCategory,
+  hints?: Partial<Record<SourcedCategory, string>>,
+): string {
+  const slots: SourcedCategory[] = ['top', 'outer', 'bottom', 'shoes', 'accessory'];
+  const lines = slots
+    .filter((s) => s !== sourced)
+    .map((s) => {
+      const hint = hints?.[s]?.trim();
+      return hint
+        ? `- ${SLOT_LABEL_EN[s]}: ${hint} — MANDATORY, follow this literally. If it contains an exclusion ("no X", "X 아님"), that exclusion is equally mandatory.`
+        : `- ${SLOT_LABEL_EN[s]}: ${DEFAULT_STYLING[s]}`;
+    });
+  return [
+    'REST OF THE OUTFIT (fixed — every shot in this set must show the exact same items, never randomize between shots):',
+    ...lines,
+  ].join('\n');
 }
 
 /**
@@ -91,10 +139,18 @@ export function buildLookbookFittingPrompt(
   garmentAnalysis: GarmentAnalysis,
   poseInstruction: string,
   bodySpec: string,
-  opts: { extraReferenceCount: number; hasPoseRefImage: boolean; hasBackgroundImage: boolean; colorOverride?: string },
+  opts: {
+    extraReferenceCount: number;
+    hasPoseRefImage: boolean;
+    hasBackgroundImage: boolean;
+    colorOverride?: string;
+    /** 소싱 제품이 아닌 나머지 슬롯을 뭘로 입힐지 — 비워두면 아래 기본 코디로 채운다 */
+    styleHints?: Partial<Record<SourcedCategory, string>>;
+  },
 ): string {
   const { extraReferenceCount, hasPoseRefImage, hasBackgroundImage } = opts;
   const color = opts.colorOverride?.trim() || garmentAnalysis.color;
+  const styling = buildStylingLines(category, opts.styleHints);
 
   // 이미지 번호 계산 — Image 1은 항상 모델, Image 2는 기준 대표컷.
   const primaryRefNum = 2;
@@ -126,6 +182,8 @@ export function buildLookbookFittingPrompt(
       : '',
     '',
     buildModelLockLines(bodySpec),
+    '',
+    styling,
     '',
     'POSE & FRAMING (mandatory — overrides any pose visible in the reference images):',
     `- ${poseInstruction}`,

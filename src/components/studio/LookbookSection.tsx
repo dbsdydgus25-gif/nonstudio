@@ -61,7 +61,10 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
 
   // ── 1단계: 기준컷 ──
   const [refShots, setRefShots] = useState<Partial<Record<CleanAngle, string>>>({});
+  const [sheetId, setSheetId] = useState<string | null>(null);
   const [garmentAnalysis, setGarmentAnalysis] = useState<any>(null);
+  // 소싱 제품이 아닌 나머지 슬롯(하의/신발 등) 코디 — 비워두면 서버가 중립 기본값으로 고정
+  const [styleHints, setStyleHints] = useState<Partial<Record<SourcedCategory, string>>>({});
   const [refBusy, setRefBusy] = useState<CleanAngle | 'all' | null>(null);
   const [refError, setRefError] = useState('');
 
@@ -150,6 +153,7 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
       setSelectedColor(null);
       setExcludedIdx(new Set());
       setRefShots({});
+      setSheetId(null);
       setGarmentAnalysis(null);
       setImportMsg({
         kind: 'ok',
@@ -201,6 +205,8 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
           openaiApiKey: openaiKey,
           colorOverride: selectedColor || undefined,
           angles,
+          // 개별 재생성이면 기존 시트에 덮어써서 앞면을 기준 앵커로 재사용한다
+          sheetId: angles?.length ? sheetId || undefined : undefined,
           // 재분석은 첫 생성 때 한 번만 — 개별 재생성에선 기존 분석을 재사용해 비용을 아낀다
           garmentAnalysis: angles?.length && garmentAnalysis ? garmentAnalysis : undefined,
         }),
@@ -208,6 +214,7 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || '기준컷 생성에 실패했습니다.');
       setGarmentAnalysis(data.garmentAnalysis);
+      setSheetId(data.sheetId);
       setRefShots((prev) => ({ ...prev, ...data.images }));
     } catch (err: any) {
       setRefError(err?.message || '기준컷 생성 중 오류가 발생했습니다.');
@@ -271,8 +278,7 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
 
   const handleRunBatch = async () => {
     if (!keysSet) return onNeedKeys();
-    const angles = Object.keys(refShots) as CleanAngle[];
-    if (angles.length === 0) {
+    if (!sheetId) {
       setRunMsg('먼저 1단계에서 기준컷을 만들어주세요.');
       return;
     }
@@ -289,13 +295,16 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          referenceImages: refShots,
+          // 기준컷 이미지 자체는 서버 Storage에 있다 — id만 보낸다(예전엔 base64 4장을
+          // 그대로 실어 보내다가 413 Request Entity Too Large가 났다).
+          sheetId,
           garmentAnalysis,
           category,
           presetIds: Array.from(selectedPresetIds),
           openaiApiKey: openaiKey,
           colorOverride: selectedColor || undefined,
           draftMode,
+          styleHints,
         }),
       });
       const data = await res.json();
@@ -512,10 +521,45 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
         </div>
       </section>
 
-      {/* ───── 03. 포즈 프리셋 ───── */}
+      {/* ───── 03. 나머지 코디 ───── */}
       <section>
         <div className="flex items-baseline gap-2 mb-4">
           <span className="text-[10px] font-semibold tracking-[0.2em] text-gray-300">03</span>
+          <h2 className="text-sm font-semibold text-gray-900">나머지 코디</h2>
+        </div>
+        <p className="text-[11px] text-gray-400 mb-3">
+          소싱 제품 외에 모델이 뭘 입을지 정합니다. 비워두면 제품이 돋보이도록 중립 기본값(흰 티 · 검정 슬랙스 ·
+          흰 스니커즈 · 액세서리 없음)으로 <b>모든 컷에 동일하게</b> 고정됩니다.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {CATEGORY_OPTIONS.filter((c) => c.id !== category).map((c) => (
+            <div key={c.id}>
+              <label className="block text-[10px] font-medium text-gray-500 mb-1">{c.label}</label>
+              <input
+                value={styleHints[c.id] || ''}
+                onChange={(e) => setStyleHints((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                placeholder={
+                  c.id === 'bottom'
+                    ? '예: 와이드 생지 데님 (배바지 아님)'
+                    : c.id === 'shoes'
+                      ? '예: 검정 로퍼'
+                      : c.id === 'outer'
+                        ? '예: 착용 안 함'
+                        : c.id === 'accessory'
+                          ? '예: 없음'
+                          : '예: 흰색 반팔 티셔츠'
+                }
+                className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-gray-400 outline-none text-xs"
+              />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ───── 04. 포즈 프리셋 ───── */}
+      <section>
+        <div className="flex items-baseline gap-2 mb-4">
+          <span className="text-[10px] font-semibold tracking-[0.2em] text-gray-300">04</span>
           <h2 className="text-sm font-semibold text-gray-900">포즈 프리셋</h2>
         </div>
         <p className="text-[11px] text-gray-400 mb-3">
@@ -624,7 +668,7 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
       <section>
         <div className="flex items-baseline justify-between mb-4">
           <div className="flex items-baseline gap-2">
-            <span className="text-[10px] font-semibold tracking-[0.2em] text-gray-300">04</span>
+            <span className="text-[10px] font-semibold tracking-[0.2em] text-gray-300">05</span>
             <h2 className="text-sm font-semibold text-gray-900">배치 생성</h2>
           </div>
           <div className="flex items-center gap-3">

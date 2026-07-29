@@ -21,7 +21,8 @@ import { getModelProfile, getModelIdentityImage, buildBodySpecFromProfile } from
 import { getPosePresetRefImage, listPosePresets } from '@/lib/pose-presets';
 import { getSessionUserId } from '@/lib/auth';
 import { downscaleImage, runWithConcurrency } from '@/lib/image-utils';
-import { parseBase64Image, resultImageToBuffer, runGptImageEdit } from '@/lib/gpt-image-edit';
+import { resultImageToBuffer, runGptImageEdit } from '@/lib/gpt-image-edit';
+import { getReferenceShot } from '@/lib/lookbook-store';
 
 export const runtime = 'nodejs';
 export const maxDuration = 280;
@@ -41,26 +42,28 @@ export async function POST(req: Request) {
     if (!uid) return NextResponse.json({ success: false, error: '로그인이 필요합니다.' }, { status: 401 });
 
     const {
-      referenceImages,
+      sheetId,
       garmentAnalysis,
       category,
       presetIds,
       openaiApiKey,
       colorOverride,
       draftMode,
+      styleHints,
     }: {
-      /** 1단계에서 승인한 각도별 기준컷 (base64 data URL) */
-      referenceImages: Partial<Record<CleanAngle, string>>;
+      /** 1단계에서 만든 기준컷 묶음 id — 이미지 자체는 서버 Storage에 있다 */
+      sheetId: string;
       garmentAnalysis: GarmentAnalysis;
       category: SourcedCategory;
       presetIds: string[];
       openaiApiKey: string;
       colorOverride?: string;
       draftMode?: boolean;
+      /** 소싱 제품이 아닌 나머지 슬롯 코디 지시 */
+      styleHints?: Partial<Record<SourcedCategory, string>>;
     } = await req.json();
 
-    const orderedRefs = ANGLE_ORDER.map((a) => referenceImages?.[a]).filter((x): x is string => !!x);
-    if (orderedRefs.length === 0) {
+    if (!sheetId) {
       return NextResponse.json(
         { success: false, error: '기준컷이 없습니다. 1단계를 먼저 완료해주세요.' },
         { status: 400 },
@@ -122,13 +125,17 @@ export async function POST(req: Request) {
         }
         bodySpec = buildBodySpecFromProfile(modelProfile);
 
-        primaryRef = orderedRefs[0];
-        extraRefs = await Promise.all(
-          orderedRefs.slice(1, 1 + MAX_EXTRA_REFERENCES).map(async (b64) => {
-            const parsed = parseBase64Image(b64);
-            return downscaleImage(parsed.buffer, parsed.mimeType);
-          }),
-        );
+        // 기준컷은 요청 본문이 아니라 Storage에서 읽는다 — base64로 되돌려받으면 요청이
+        // 수 MB가 되어 413(Request Entity Too Large)이 났다.
+        const loaded = (
+          await Promise.all(ANGLE_ORDER.map((a) => getReferenceShot(uid, sheetId, a)))
+        ).filter((x): x is { buffer: Buffer; mimeType: string } => !!x);
+        if (loaded.length === 0) {
+          throw new Error('저장된 기준컷을 찾지 못했습니다. 1단계에서 기준컷을 다시 만들어주세요.');
+        }
+        const scaled = await Promise.all(loaded.map((s) => downscaleImage(s.buffer, s.mimeType)));
+        primaryRef = `data:${scaled[0].mimeType};base64,${scaled[0].buffer.toString('base64')}`;
+        extraRefs = scaled.slice(1, 1 + MAX_EXTRA_REFERENCES);
       } catch (prepErr: any) {
         const msg = prepErr?.message || '생성 준비 중 오류가 발생했습니다.';
         console.error('[api/lookbook/batch][after] 준비 실패 — 전체 job 실패 처리:', prepErr);
@@ -148,6 +155,7 @@ export async function POST(req: Request) {
             hasPoseRefImage: !!poseRefImage,
             hasBackgroundImage: !!backgroundReferenceImage,
             colorOverride,
+            styleHints,
           });
 
           // 이미지 순서는 buildLookbookFittingPrompt의 번호 계산과 반드시 일치해야 한다:
