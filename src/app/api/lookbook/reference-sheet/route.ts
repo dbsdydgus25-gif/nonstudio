@@ -40,6 +40,7 @@ export async function POST(req: Request) {
       productText,
       productNotes,
       sourceUrl,
+      draftMode,
     }: {
       /** 색상별로 큐레이션된 실제 스크래핑 사진(대표컷 먼저) */
       productImagesBase64: string[];
@@ -58,7 +59,10 @@ export async function POST(req: Request) {
       /** 대표님이 직접 적은 핏/디테일 메모 */
       productNotes?: string;
       sourceUrl?: string;
+      /** 재질/절개선만 빠르게 확인할 땐 저화질로 — 출력 비용 약 1/8 */
+      draftMode?: boolean;
     } = await req.json();
+    const quality = draftMode ? 'low' : 'medium';
 
     if (!productImagesBase64?.length) {
       return NextResponse.json({ success: false, error: '제품 이미지가 없습니다.' }, { status: 400 });
@@ -94,7 +98,11 @@ export async function POST(req: Request) {
     );
     const [primary, ...rest] = referenceImages;
     const primaryBase64 = `data:${primary.mimeType};base64,${primary.buffer.toString('base64')}`;
-    const realRefs = rest.slice(0, 4);
+    // (2026-07-29) gpt-image-2는 입력 이미지를 전부 고정밀도로 처리해 장당 입력 토큰 비용이
+    // 붙는다 — 참고컷 4장씩 매 각도(4콜)에 실어 보내던 게 "4컷에 1.2달러"의 실제 원인이었다
+    // (대표님 신고). 텍스트 분석(garmentAnalysis)이 이미 색/재질/구조를 담고 있어 사진은
+    // 색·질감 검증용 최소한만 있으면 되므로 2장으로 줄인다.
+    const realRefs = rest.slice(0, 2);
 
     const images: Partial<Record<CleanAngle, string>> = {};
 
@@ -105,9 +113,10 @@ export async function POST(req: Request) {
     ): Promise<{ buffer: Buffer; mimeType: string }> => {
       const prompt = buildCleanAngleShotPrompt(category, garmentAnalysis, angle, colorOverride, !!anchor);
       // identity/background 없음 — 사람이 안 들어가는 컷이라 MODEL LOCK 자체가 불필요.
-      // 앵커(앞면 결과)가 있으면 실제 사진보다 앞에 두어 "같은 옷"으로 수렴시킨다.
-      const extras = anchor ? [anchor, ...realRefs.slice(0, 3)] : realRefs;
-      const imageUrl = await runGptImageEdit(openai, primaryBase64, prompt, null, null, 'medium', extras);
+      // 앵커(앞면 결과)가 있으면 그 자체가 이미 확정된 같은 옷이라 실제 사진은 1장이면
+      // 충분하다(재질/색 재확인용) — 앵커 없는 앞면 생성만 2장을 다 쓴다.
+      const extras = anchor ? [anchor, ...realRefs.slice(0, 1)] : realRefs;
+      const imageUrl = await runGptImageEdit(openai, primaryBase64, prompt, null, null, quality, extras);
       const out = await resultImageToBuffer(imageUrl);
       await saveReferenceShot(uid, sheetId, angle, out.buffer, out.mimeType);
       images[angle] = `data:${out.mimeType};base64,${out.buffer.toString('base64')}`;

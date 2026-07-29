@@ -33,7 +33,9 @@ export const maxDuration = 280;
  * 4컷은 우리가 같은 스펙으로 생성한 동일 제품·동일 색상의 깨끗한 컷이라 그 위험이 훨씬 낮다.
  * 뒷모습 포즈에 뒷면 근거가 없으면 지어내므로 3장(뒤/좌/우)까지 허용한다.
  */
-const MAX_EXTRA_REFERENCES = 3;
+// (2026-07-29) 입력 이미지 장당 토큰 비용이 붙어 참고컷 개수가 곧 비용이다 — 앵커가
+// 이미 확정된 완성본이므로 실제 사진은 최소한(뒷면 근거 1장)만 남긴다.
+const MAX_EXTRA_REFERENCES = 1;
 const ANGLE_ORDER: CleanAngle[] = ['front', 'back', 'left', 'right'];
 
 export async function POST(req: Request) {

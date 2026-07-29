@@ -12,6 +12,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { pollGenerationStatuses, type PolledGenerationStatus } from '@/lib/poll-generations';
+import { downloadResultImage } from '@/lib/download-image';
 import type { SourcedCategory } from '@/lib/fitting-prompts';
 
 type CleanAngle = 'front' | 'back' | 'left' | 'right';
@@ -77,6 +78,7 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
   const [styleHints, setStyleHints] = useState<Partial<Record<SourcedCategory, string>>>({});
   const [refBusy, setRefBusy] = useState<CleanAngle | 'all' | null>(null);
   const [refError, setRefError] = useState('');
+  const [refDraftMode, setRefDraftMode] = useState(false);
 
   // ── 2단계: 포즈 프리셋 ──
   const [presets, setPresets] = useState<PosePresetItem[]>([]);
@@ -237,6 +239,7 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
           openaiApiKey: openaiKey,
           colorOverride: selectedColor || undefined,
           angles,
+          draftMode: refDraftMode,
           // 사진만으로는 안 보이는 핏/재질 정보 — 분석에 함께 넣어야 머슬핏/크롭이 살아난다
           productText,
           productNotes,
@@ -376,13 +379,16 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
     }
   };
 
-  const downloadImage = (url: string, name: string) => {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.click();
+  const [downloadError, setDownloadError] = useState('');
+  const downloadImage = async (url: string, name: string) => {
+    try {
+      // (2026-07-29) <a download>는 결과 이미지가 서명 URL(cross-origin)일 때 브라우저가
+      // 조용히 무시한다 — 대표님 신고("저장도 안되고"). 다른 섹션과 동일하게
+      // /api/download 프록시를 거쳐 blob으로 받아 저장한다.
+      await downloadResultImage(url, name);
+    } catch (err: any) {
+      setDownloadError(err?.message || '다운로드에 실패했습니다.');
+    }
   };
 
   // ── 렌더 ──
@@ -570,17 +576,24 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
             <span className="text-[10px] font-semibold tracking-[0.2em] text-gray-300">02</span>
             <h2 className="text-sm font-semibold text-gray-900">기준컷 (앞 / 뒤 / 옆·옆)</h2>
           </div>
-          <button
-            onClick={() => generateRefShots()}
-            disabled={!!refBusy || productImages.length === 0}
-            className="px-4 py-2 rounded-lg bg-gray-900 text-white text-xs font-medium disabled:opacity-40 transition"
-          >
-            {refBusy === 'all' ? '만드는 중…' : '4컷 만들기'}
-          </button>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-[11px] text-gray-500 cursor-pointer">
+              <input type="checkbox" checked={refDraftMode} onChange={(e) => setRefDraftMode(e.target.checked)} />
+              재질/절개선 확인용 (저화질, 비용 약 1/8)
+            </label>
+            <button
+              onClick={() => generateRefShots()}
+              disabled={!!refBusy || productImages.length === 0}
+              className="px-4 py-2 rounded-lg bg-gray-900 text-white text-xs font-medium disabled:opacity-40 transition"
+            >
+              {refBusy === 'all' ? '만드는 중…' : '4컷 만들기'}
+            </button>
+          </div>
         </div>
         <p className="text-[11px] text-gray-400 mb-3">
           사람 없이 제품만 담긴 깨끗한 컷을 만듭니다. 이 4장이 이후 모든 포즈 생성의 기준이 되므로, 여기서 확인하고
-          마음에 안 드는 각도만 다시 만들면 됩니다.
+          마음에 안 드는 각도만 다시 만들면 됩니다. 재질/절개선만 빠르게 볼 땐 저화질로 확인 후, 마음에 들면
+          체크 해제하고 다시 만들어 확정하세요.
         </p>
         {refError && <p className="text-[11px] text-red-500 mb-2">{refError}</p>}
 
@@ -611,13 +624,23 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
               </div>
               <div className="mt-1.5 flex items-center justify-between">
                 <span className="text-[10px] font-medium text-gray-500">{a.label}</span>
-                <button
-                  onClick={() => generateRefShots([a.id])}
-                  disabled={!!refBusy || productImages.length === 0}
-                  className="text-[10px] text-gray-400 hover:text-gray-900 disabled:opacity-40 transition"
-                >
-                  다시
-                </button>
+                <div className="flex items-center gap-2">
+                  {refShots[a.id] && (
+                    <button
+                      onClick={() => downloadImage(refShots[a.id]!, `lookbook_ref_${a.label}.png`)}
+                      className="text-[10px] text-gray-400 hover:text-gray-900 transition"
+                    >
+                      저장
+                    </button>
+                  )}
+                  <button
+                    onClick={() => generateRefShots([a.id])}
+                    disabled={!!refBusy || productImages.length === 0}
+                    className="text-[10px] text-gray-400 hover:text-gray-900 disabled:opacity-40 transition"
+                  >
+                    다시
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -832,7 +855,8 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
             </button>
           </div>
         </div>
-        {runMsg && <p className="text-[11px] text-gray-500 mb-3">{runMsg}</p>}
+        {runMsg && <p className="text-[11px] text-gray-500 mb-1">{runMsg}</p>}
+        {downloadError && <p className="text-[11px] text-red-500 mb-2">{downloadError}</p>}
 
         {results.length > 0 && (
           <div className="grid grid-cols-4 gap-3">
