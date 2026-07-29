@@ -204,14 +204,18 @@ export function buildLookbookFittingPrompt(
     '',
     styling,
     anchorNum
-      ? `\nBATCH CONSISTENCY ANCHOR — Image ${anchorNum} is an already-approved shot from THIS SAME set: same person, same garment, same outfit, same studio. It is the ground truth for everything except the pose. The model's HEIGHT, head-to-body ratio, build, shoulder width, face, hair and skin tone must match it exactly, and every non-sourced item (the exact bottoms, their exact color and silhouette, the exact shoes) must be the identical item shown there — not a similar one, not a different shade. Only the pose and camera angle change between that shot and this one. If anything about the body or the outfit would differ from Image ${anchorNum}, you are wrong — copy Image ${anchorNum}.`
+      ? `\nBATCH CONSISTENCY ANCHOR — Image ${anchorNum} is an already-approved shot from THIS SAME set: same person, same garment, same outfit, same studio. It is the ground truth for WHO and WHAT, never for HOW THEY STAND. The model's HEIGHT, head-to-body ratio, build, shoulder width, face, hair and skin tone must match it exactly, and every non-sourced item (the exact bottoms, their exact color and silhouette, the exact shoes) must be the identical item shown there — not a similar one, not a different shade. If anything about the body or the outfit would differ from Image ${anchorNum}, you are wrong — copy Image ${anchorNum}.\nCRITICAL EXCEPTION: do NOT take the pose, limb placement, body rotation, gaze, or camera angle from Image ${anchorNum}. Those come exclusively from the POSE section below. Image ${anchorNum} deliberately shows a DIFFERENT pose and reusing it would defeat the purpose of this shot.`
       : '',
     '',
-    'POSE & FRAMING (mandatory — overrides any pose visible in the reference images):',
-    `- ${poseInstruction}`,
+    'POSE & FRAMING (mandatory — overrides any pose visible in ANY other attached image):',
     poseRefNum
-      ? `- Image ${poseRefNum} is a POSE REFERENCE: copy ONLY the body posture, limb placement, and camera angle from it. Completely ignore the person, face, clothing, and background in that image — the identity comes from Image 1 and the garment from the product references.`
-      : '',
+      ? [
+          `- PRIMARY POSE AUTHORITY — Image ${poseRefNum} is a POSE REFERENCE PHOTO. Reproduce the posture in that photo as literally as a photographer re-shooting it: the same torso rotation and body facing, the same head/gaze direction, the same placement of BOTH hands (note exactly whether each hand is in a FRONT pocket, a BACK pocket, crossed, hanging, or holding something — front and back pockets are NOT interchangeable), the same arm bend, the same weight distribution and foot position, and the same camera height and distance. If your first instinct differs from that photo, the photo is right and you are wrong.`,
+          `- Copy ONLY the posture and camera angle from Image ${poseRefNum}. Completely ignore the person, face, clothing, and background in it — identity comes from Image 1 and the garment from the product references.`,
+          `- The text description below is SECONDARY: use it only to settle details the photo cannot show or that it leaves ambiguous. It must never be used to justify a posture different from the photo.`,
+          `- Pose details (secondary refinement): ${poseInstruction}`,
+        ].join('\n')
+      : `- ${poseInstruction} — follow every part of this literally, especially exact hand placement (a "back pocket" means the hand is behind the body in a rear pocket, never in a front pocket) and gaze direction.`,
     framing === 'close'
       ? `- CLOSE-UP framing: crop in tight on the sourced ${SLOT_LABEL_EN[category]} so it fills most of the frame, showing the fabric weave, stitching, and trims at real scale. The face may be partly or fully out of frame — that is expected. Keep the crop natural and photographic, not a zoomed-in blur.`
       : '- FULL-BODY commercial lookbook framing: the entire figure from head to shoes is inside the frame with comfortable margin, the whole outfit visible, photorealistic, shot on a professional camera.',

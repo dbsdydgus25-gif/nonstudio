@@ -160,8 +160,14 @@ export async function POST(req: Request) {
           const rawPoseRef = preset.hasRefImage ? await getPosePresetRefImage(uid, preset.id) : null;
           const poseRefImage = rawPoseRef ? await downscaleImage(rawPoseRef.buffer, rawPoseRef.mimeType) : null;
 
+          // (2026-07-29) 참고 이미지가 8장까지 불어나면서 포즈 참고사진이 파묻혀 무시되는
+          // 문제가 있었다(대표님 신고: "측면1은 참고해놓은 사진을 그대로 반영을 안했어").
+          // 이 코드베이스의 반복 교훈대로, 앵커가 있으면 그 앵커가 이미 옷·코디의 완성본이라
+          // 기준컷 여러 장은 중복 정보다 — 뒷면 근거 1장만 남기고 줄여서 포즈 사진에 집중시킨다.
+          const extrasForThisCall = batchAnchor ? extraRefs.slice(0, 1) : extraRefs;
+
           const prompt = buildLookbookFittingPrompt(category, garmentAnalysis, preset.poseInstruction, bodySpec, {
-            extraReferenceCount: extraRefs.length,
+            extraReferenceCount: extrasForThisCall.length,
             hasPoseRefImage: !!poseRefImage,
             hasBackgroundImage: !!backgroundReferenceImage,
             colorOverride,
@@ -182,7 +188,7 @@ export async function POST(req: Request) {
             identityReferenceImage,
             backgroundReferenceImage,
             draftMode ? 'low' : 'medium',
-            extraRefs,
+            extrasForThisCall,
             [],
             poseRefImage ? [poseRefImage] : [],
             batchAnchor,

@@ -587,15 +587,22 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
         <div className="grid grid-cols-4 gap-3">
           {ANGLES.map((a) => (
             <div key={a.id}>
-              <div className="relative aspect-[3/4] rounded-lg border border-gray-200 overflow-hidden bg-gray-50">
+              <div
+                onClick={() => refShots[a.id] && setZoomImage(refShots[a.id]!)}
+                className={`group relative aspect-[3/4] rounded-lg border border-gray-200 overflow-hidden bg-gray-50 ${
+                  refShots[a.id] ? 'cursor-zoom-in' : ''
+                }`}
+              >
                 {refShots[a.id] ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={refShots[a.id]}
-                    alt={a.label}
-                    onClick={() => setZoomImage(refShots[a.id]!)}
-                    className="w-full h-full object-cover cursor-zoom-in"
-                  />
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={refShots[a.id]} alt={a.label} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition flex items-center justify-center">
+                      <span className="opacity-0 group-hover:opacity-100 transition px-2 py-1 rounded bg-black/60 text-white text-[10px] font-medium">
+                        클릭해서 확대
+                      </span>
+                    </div>
+                  </>
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-300">
                     {refBusy === 'all' || refBusy === a.id ? '생성 중…' : '비어 있음'}
@@ -831,15 +838,22 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
           <div className="grid grid-cols-4 gap-3">
             {results.map((r) => (
               <div key={r.generationId}>
-                <div className="relative aspect-[2/3] rounded-lg border border-gray-200 overflow-hidden bg-gray-50">
+                <div
+                  onClick={() => r.imageUrl && setZoomImage(r.imageUrl)}
+                  className={`group relative aspect-[2/3] rounded-lg border border-gray-200 overflow-hidden bg-gray-50 ${
+                    r.imageUrl ? 'cursor-zoom-in' : ''
+                  }`}
+                >
                   {r.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={r.imageUrl}
-                      alt={r.label}
-                      onClick={() => setZoomImage(r.imageUrl!)}
-                      className="w-full h-full object-cover cursor-zoom-in"
-                    />
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={r.imageUrl} alt={r.label} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition flex items-center justify-center">
+                        <span className="opacity-0 group-hover:opacity-100 transition px-2 py-1 rounded bg-black/60 text-white text-[10px] font-medium">
+                          클릭해서 확대
+                        </span>
+                      </div>
+                    </>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-300 px-2 text-center">
                       {r.status === 'failed' ? r.errorMessage || '실패' : '생성 중…'}
