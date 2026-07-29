@@ -10,6 +10,7 @@
  */
 
 import { getSupabaseAdmin, GENERATIONS_BUCKET } from './supabase';
+import type { SourcedCategory } from './fitting-prompts';
 
 export interface PosePreset {
   id: string;
@@ -19,7 +20,27 @@ export interface PosePreset {
   poseInstruction: string;
   /** 참고 사진(포즈 예시)이 함께 저장되어 있는지 */
   hasRefImage: boolean;
+  /**
+   * 어느 소싱 카테고리용 포즈인지 — 신발 촬영용 포즈와 상의 촬영용 포즈는 프레이밍도
+   * 자세도 완전히 다르므로 섞이면 안 된다. 구버전 프리셋은 'top'으로 폴백.
+   */
+  slot: SourcedCategory;
+  /** 전신샷인지 클로즈업인지 — 구버전 프리셋은 'full'로 폴백 */
+  framing: 'full' | 'close';
   createdAt: string;
+}
+
+/** 구버전(필드 없던 시절) 프리셋도 안전하게 읽히도록 기본값을 채운다 */
+function normalizePreset(p: any): PosePreset {
+  return {
+    id: p.id,
+    name: p.name,
+    poseInstruction: p.poseInstruction,
+    hasRefImage: !!p.hasRefImage,
+    slot: p.slot || 'top',
+    framing: p.framing === 'close' ? 'close' : 'full',
+    createdAt: p.createdAt || new Date(0).toISOString(),
+  };
 }
 
 function indexPath(uid: string): string {
@@ -35,7 +56,7 @@ export async function listPosePresets(uid: string): Promise<PosePreset[]> {
     const { data, error } = await supabase.storage.from(GENERATIONS_BUCKET).download(indexPath(uid));
     if (error || !data) return [];
     const parsed = JSON.parse(await data.text());
-    return Array.isArray(parsed?.presets) ? parsed.presets : [];
+    return Array.isArray(parsed?.presets) ? parsed.presets.map(normalizePreset) : [];
   } catch {
     return [];
   }
@@ -55,7 +76,13 @@ async function writeIndex(uid: string, presets: PosePreset[]): Promise<void> {
 
 export async function addPosePreset(
   uid: string,
-  input: { name: string; poseInstruction: string; refImage?: { buffer: Buffer; mimeType: string } },
+  input: {
+    name: string;
+    poseInstruction: string;
+    slot: SourcedCategory;
+    framing: 'full' | 'close';
+    refImage?: { buffer: Buffer; mimeType: string };
+  },
 ): Promise<PosePreset> {
   const supabase = getSupabaseAdmin();
   const id = `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -75,6 +102,8 @@ export async function addPosePreset(
     name: input.name.trim(),
     poseInstruction: input.poseInstruction.trim(),
     hasRefImage: !!input.refImage,
+    slot: input.slot,
+    framing: input.framing,
     createdAt: new Date().toISOString(),
   };
   const presets = await listPosePresets(uid);

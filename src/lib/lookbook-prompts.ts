@@ -146,17 +146,35 @@ export function buildLookbookFittingPrompt(
     colorOverride?: string;
     /** 소싱 제품이 아닌 나머지 슬롯을 뭘로 입힐지 — 비워두면 아래 기본 코디로 채운다 */
     styleHints?: Partial<Record<SourcedCategory, string>>;
+    /** 판매자 제공 핏/디테일 스펙 (머슬핏, 크롭 기장 등) + 선택 사이즈 실측 */
+    productNotes?: string;
+    selectedSize?: { label: string; measurements?: string };
+    /** 전신샷 / 클로즈업 */
+    framing?: 'full' | 'close';
+    /** 같은 배치에서 이미 확정된 첫 컷을 앵커로 함께 넣는지 */
+    hasPoseAnchor?: boolean;
   },
 ): string {
   const { extraReferenceCount, hasPoseRefImage, hasBackgroundImage } = opts;
   const color = opts.colorOverride?.trim() || garmentAnalysis.color;
   const styling = buildStylingLines(category, opts.styleHints);
+  const framing = opts.framing || 'full';
 
   // 이미지 번호 계산 — Image 1은 항상 모델, Image 2는 기준 대표컷.
+  // 순서: [모델, 대표 기준컷, 나머지 기준컷…, 포즈참고, 배치앵커, 배경]
   const primaryRefNum = 2;
   const extraRefNums = Array.from({ length: extraReferenceCount }, (_, i) => primaryRefNum + 1 + i);
-  const poseRefNum = hasPoseRefImage ? primaryRefNum + 1 + extraReferenceCount : null;
-  const backgroundNum = hasBackgroundImage ? primaryRefNum + 1 + extraReferenceCount + (hasPoseRefImage ? 1 : 0) : null;
+  let cursor = primaryRefNum + extraReferenceCount;
+  const poseRefNum = hasPoseRefImage ? ++cursor : null;
+  const anchorNum = opts.hasPoseAnchor ? ++cursor : null;
+  const backgroundNum = hasBackgroundImage ? ++cursor : null;
+
+  // 판매자 스펙 + 선택 사이즈 실측 — 숫자를 그대로 베끼지 말고 이 모델 체형 기준으로
+  // "실제로 얼마나 헐렁/타이트하게 보이는지"를 추론하게 한다(제품 피팅에서 검증된 문구).
+  const specParts = [opts.productNotes?.trim(), opts.selectedSize?.measurements?.trim()].filter(Boolean);
+  const sizeLine = specParts.length
+    ? `\nMANDATORY FIT/DETAIL SPEC from the seller${opts.selectedSize?.label ? ` (size ${opts.selectedSize.label})` : ''} — this overrides any fit impression you form from the photos, because shop photos are often shot loose on a different body: ${specParts.join(' / ')}. If this includes numeric measurements (chest, shoulder, total length, sleeve, waist, hip, thigh, rise, hem width), do NOT just repeat the numbers — reason about what they mean ON THIS SPECIFIC MODEL's body as described in the MODEL section below, and render the actual visual looseness, tightness, and drape they imply. For example: a chest width much narrower than a relaxed fit implies the fabric visibly hugs the chest and upper arms with no slack; a total length shorter than a standard tee on this height implies a visibly cropped hem sitting above the waistband; a hem/thigh width far wider than the leg implies a clearly baggy silhouette with extra fabric volume, not a tapered line.`
+    : '';
 
   return [
     '=== TASK: DRESS THE FIXED MODEL IN THIS PRODUCT (LOOKBOOK SHOT) ===',
@@ -180,17 +198,24 @@ export function buildLookbookFittingPrompt(
     garmentAnalysis.constructionMap?.asymmetryChecklist
       ? `- Asymmetric details (exist on ONE side only — do not duplicate to the other side): ${garmentAnalysis.constructionMap.asymmetryChecklist}`
       : '',
+    sizeLine,
     '',
     buildModelLockLines(bodySpec),
     '',
     styling,
+    anchorNum
+      ? `\nBATCH CONSISTENCY ANCHOR — Image ${anchorNum} is an already-approved shot from THIS SAME set: same person, same garment, same outfit, same studio. It is the ground truth for everything except the pose. The model's HEIGHT, head-to-body ratio, build, shoulder width, face, hair and skin tone must match it exactly, and every non-sourced item (the exact bottoms, their exact color and silhouette, the exact shoes) must be the identical item shown there — not a similar one, not a different shade. Only the pose and camera angle change between that shot and this one. If anything about the body or the outfit would differ from Image ${anchorNum}, you are wrong — copy Image ${anchorNum}.`
+      : '',
     '',
     'POSE & FRAMING (mandatory — overrides any pose visible in the reference images):',
     `- ${poseInstruction}`,
     poseRefNum
       ? `- Image ${poseRefNum} is a POSE REFERENCE: copy ONLY the body posture, limb placement, and camera angle from it. Completely ignore the person, face, clothing, and background in that image — the identity comes from Image 1 and the garment from the product references.`
       : '',
-    '- Full-body commercial lookbook framing, the whole outfit visible, photorealistic, shot on a professional camera.',
+    framing === 'close'
+      ? `- CLOSE-UP framing: crop in tight on the sourced ${SLOT_LABEL_EN[category]} so it fills most of the frame, showing the fabric weave, stitching, and trims at real scale. The face may be partly or fully out of frame — that is expected. Keep the crop natural and photographic, not a zoomed-in blur.`
+      : '- FULL-BODY commercial lookbook framing: the entire figure from head to shoes is inside the frame with comfortable margin, the whole outfit visible, photorealistic, shot on a professional camera.',
+    '- Keep the camera distance and lens feel consistent with the rest of this set; do not zoom in or out arbitrarily.',
     '',
     `BACKGROUND: ${DEFAULT_STUDIO_BACKGROUND}`,
     backgroundNum

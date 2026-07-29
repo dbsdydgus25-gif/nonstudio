@@ -36,6 +36,8 @@ interface PosePresetItem {
   name: string;
   poseInstruction: string;
   hasRefImage: boolean;
+  slot: SourcedCategory;
+  framing: 'full' | 'close';
   refImageUrl: string | null;
 }
 
@@ -56,6 +58,14 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
   const [productImageHasPerson, setProductImageHasPerson] = useState<boolean[]>([]);
   const [colorOptions, setColorOptions] = useState<string[]>([]);
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
+  // 상세페이지에서 뽑은 특징 텍스트 — 분석(rawSpecs)으로 넘겨 머슬핏/크롭/골지 같은 정보를 살린다
+  const [productText, setProductText] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
+  // 대표님이 직접 적는 핏/디테일 메모 (예: 머슬핏, 크롭 기장)
+  const [productNotes, setProductNotes] = useState('');
+  // 상세페이지 사이즈표 — 고른 사이즈의 실측을 모델 체형 기준으로 추론해 입힌다
+  const [sizeOptions, setSizeOptions] = useState<Array<{ label: string; measurements?: string }>>([]);
+  const [selectedSize, setSelectedSize] = useState<{ label: string; measurements?: string } | null>(null);
   const [excludedIdx, setExcludedIdx] = useState<Set<number>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -74,6 +84,8 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
   const [newPresetName, setNewPresetName] = useState('');
   const [newPresetText, setNewPresetText] = useState('');
   const [newPresetRef, setNewPresetRef] = useState<string | null>(null);
+  const [newPresetFraming, setNewPresetFraming] = useState<'full' | 'close'>('full');
+  const [presetTab, setPresetTab] = useState<SourcedCategory>('top');
   const [isSavingPreset, setIsSavingPreset] = useState(false);
   const [presetError, setPresetError] = useState('');
   const presetFileRef = useRef<HTMLInputElement>(null);
@@ -92,11 +104,26 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
     }>
   >([]);
 
+  // 확대 보기 — 기준컷/결과컷 클릭 시
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
+
   const keysSet = geminiKey && openaiKey;
 
   useEffect(() => {
     void loadPresets();
   }, []);
+
+  // 소싱 카테고리를 바꾸면 프리셋 탭도 따라간다 — 상의 룩북엔 상의용 포즈가 기본
+  useEffect(() => {
+    setPresetTab(category);
+  }, [category]);
+
+  useEffect(() => {
+    if (!zoomImage) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setZoomImage(null);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoomImage]);
 
   const loadPresets = async () => {
     try {
@@ -151,6 +178,11 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
       setProductImageHasPerson((data.productImageHasPerson || []).slice(0, 20));
       setColorOptions(data.colorOptions || []);
       setSelectedColor(null);
+      setProductText(data.productText || '');
+      setSourceUrl(data.sourceUrl || url);
+      const sizes: Array<{ label: string; measurements?: string }> = data.sizeOptions || [];
+      setSizeOptions(sizes);
+      setSelectedSize(null);
       setExcludedIdx(new Set());
       setRefShots({});
       setSheetId(null);
@@ -205,6 +237,10 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
           openaiApiKey: openaiKey,
           colorOverride: selectedColor || undefined,
           angles,
+          // 사진만으로는 안 보이는 핏/재질 정보 — 분석에 함께 넣어야 머슬핏/크롭이 살아난다
+          productText,
+          productNotes,
+          sourceUrl,
           // 개별 재생성이면 기존 시트에 덮어써서 앞면을 기준 앵커로 재사용한다
           sheetId: angles?.length ? sheetId || undefined : undefined,
           // 재분석은 첫 생성 때 한 번만 — 개별 재생성에선 기존 분석을 재사용해 비용을 아낀다
@@ -238,6 +274,8 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
         body: JSON.stringify({
           name: newPresetName,
           poseInstruction: newPresetText,
+          slot: presetTab,
+          framing: newPresetFraming,
           refImageBase64: newPresetRef || undefined,
         }),
       });
@@ -267,6 +305,9 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
       setPresetError(err?.message || '프리셋 삭제 중 오류가 발생했습니다.');
     }
   };
+
+  /** 현재 탭(카테고리)의 프리셋만 노출 — 신발용 포즈가 상의 룩북에 섞이면 안 된다 */
+  const visiblePresets = presets.filter((p) => p.slot === presetTab);
 
   const togglePreset = (id: string) =>
     setSelectedPresetIds((prev) => {
@@ -305,6 +346,8 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
           colorOverride: selectedColor || undefined,
           draftMode,
           styleHints,
+          productNotes,
+          selectedSize: selectedSize || undefined,
         }),
       });
       const data = await res.json();
@@ -470,6 +513,54 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
             e.target.value = '';
           }}
         />
+
+        {/* 핏/디테일 메모 + 사이즈 — 사진만으로는 안 보이는 정보를 분석에 넣는다 */}
+        <div className="mt-4 space-y-2">
+          <div>
+            <label className="block text-[10px] font-medium text-gray-500 mb-1">
+              핏 · 디테일 메모 (사진으로 안 보이는 것)
+            </label>
+            <input
+              value={productNotes}
+              onChange={(e) => setProductNotes(e.target.value)}
+              placeholder="예: 머슬핏, 크롭 기장, 골지 소재, 오버핏"
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-gray-400 outline-none text-xs"
+            />
+            {productText && (
+              <p className="mt-1 text-[10px] text-emerald-600">
+                상세페이지 특징 텍스트도 분석에 함께 반영됩니다 ({productText.length}자)
+              </p>
+            )}
+          </div>
+
+          {sizeOptions.length > 0 && (
+            <div>
+              <label className="block text-[10px] font-medium text-gray-500 mb-1">
+                사이즈 — 고른 사이즈의 실측을 모델 체형(키/체격) 기준으로 추론해 입힙니다
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {sizeOptions.map((s) => (
+                  <button
+                    key={s.label}
+                    onClick={() => setSelectedSize(selectedSize?.label === s.label ? null : s)}
+                    title={s.measurements || '실측 없음'}
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-medium transition ${
+                      selectedSize?.label === s.label
+                        ? 'bg-gray-900 text-white'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                    }`}
+                  >
+                    {s.label}
+                    {s.measurements ? ' *' : ''}
+                  </button>
+                ))}
+              </div>
+              {selectedSize?.measurements && (
+                <p className="mt-1.5 text-[10px] text-gray-400 leading-relaxed">실측: {selectedSize.measurements}</p>
+              )}
+            </div>
+          )}
+        </div>
       </section>
 
       {/* ───── 02. 기준컷 4장 ───── */}
@@ -499,7 +590,12 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
               <div className="relative aspect-[3/4] rounded-lg border border-gray-200 overflow-hidden bg-gray-50">
                 {refShots[a.id] ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={refShots[a.id]} alt={a.label} className="w-full h-full object-cover" />
+                  <img
+                    src={refShots[a.id]}
+                    alt={a.label}
+                    onClick={() => setZoomImage(refShots[a.id]!)}
+                    className="w-full h-full object-cover cursor-zoom-in"
+                  />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-300">
                     {refBusy === 'all' || refBusy === a.id ? '생성 중…' : '비어 있음'}
@@ -563,11 +659,29 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
           <h2 className="text-sm font-semibold text-gray-900">포즈 프리셋</h2>
         </div>
         <p className="text-[11px] text-gray-400 mb-3">
-          한 번 등록해두면 계속 재사용됩니다. 참고 사진을 같이 올리면 그 자세를 더 정확히 따라갑니다.
+          카테고리별로 따로 저장됩니다. 참고 사진을 같이 올리면 그 자세를 더 정확히 따라갑니다.
         </p>
 
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {CATEGORY_OPTIONS.map((c) => {
+            const count = presets.filter((p) => p.slot === c.id).length;
+            return (
+              <button
+                key={c.id}
+                onClick={() => setPresetTab(c.id)}
+                className={`px-3 py-1.5 rounded-full text-[11px] font-medium transition ${
+                  presetTab === c.id ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                {c.label}
+                {count > 0 && ` ${count}`}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="grid grid-cols-3 gap-2 mb-4">
-          {presets.map((p) => {
+          {visiblePresets.map((p) => {
             const on = selectedPresetIds.has(p.id);
             return (
               <div
@@ -583,7 +697,16 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
                     <img src={p.refImageUrl} alt="" className="w-8 h-10 object-cover rounded" />
                   )}
                   <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-medium text-gray-900 truncate">{p.name}</p>
+                    <p className="text-[11px] font-medium text-gray-900 truncate">
+                      {p.name}
+                      <span
+                        className={`ml-1.5 px-1 py-0.5 rounded text-[9px] font-semibold align-middle ${
+                          p.framing === 'close' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-500'
+                        }`}
+                      >
+                        {p.framing === 'close' ? '클로즈업' : '전신'}
+                      </span>
+                    </p>
                     <p className="text-[10px] text-gray-400 truncate">{p.poseInstruction}</p>
                   </div>
                 </div>
@@ -599,14 +722,18 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
               </div>
             );
           })}
-          {presets.length === 0 && (
+          {visiblePresets.length === 0 && (
             <p className="col-span-3 text-[11px] text-gray-300 py-4 text-center">
-              등록된 포즈가 없습니다. 아래에서 추가해주세요.
+              이 카테고리에 등록된 포즈가 없습니다. 아래에서 추가해주세요.
             </p>
           )}
         </div>
 
         <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+          <p className="text-[10px] text-gray-400">
+            <b className="text-gray-600">{CATEGORY_OPTIONS.find((c) => c.id === presetTab)?.label}</b> 카테고리에
+            저장됩니다
+          </p>
           <input
             value={newPresetName}
             onChange={(e) => setNewPresetName(e.target.value)}
@@ -621,6 +748,19 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
             className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:border-gray-400 outline-none text-xs resize-none"
           />
           <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+              {(['full', 'close'] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setNewPresetFraming(f)}
+                  className={`px-3 py-1.5 text-[11px] font-medium transition ${
+                    newPresetFraming === f ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  {f === 'full' ? '전신' : '클로즈업'}
+                </button>
+              ))}
+            </div>
             <button
               onClick={() => presetFileRef.current?.click()}
               className="px-3 py-1.5 rounded-lg border border-gray-200 hover:border-gray-400 text-[11px] text-gray-500 transition"
@@ -694,7 +834,12 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
                 <div className="relative aspect-[2/3] rounded-lg border border-gray-200 overflow-hidden bg-gray-50">
                   {r.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={r.imageUrl} alt={r.label} className="w-full h-full object-cover" />
+                    <img
+                      src={r.imageUrl}
+                      alt={r.label}
+                      onClick={() => setZoomImage(r.imageUrl!)}
+                      className="w-full h-full object-cover cursor-zoom-in"
+                    />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-[10px] text-gray-300 px-2 text-center">
                       {r.status === 'failed' ? r.errorMessage || '실패' : '생성 중…'}
@@ -717,6 +862,28 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
           </div>
         )}
       </section>
+
+      {/* 확대 보기 — 기준컷/결과컷 클릭 시. 배경이나 ESC로 닫힘 */}
+      {zoomImage && (
+        <div
+          onClick={() => setZoomImage(null)}
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6 cursor-zoom-out"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={zoomImage}
+            alt="확대 보기"
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-full max-h-full object-contain rounded-lg cursor-default"
+          />
+          <button
+            onClick={() => setZoomImage(null)}
+            className="absolute top-5 right-6 text-white/70 hover:text-white text-2xl leading-none"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }

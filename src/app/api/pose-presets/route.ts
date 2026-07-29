@@ -29,13 +29,15 @@ export async function POST(req: Request) {
   if (!uid) return NextResponse.json({ success: false, error: '로그인이 필요합니다.' }, { status: 401 });
 
   try {
-    const { name, poseInstruction, refImageBase64 } = await req.json();
+    const { name, poseInstruction, slot, framing, refImageBase64 } = await req.json();
     if (!name?.trim() || !poseInstruction?.trim()) {
       return NextResponse.json({ success: false, error: '이름과 포즈 설명을 입력해주세요.' }, { status: 400 });
     }
     const preset = await addPosePreset(uid, {
       name,
       poseInstruction,
+      slot: slot || 'top',
+      framing: framing === 'close' ? 'close' : 'full',
       refImage: refImageBase64 ? parseBase64Image(refImageBase64) : undefined,
     });
     return NextResponse.json({ success: true, preset });

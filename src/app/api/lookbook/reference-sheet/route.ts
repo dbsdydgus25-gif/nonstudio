@@ -37,6 +37,9 @@ export async function POST(req: Request) {
       angles,
       sheetId: providedSheetId,
       garmentAnalysis: providedAnalysis,
+      productText,
+      productNotes,
+      sourceUrl,
     }: {
       /** 색상별로 큐레이션된 실제 스크래핑 사진(대표컷 먼저) */
       productImagesBase64: string[];
@@ -50,6 +53,11 @@ export async function POST(req: Request) {
       sheetId?: string;
       /** 재생성 시 이미 있는 분석 결과를 넘기면 재분석 생략(비용 절감) */
       garmentAnalysis?: GarmentAnalysis;
+      /** 상세페이지에서 뽑은 제품명·특징 텍스트 — 머슬핏/크롭/골지 같은 핏·재질 정보의 출처 */
+      productText?: string;
+      /** 대표님이 직접 적은 핏/디테일 메모 */
+      productNotes?: string;
+      sourceUrl?: string;
     } = await req.json();
 
     if (!productImagesBase64?.length) {
@@ -59,9 +67,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'OpenAI API 키가 없습니다.' }, { status: 400 });
     }
 
+    // (2026-07-29) 상세페이지 특징 텍스트(productText)와 대표님 메모를 rawSpecs로 함께 넘긴다 —
+    // 사진만으로는 "머슬핏 / 크롭 기장 / 골지" 같은 핏·재질 정보를 알 수 없어서, 이걸 안 넣으면
+    // 분석 결과가 일반적인 티셔츠로 뭉개진다(대표님 지적: "상세페이지 분석해서 저장되어야 한다").
+    const rawSpecs = [productText?.trim(), productNotes?.trim()].filter(Boolean).join('\n') || undefined;
     const garmentAnalysis =
       providedAnalysis ||
-      (await analyzeGarment(productImagesBase64, geminiApiKey, undefined, undefined, category, openaiApiKey));
+      (await analyzeGarment(productImagesBase64, geminiApiKey, sourceUrl, rawSpecs, category, openaiApiKey));
 
     if (garmentAnalysis.analysisFailed) {
       return NextResponse.json(

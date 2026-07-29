@@ -50,6 +50,8 @@ export async function POST(req: Request) {
       colorOverride,
       draftMode,
       styleHints,
+      productNotes,
+      selectedSize,
     }: {
       /** 1단계에서 만든 기준컷 묶음 id — 이미지 자체는 서버 Storage에 있다 */
       sheetId: string;
@@ -61,6 +63,10 @@ export async function POST(req: Request) {
       draftMode?: boolean;
       /** 소싱 제품이 아닌 나머지 슬롯 코디 지시 */
       styleHints?: Partial<Record<SourcedCategory, string>>;
+      /** 판매자 제공 핏/디테일 스펙 (머슬핏, 크롭 기장 등) */
+      productNotes?: string;
+      /** 선택한 사이즈 + 실측 — 모델 체형 기준으로 핏을 추론하는 데 쓴다 */
+      selectedSize?: { label: string; measurements?: string };
     } = await req.json();
 
     if (!sheetId) {
@@ -143,9 +149,13 @@ export async function POST(req: Request) {
         return;
       }
 
-      await runWithConcurrency(jobs, 2, async ({ preset, generationId }) => {
+      /** 한 컷 생성. batchAnchor가 있으면 그 컷과 몸/코디를 일치시키도록 함께 넣는다. */
+      const generateOne = async (
+        { preset, generationId }: (typeof jobs)[number],
+        batchAnchor: { buffer: Buffer; mimeType: string } | null,
+      ): Promise<{ buffer: Buffer; mimeType: string } | null> => {
         try {
-          if (await isGenerationCanceled(generationId)) return;
+          if (await isGenerationCanceled(generationId)) return null;
 
           const rawPoseRef = preset.hasRefImage ? await getPosePresetRefImage(uid, preset.id) : null;
           const poseRefImage = rawPoseRef ? await downscaleImage(rawPoseRef.buffer, rawPoseRef.mimeType) : null;
@@ -156,11 +166,15 @@ export async function POST(req: Request) {
             hasBackgroundImage: !!backgroundReferenceImage,
             colorOverride,
             styleHints,
+            productNotes,
+            selectedSize,
+            framing: preset.framing,
+            hasPoseAnchor: !!batchAnchor,
           });
 
           // 이미지 순서는 buildLookbookFittingPrompt의 번호 계산과 반드시 일치해야 한다:
-          // [identity, 대표 기준컷, 나머지 기준컷…, 포즈 참고, 배경]
-          // 포즈 참고는 styleReferenceImages 슬롯을 빌려 쓴다(그 슬롯이 배경 바로 앞이라 순서가 맞다).
+          // [identity, 대표 기준컷, 나머지 기준컷…, 포즈 참고, 배치 앵커, 배경]
+          // 포즈 참고는 styleReferenceImages 슬롯을, 배치 앵커는 poseAnchorImage 슬롯을 쓴다.
           const imageUrl = await runGptImageEdit(
             openai,
             primaryRef,
@@ -171,14 +185,31 @@ export async function POST(req: Request) {
             extraRefs,
             [],
             poseRefImage ? [poseRefImage] : [],
+            batchAnchor,
           );
 
           const { buffer, mimeType } = await resultImageToBuffer(imageUrl);
           await markGenerationCompleted(generationId, { outputBuffer: buffer, outputMimeType: mimeType, prompt });
+          return { buffer, mimeType };
         } catch (err: any) {
           console.error(`[api/lookbook/batch][after] "${preset.name}" 생성 실패:`, err);
           await markGenerationFailed(generationId, err?.message || '생성 중 오류가 발생했습니다.');
+          return null;
         }
+      };
+
+      // (2026-07-29) 예전엔 모든 컷을 병렬로 만들어서 서로를 모른 채 그려졌고, 결과적으로
+      // 컷마다 모델 키·체형이 달라지고 하의 색까지 바뀌는 문제가 있었다(대표님 신고).
+      // gpt-image-2는 seed가 없어 같은 텍스트 스펙만으로는 수렴하지 않는다 — 이 코드베이스에서
+      // 반복 확인된 해법은 "이미 확정된 사진"을 기준으로 주는 것이라, 첫 컷을 먼저 만들고
+      // 그 결과를 나머지 전부의 앵커로 넣는다.
+      const [firstJob, ...restJobs] = jobs;
+      const firstOut = await generateOne(firstJob, null);
+      const batchAnchor = firstOut ? await downscaleImage(firstOut.buffer, firstOut.mimeType) : null;
+      // 첫 컷을 순차로 먼저 만드느라 라운드가 한 번 늘었으므로, 나머지는 3장씩 돌려
+      // 전체 시간이 maxDuration(280초)을 넘지 않게 한다. 429는 withImageRetry가 흡수한다.
+      await runWithConcurrency(restJobs, 3, async (job) => {
+        await generateOne(job, batchAnchor);
       });
     });
 
