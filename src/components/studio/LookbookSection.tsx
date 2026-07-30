@@ -60,7 +60,14 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
   // 갤러리는 썸네일(512px)이라, 생성 시 서버가 원본을 다시 받도록 소스 URL을 같이 들고 있는다
   const [productImageUrls, setProductImageUrls] = useState<string[]>([]);
   const [colorOptions, setColorOptions] = useState<string[]>([]);
+  // 사진에서 실제로 판별된 색상 — <select> 옵션에 없는 색도 탭에 띄우기 위함
+  const [detectedColors, setDetectedColors] = useState<string[]>([]);
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
+  // 디테일 설명/원단 클로즈업 — 생성 원본이 아니라 분석 근거로만 쓴다
+  const [materialImages, setMaterialImages] = useState<string[]>([]);
+  const [infoImageCount, setInfoImageCount] = useState(0);
+  // 갤러리를 다 펼치면 지저분해서 기본은 8장만 보여주고, 전체보기로 모달을 띄운다
+  const [showAllImages, setShowAllImages] = useState(false);
   // 상세페이지에서 뽑은 특징 텍스트 — 분석(rawSpecs)으로 넘겨 머슬핏/크롭/골지 같은 정보를 살린다
   const [productText, setProductText] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
@@ -148,6 +155,14 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
     .map((_, i) => i)
     .filter((i) => !activeColorKey || colorKeyOf(i) === activeColorKey || colorKeyOf(i) === '');
   const isIncluded = (i: number) => !excludedIdx.has(i);
+  /**
+   * 색상 탭 목록 — <select> 옵션 + 사진에서 실제 판별된 색의 합집합.
+   * 옵션에만 의존하면 이름이 다른 색이 통째로 안 보이고(대표님: "두 가지 색상밖에 없어"),
+   * 판별값에만 의존하면 사진이 없는 색이 사라진다.
+   */
+  const colorTabs = Array.from(new Set([...colorOptions, ...detectedColors].filter(Boolean)));
+  /** 그리드에 실제로 그리는 인덱스 — 기본 8장, 전체보기 시 전부 */
+  const GRID_PREVIEW = 8;
 
   /** 기준컷 생성에 실제로 넘기는 사진: 선택 색상 + 포함된 것 + 인물 없는 컷 우선 */
   const curatedIdxs = (): number[] => {
@@ -189,6 +204,10 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
       setProductImageHasPerson((data.productImageHasPerson || []).slice(0, 40));
       setProductImageUrls((data.productImageUrls || []).slice(0, 40));
       setColorOptions(data.colorOptions || []);
+      setDetectedColors(data.detectedColors || []);
+      setMaterialImages((data.materialImages || []).slice(0, 20));
+      setInfoImageCount((data.infoImages || []).length);
+      setShowAllImages(false);
       setSelectedColor(null);
       setProductText(data.productText || '');
       setSourceUrl(data.sourceUrl || url);
@@ -245,6 +264,8 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
         body: JSON.stringify({
           productImagesBase64: images,
           productImageUrls: curatedUrls(),
+          // 원단/구조 클로즈업 — 생성 원본이 아니라 재질·디테일 분석 근거로만 쓰인다
+          materialImagesBase64: materialImages.slice(0, 6),
           category,
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
@@ -425,6 +446,45 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
     }
   };
 
+  /** 제품컷 카드 — 그리드와 전체보기 모달이 같은 렌더를 쓴다 */
+  const renderImageCard = (i: number) => (
+    <div key={i} className="relative group">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={productImages[i]}
+        alt=""
+        onClick={() => setZoomImage(productImages[i])}
+        className={`w-full aspect-[3/4] object-cover rounded-lg border border-gray-200 transition cursor-zoom-in ${
+          isIncluded(i) ? '' : 'opacity-40 grayscale'
+        }`}
+      />
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setExcludedIdx((prev) => {
+            const next = new Set(prev);
+            if (next.has(i)) next.delete(i);
+            else next.add(i);
+            return next;
+          });
+        }}
+        className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/50 text-white text-[10px] flex items-center justify-center"
+      >
+        {isIncluded(i) ? '✓' : '○'}
+      </button>
+      {productImageHasPerson[i] && (
+        <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-amber-500/90 text-white text-[9px] font-semibold">
+          인물
+        </span>
+      )}
+      {productImageColors[i] && (
+        <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-white/85 text-gray-700 text-[9px] font-semibold">
+          {productImageColors[i]}
+        </span>
+      )}
+    </div>
+  );
+
   // ── 렌더 ──
   return (
     <div className="max-w-5xl mx-auto px-8 py-10 space-y-12">
@@ -470,7 +530,7 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
           ))}
         </div>
 
-        {colorOptions.length > 0 && (
+        {colorTabs.length > 0 && (
           <div className="mt-3">
             <p className="text-[10px] text-gray-400 mb-1.5">색상 선택 — 고른 색의 컷만 기준컷 생성에 쓰입니다</p>
             <div className="flex flex-wrap gap-1.5">
@@ -480,59 +540,41 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
                   !selectedColor ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                 }`}
               >
-                전체
+                전체 {productImages.length}
               </button>
-              {colorOptions.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setSelectedColor(c)}
-                  className={`px-3 py-1.5 rounded-full text-[11px] font-medium transition ${
-                    selectedColor === c ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                  }`}
-                >
-                  {c}
-                </button>
-              ))}
+              {colorTabs.map((c) => {
+                const n = productImageColors.filter((x) => x.toLowerCase() === c.toLowerCase()).length;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => setSelectedColor(c)}
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-medium transition ${
+                      selectedColor === c
+                        ? 'bg-gray-900 text-white'
+                        : n === 0
+                          ? 'bg-gray-50 text-gray-300 hover:bg-gray-100'
+                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                    }`}
+                  >
+                    {c} {n}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
 
         <div className="mt-4 grid grid-cols-5 gap-2">
-          {visibleIdxs.map((i) => (
-            <div key={i} className="relative group">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={productImages[i]}
-                alt=""
-                className={`w-full aspect-[3/4] object-cover rounded-lg border border-gray-200 transition ${
-                  isIncluded(i) ? '' : 'opacity-40 grayscale'
-                }`}
-              />
-              <button
-                onClick={() =>
-                  setExcludedIdx((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(i)) next.delete(i);
-                    else next.add(i);
-                    return next;
-                  })
-                }
-                className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-black/50 text-white text-[10px] flex items-center justify-center"
-              >
-                {isIncluded(i) ? '✓' : '○'}
-              </button>
-              {productImageHasPerson[i] && (
-                <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-amber-500/90 text-white text-[9px] font-semibold">
-                  인물
-                </span>
-              )}
-              {productImageColors[i] && (
-                <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-white/85 text-gray-700 text-[9px] font-semibold">
-                  {productImageColors[i]}
-                </span>
-              )}
-            </div>
-          ))}
+          {visibleIdxs.slice(0, GRID_PREVIEW).map((i) => renderImageCard(i))}
+          {visibleIdxs.length > GRID_PREVIEW && (
+            <button
+              onClick={() => setShowAllImages(true)}
+              className="aspect-[3/4] rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-500 hover:text-gray-900 text-[11px] font-medium transition flex flex-col items-center justify-center gap-1"
+            >
+              <span className="text-base font-light leading-none">+{visibleIdxs.length - GRID_PREVIEW}</span>
+              <span className="text-[10px]">전체보기</span>
+            </button>
+          )}
           {productImages.length < 40 && (
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -542,6 +584,13 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
             </button>
           )}
         </div>
+        {(materialImages.length > 0 || infoImageCount > 0) && (
+          <p className="mt-2 text-[10px] text-gray-400">
+            디테일 참고로 분리됨 — 원단·구조 클로즈업 {materialImages.length}장
+            {infoImageCount > 0 && `, 사이즈표·설명 이미지 ${infoImageCount}장(텍스트 분석용)`}. 생성 원본으로는 쓰지
+            않고 재질·스펙 근거로만 씁니다.
+          </p>
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -961,6 +1010,59 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
           </div>
         )}
       </section>
+
+      {/* 전체보기 — 가져온 제품컷 전부를 한 화면에서 색상별로 훑고 포함/제외 */}
+      {showAllImages && (
+        <div className="fixed inset-0 z-40 bg-black/60 flex items-start justify-center p-6 overflow-y-auto">
+          <div className="bg-white rounded-xl w-full max-w-6xl p-5 my-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">
+                  가져온 제품컷 전체 {visibleIdxs.length}장
+                  {selectedColor && <span className="text-gray-400 font-normal"> · {selectedColor}</span>}
+                </h3>
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  ✓ 를 눌러 제외/포함, 사진을 누르면 크게 볼 수 있습니다
+                </p>
+              </div>
+              <button onClick={() => setShowAllImages(false)} className="text-gray-400 hover:text-gray-900 text-xl">
+                ✕
+              </button>
+            </div>
+            {colorTabs.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                <button
+                  onClick={() => setSelectedColor(null)}
+                  className={`px-3 py-1.5 rounded-full text-[11px] font-medium transition ${
+                    !selectedColor ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                  }`}
+                >
+                  전체 {productImages.length}
+                </button>
+                {colorTabs.map((c) => {
+                  const n = productImageColors.filter((x) => x.toLowerCase() === c.toLowerCase()).length;
+                  return (
+                    <button
+                      key={c}
+                      onClick={() => setSelectedColor(c)}
+                      className={`px-3 py-1.5 rounded-full text-[11px] font-medium transition ${
+                        selectedColor === c
+                          ? 'bg-gray-900 text-white'
+                          : n === 0
+                            ? 'bg-gray-50 text-gray-300'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      }`}
+                    >
+                      {c} {n}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div className="grid grid-cols-8 gap-2">{visibleIdxs.map((i) => renderImageCard(i))}</div>
+          </div>
+        </div>
+      )}
 
       {/* 확대 보기 — 기준컷/결과컷 클릭 시. 배경이나 ESC로 닫힘 */}
       {zoomImage && (

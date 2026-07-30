@@ -125,8 +125,8 @@ function collectImageUrls(html: string, pageUrl: string): { official: string[]; 
   // 있는데 30장에서 잘려, 문서 순서상 앞쪽에 몰려 있던 버건디 컷만 들어오고 화이트/남색 룩북샷은
   // 통째로 사라졌다(대표님 신고: "버건디색상만 가져왔어"). 색상별 큐레이션이 가능하려면 모든
   // 색상 구간이 후보에 들어와야 하므로, URL 수집 단계에서는 잘라내지 않는다.
-  const official = clean(officialSet, 60);
-  const detailOnly = clean(detailSet, 160).filter((u) => !official.includes(u));
+  const official = clean(officialSet, 120);
+  const detailOnly = clean(detailSet, 220).filter((u) => !official.includes(u));
   return { official, detail: detailOnly };
 }
 
@@ -361,12 +361,13 @@ async function filterRelevantImages(
 
 For EACH image return three things:
 1. keep — true if it is at all related to THIS product (a photo of the garment worn/flat, a fabric close-up, a size chart, a colorway/spec info card, etc.); false ONLY if it is unrelated scenery/person, a clearly DIFFERENT garment, or a generic banner/promo with no info about this product.
+   IMPORTANT — this product is sold in MULTIPLE COLORWAYS${colorOptions.length ? ` (${colorOptions.length}: ${colorOptions.join(', ')})` : ''}. A photo showing this SAME garment design in a different COLOR is still this product — keep it. Only a genuinely different garment (different silhouette, different category, different construction) counts as a different product. Never set keep=false merely because the color differs from the other photos.
 2. role — classify HOW the image can be used, because some images must never be used as a rendering reference:
    - "garment" = a clean photo showing THIS SINGLE garment clearly (worn on one model, or laid flat/on a hanger), with NO heavy text overlay and NOT a multi-garment layout. These are the only images safe to recreate the product from.
    - "fabric" = a close-up of the fabric surface / a construction detail (stitching, button, weave) — one garment, zoomed in.
    - "info" = anything that is NOT a clean single-garment shot even though it relates to the product: a size chart, a text-heavy spec/marketing card, a "컬러뷰/color view" swatch sheet, a grid/collage showing SEVERAL garments or SEVERAL colors together, an "overview" card with feature bullets. These carry useful text but must NEVER be used to redraw the garment.
    Be strict: if an image shows more than one garment, or is mostly text, or is a color-swatch lineup, it is "info", not "garment" — even if a garment is visible in it.
-3. colorway — WHICH single colorway of this product the garment in that photo actually is. Judge by the garment's real color${colorOptions.length ? ` and answer with EXACTLY one of these option names: ${colorOptions.join(', ')}` : ''}. If the image is "info" (size chart, text card, or a multi-color swatch/grid showing several colors at once), answer "unknown" — never pick one color off a multi-color sheet.
+3. colorway — WHICH single colorway of this product the garment in that photo actually is. Judge by the garment's real color${colorOptions.length ? ` and prefer EXACTLY one of these option names: ${colorOptions.join(', ')}. If the garment's real color clearly matches none of them, answer with a short plain Korean color word for what you actually see (예: 화이트, 블랙, 네이비, 그레이, 베이지) rather than forcing a wrong option` : ' — answer with a short plain Korean color word (예: 화이트, 블랙, 네이비, 그레이, 베이지)'}. If the image is "info" (size chart, text card, or a multi-color swatch/grid showing several colors at once), answer "unknown" — never pick one color off a multi-color sheet.
 4. hasPerson — true if any part of a real human (face, or a body wearing the garment) is visible in the photo; false for flat-lay, ghost-mannequin, or pure fabric/hardware close-ups with no person at all.`,
       },
     ];
@@ -413,11 +414,16 @@ For EACH image return three things:
     return chunk.map((_, i) => {
       const d = map.get(i);
       const raw = (d?.colorway || '').trim();
-      const matched = colorOptions.find((c) => c.toLowerCase() === raw.toLowerCase()) || '';
+      // (2026-07-29 2차) 예전엔 <select> 옵션명과 정확히 일치하지 않으면 색상을 통째로 버려서('')
+      // 그 컷들이 전부 "색상 미판별"로 뭉쳐 색상 탭에서 구분이 안 됐다(대표님: "두 가지 색상밖에
+      // 없어"). 옵션명과 맞으면 옵션명으로 정규화하고, 아니면 비전이 실제로 본 색 이름을 그대로
+      // 살린다 — 이름이 조금 달라도 색끼리는 묶이는 게 버리는 것보다 훨씬 낫다.
+      const matched = colorOptions.find((c) => c.toLowerCase() === raw.toLowerCase());
+      const colorway = /^(unknown|알\s*수\s*없음|)$/i.test(raw) ? '' : matched || raw;
       const role: 'garment' | 'fabric' | 'info' =
         d?.role === 'fabric' || d?.role === 'info' ? d.role : 'garment';
       // info(스와치/텍스트/그리드)는 색상을 특정할 수 없으므로 항상 unknown 취급 — 색상 필터 오염 방지
-      return { keep: d?.keep ?? true, role, colorway: role === 'info' ? '' : matched, hasPerson: d?.hasPerson ?? false };
+      return { keep: d?.keep ?? true, role, colorway: role === 'info' ? '' : colorway, hasPerson: d?.hasPerson ?? false };
     });
   } catch (err) {
     console.warn('[from-link] 이미지 관련성 필터 청크 실패 — 이 청크는 생략(전부 통과):', err);
@@ -483,12 +489,16 @@ export async function POST(req: Request) {
     // (2026-07-29) 썸네일 모드 — 갤러리에 수십 장을 보여주려면 장당 용량을 줄여야 한다.
     // 이미지 원본 URL을 같이 반환해, 실제 생성 단계에서 선택된 것만 서버가 고해상도로
     // 다시 받아 쓰도록 한다(브라우저를 왕복하며 수 MB를 나르지 않는다).
-    const thumbDim = thumbnails ? 512 : undefined;
+    // (2026-07-29 2차) 갤러리 썸네일은 화면에서 150px 정도로만 보이므로 256px면 충분하다.
+    // 512px일 때 100장이면 응답이 10MB 가까이 되어 전송만으로도 느렸다(대표님: "왜이렇게 더뎌").
+    // 256px이면 장당 ~15KB라 130장도 3MB 안쪽에서 처리된다.
+    const thumbDim = thumbnails ? 256 : undefined;
     const downloadBucket = async (urls: string[], cap: number) => {
       const out: Array<{ data: string; url: string }> = [];
-      // 순차 다운로드는 60장 넘어가면 너무 느리다 — 6장씩 병렬로 받는다.
-      for (let i = 0; i < urls.length && out.length < cap; i += 6) {
-        const batch = urls.slice(i, i + 6);
+      // 16장씩 병렬 — 6장씩으로는 100장 받는 데 라운드가 17번이라 체감이 느렸다.
+      const CONC = 16;
+      for (let i = 0; i < urls.length && out.length < cap; i += CONC) {
+        const batch = urls.slice(i, i + CONC);
         const results = await Promise.all(
           batch.map(async (u) => ({ url: u, data: await downloadImage(u, referer, thumbDim) })),
         );
@@ -499,9 +509,10 @@ export async function POST(req: Request) {
       return out;
     };
 
-    // 썸네일 모드에서는 장당 용량이 1/4 이하라 훨씬 많이 담을 수 있다.
-    const productImagesRaw = await downloadBucket(official, thumbnails ? 40 : 20);
-    const materialImagesRaw = await downloadBucket(detail, thumbnails ? 60 : 15);
+    // 썸네일 모드에서는 색상별 큐레이션이 목적이므로 사실상 자르지 않는다 — 색상 구간이
+    // 하나라도 빠지면 그 색은 아예 고를 수 없다(대표님 신고의 근본 원인).
+    const productImagesRaw = await downloadBucket(official, thumbnails ? 120 : 20);
+    const materialImagesRaw = await downloadBucket(detail, thumbnails ? 120 : 15);
 
     // 무관 이미지 필터 + 이미지별 역할(garment/fabric/info)·컬러웨이 판별 — 두 버킷을 합쳐
     // 한 번에 검사(호출 절약)한다. (2026-07-23) 예전엔 URL 출처(official/detail)로만 버킷을
@@ -534,6 +545,14 @@ export async function POST(req: Request) {
     // 썸네일 모드에서 실제 생성 시 고해상도로 다시 받기 위한 원본 URL (인덱스 정렬 유지)
     const productImageUrls = productKept.map((x) => x.srcUrl);
     const materialImageUrls = materialKept.map((x) => x.srcUrl);
+    // 사진에서 실제로 판별된 색상들(등장 횟수 많은 순) — <select>에 없는 색도 탭에 띄운다
+    const colorCounts = new Map<string, number>();
+    for (const c of productImageColors) {
+      if (c) colorCounts.set(c, (colorCounts.get(c) || 0) + 1);
+    }
+    const detectedColors = Array.from(colorCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([c]) => c);
     // (2026-07-28) 이 컷에 실제 사람(다른 판매처 모델 등)이 찍혀 있는지 — 프론트가 생성 입력으로
     // 쓸 보조컷을 고를 때 인물 없는 컷을 우선하도록. 대표컷 1장이 사람 착용샷인 건 정상(항상 그래왔음).
     const productImageHasPerson = productKept.map((x) => x.v.hasPerson);
@@ -563,6 +582,8 @@ export async function POST(req: Request) {
       // 썸네일 모드용 원본 URL — 생성 단계에서 선택된 것만 서버가 고해상도로 다시 받는다
       productImageUrls,
       materialImageUrls,
+      // 실제로 사진에서 판별된 색상 목록 — <select> 옵션에 없는 색도 탭으로 노출하기 위함
+      detectedColors,
       // 대표컷 외 보조(otherAngles) 후보 선택 시 인물 사진을 뒤로 미루기 위한 플래그
       productImageHasPerson,
       title,

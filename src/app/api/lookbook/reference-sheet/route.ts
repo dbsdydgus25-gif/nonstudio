@@ -42,6 +42,7 @@ export async function POST(req: Request) {
       sourceUrl,
       draftMode,
       productImageUrls,
+      materialImagesBase64,
     }: {
       /** 색상별로 큐레이션된 실제 스크래핑 사진(대표컷 먼저) */
       productImagesBase64: string[];
@@ -68,6 +69,8 @@ export async function POST(req: Request) {
        * 왕복하며 수 MB를 나르지 않는다). 실패하면 넘어온 썸네일로 폴백.
        */
       productImageUrls?: string[];
+      /** 원단/구조 클로즈업 — 생성기엔 안 넣고 재질·디테일 분석 근거로만 쓴다 */
+      materialImagesBase64?: string[];
     } = await req.json();
     const quality = draftMode ? 'low' : 'medium';
 
@@ -84,7 +87,15 @@ export async function POST(req: Request) {
     const rawSpecs = [productText?.trim(), productNotes?.trim()].filter(Boolean).join('\n') || undefined;
     const garmentAnalysis =
       providedAnalysis ||
-      (await analyzeGarment(productImagesBase64, geminiApiKey, sourceUrl, rawSpecs, category, openaiApiKey));
+      (await analyzeGarment(
+        productImagesBase64,
+        geminiApiKey,
+        sourceUrl,
+        rawSpecs,
+        category,
+        openaiApiKey,
+        materialImagesBase64,
+      ));
 
     if (garmentAnalysis.analysisFailed) {
       return NextResponse.json(
