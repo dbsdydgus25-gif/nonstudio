@@ -70,7 +70,9 @@ Using the attached real reference photos of this ${CATEGORY_LABEL[category]} as 
 
 ${ANGLE_INSTRUCTION[angle]}${anchorLine}
 
-Background: pure seamless white studio background, soft even product-photography lighting, no props, no harsh shadows, no text overlay.
+Background: pure seamless white studio background, no props, no text overlay.
+
+LIGHTING (critical — this is what makes the colour read correctly): light it like a real e-commerce studio, NOT flat. A large soft key light from the front-upper-left plus a fill on the right, so the fabric shows gentle highlights on the raised areas and soft gradual shading in the folds. The garment must look LIT — bright, open and true to its real shade — never sunk into shadow. Expose for the garment: mid-tones stay open and the colour stays clearly readable. A navy must read as NAVY (clearly blue, obviously lighter than black); a heather grey must stay light and airy. Do not add a moody, dim, or heavily contrasted look, and do not let the fabric go so dark that its hue disappears.
 
 Garment spec (authoritative — follow exactly, do not default to a generic version of this garment type):
 - Color: ${color}
@@ -83,7 +85,7 @@ Garment spec (authoritative — follow exactly, do not default to a generic vers
 
 ${notesLine}
 
-COLOR FIDELITY (critical): sample the garment's colour straight from the attached reference photos and reproduce that exact hue, saturation and lightness. Do NOT darken, deepen, mute or "enrich" it, and do not stylise it toward a moodier tone — a mid-tone heather grey must stay a mid-tone heather grey, not charcoal; a wine red must stay exactly as light or dark as the photo. If the reference photos and your instinct disagree, the photos win.
+COLOR FIDELITY (critical): sample the garment's colour straight from the attached reference photos and reproduce that exact hue, saturation and lightness. Do NOT darken, deepen, mute or "enrich" it, and do not stylise it toward a moodier tone — a mid-tone heather grey must stay a mid-tone heather grey, not charcoal; a navy must stay clearly blue and obviously lighter than black; a wine red must stay exactly as light or dark as the photo. Rendering a colour darker than the reference is the single most common failure here — if in doubt, err one step BRIGHTER, never darker. If the reference photos and your instinct disagree, the photos win.
 
 MATERIAL FIDELITY (critical): reproduce the actual fabric named in the spec. Cotton jersey / knit tee fabric must read as matte cotton with a visible fine knit grain and normal fabric body — NOT as brushed fleece, velour, suede, satin or any soft fuzzy pile. Do not add sheen, nap or plushness that is not in the reference photos.
 
@@ -132,7 +134,8 @@ function buildStylingLines(
   return [
     'REST OF THE OUTFIT (fixed — every shot in this set must show the exact same items, never randomize between shots):',
     ...lines,
-    '- ACCESSORY CONSISTENCY: if an accessory is specified above, render that ONE exact item — same type, same metal/material, same colour, same width — in every shot. Do not swap it for a similar-looking alternative between shots, and do not add any accessory that was not specified.',
+    '- JEWELLERY IS A CLOSED LIST: the accessory line above is the COMPLETE inventory of everything worn on the hands, wrists, neck and ears. If it names one bracelet, the model wears exactly that one bracelet and NOTHING else — no ring, no second bracelet, no watch, no necklace, no earring. If it says none, the hands and neck are completely bare. Any jewellery visible in the model reference photo, the pose reference photo, the product photos or the anchor shot is NOT part of this outfit — those people are wearing their own things, and you must strip all of it.',
+    '- ACCESSORY CONSISTENCY: render the specified item as ONE exact object — same type, same metal colour, same link/band style, same width — identical in every shot of this set. Never substitute a similar-looking alternative between shots.',
     "- SIDE/HAND RULE: any instruction naming a side (left wrist, right hand, etc.) means the WEARER'S own side. In a front-facing photo the wearer's left wrist appears on the RIGHT side of the frame — account for that mirroring. The named side must be identical in every shot of this set; never flip it between shots.",
     "- HEM: the sourced garment's hem hangs loose and untucked over the waistband unless explicitly told otherwise. Never tuck it in, never fold or roll the bottom hem, and never crop it short — let it fall naturally.",
   ].join('\n');
@@ -169,6 +172,13 @@ export function buildLookbookFittingPrompt(
     framing?: 'full' | 'close';
     /** 같은 배치에서 이미 확정된 첫 컷을 앵커로 함께 넣는지 */
     hasPoseAnchor?: boolean;
+    /**
+     * (2026-07-31) 포즈 참고사진을 Image 1(편집 베이스)로 넣는 모드.
+     * gpt-image-2 edit는 첫 이미지를 "편집 대상"으로 취급해서, 모델 사진을 1번에 두면
+     * 그 사진의 포즈·구도가 기준이 되어 포즈 참고사진이 텍스트로 아무리 우선순위를 줘도
+     * 밀린다(대표님이 세 번 신고). 포즈를 지킬 땐 포즈 사진 자체를 베이스로 편집한다.
+     */
+    poseAsBase?: boolean;
   },
 ): string {
   const { extraReferenceCount, hasPoseRefImage, hasBackgroundImage } = opts;
@@ -178,10 +188,16 @@ export function buildLookbookFittingPrompt(
 
   // 이미지 번호 계산 — Image 1은 항상 모델, Image 2는 기준 대표컷.
   // 순서: [모델, 대표 기준컷, 나머지 기준컷…, 포즈참고, 배치앵커, 배경]
-  const primaryRefNum = 2;
-  const extraRefNums = Array.from({ length: extraReferenceCount }, (_, i) => primaryRefNum + 1 + i);
-  let cursor = primaryRefNum + extraReferenceCount;
-  const poseRefNum = hasPoseRefImage ? ++cursor : null;
+  // poseAsBase: [포즈사진(1), 모델(2), 대표 기준컷(3), 나머지 기준컷…, 앵커, 배경]
+  // 일반 모드: [모델(1), 대표 기준컷(2), 나머지 기준컷…, 포즈사진, 앵커, 배경]
+  const poseAsBase = !!opts.poseAsBase && hasPoseRefImage;
+  let cursor = 0;
+  const poseRefNum = poseAsBase ? ++cursor : null;
+  const identityNum = ++cursor;
+  const primaryRefNum = ++cursor;
+  const extraRefNums = Array.from({ length: extraReferenceCount }, () => ++cursor);
+  const poseRefNumTail = !poseAsBase && hasPoseRefImage ? ++cursor : null;
+  const poseNum = poseRefNum ?? poseRefNumTail;
   const anchorNum = opts.hasPoseAnchor ? ++cursor : null;
   const backgroundNum = hasBackgroundImage ? ++cursor : null;
 
@@ -195,7 +211,10 @@ export function buildLookbookFittingPrompt(
   return [
     '=== TASK: DRESS THE FIXED MODEL IN THIS PRODUCT (LOOKBOOK SHOT) ===',
     '',
-    `Image 1 is the FIXED MODEL reference — the face, body proportions, and skin tone of the one person this brand always shoots. Match that person exactly. Do NOT copy the clothing, background, or pose from Image 1; the outfit comes from the product references below and the pose comes from the POSE section.`,
+    poseAsBase
+      ? `Image ${poseRefNum} is the POSE BASE — you are editing THIS photograph. Keep its composition exactly: the same body posture, the same limb positions, the same head and gaze direction, the same camera angle, distance and crop. Replace only WHO is in it and WHAT they are wearing. The person becomes the fixed model defined by Image ${identityNum}, and the clothing becomes the outfit specified below. Everything about the pose stays as it is in Image ${poseRefNum}.`
+      : '',
+    `Image ${identityNum} is the FIXED MODEL reference — the face, body proportions, and skin tone of the one person this brand always shoots. Match that person exactly. Do NOT copy the clothing, background, or pose from Image ${identityNum}; the outfit comes from the product references below${poseAsBase ? ` and the pose comes from Image ${poseRefNum}` : ' and the pose comes from the POSE section'}.`,
     '',
     `Image ${primaryRefNum}${extraRefNums.length ? ` and Images ${extraRefNums.join(', ')}` : ''} show the SOURCED PRODUCT — clean product-only reference shots of this exact garment from different angles (front / back / left side / right side), already verified by the operator. These are the sole authority on the garment's color, material, construction, and proportions. Reproduce that exact garment on the model: same color, same fabric texture, same seams, pockets, closures and trims, in the same places. Do not substitute a generic version of this garment type and do not invent details that are absent from these references.`,
     extraRefNums.length
@@ -224,11 +243,11 @@ export function buildLookbookFittingPrompt(
       : '',
     '',
     'POSE & FRAMING (mandatory — overrides any pose visible in ANY other attached image):',
-    poseRefNum
+    poseNum
       ? [
-          `- PRIMARY POSE AUTHORITY — Image ${poseRefNum} is a POSE REFERENCE PHOTO. Reproduce the posture in that photo as literally as a photographer re-shooting it: the same torso rotation and body facing, the same head/gaze direction, the same placement of BOTH hands (note exactly whether each hand is in a FRONT pocket, a BACK pocket, crossed, hanging, or holding something — front and back pockets are NOT interchangeable), the same arm bend, the same weight distribution and foot position, and the same camera height and distance. If your first instinct differs from that photo, the photo is right and you are wrong.`,
-          `- Copy ONLY the posture and camera angle from Image ${poseRefNum}. Completely ignore the person, face, clothing, and background in it — identity comes from Image 1 and the garment from the product references.`,
-          `- The text description below is SECONDARY: use it only to settle details the photo cannot show or that it leaves ambiguous. It must never be used to justify a posture different from the photo.`,
+          `- PRIMARY POSE AUTHORITY — Image ${poseNum} is the POSE REFERENCE PHOTO. Reproduce its posture as literally as a photographer re-shooting the same frame: the same torso rotation and body facing, the same head/gaze direction, the same placement of BOTH hands (note exactly whether each hand is in a FRONT pocket, a BACK pocket, crossed, hanging, raised, or holding something — front and back pockets are NOT interchangeable), the same arm bend, the same weight distribution and foot position, and the same camera height, distance and crop. If your first instinct differs from that photo, the photo is right and you are wrong.`,
+          `- Take ONLY posture and camera framing from Image ${poseNum}. Its person, face, clothing, jewellery and background are NOT to be copied — identity comes from Image ${identityNum}, the garment from the product references, accessories from the outfit list above.`,
+          `- The text description below is SECONDARY: use it only to settle details the photo cannot show or leaves ambiguous. It must never justify a posture different from the photo.`,
           `- Pose details (secondary refinement): ${poseInstruction}`,
         ].join('\n')
       : `- ${poseInstruction} — follow every part of this literally, especially exact hand placement (a "back pocket" means the hand is behind the body in a rear pocket, never in a front pocket) and gaze direction.`,

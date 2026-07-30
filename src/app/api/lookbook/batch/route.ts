@@ -21,7 +21,7 @@ import { getModelProfile, getModelIdentityImage, buildBodySpecFromProfile } from
 import { getPosePresetRefImage, listPosePresets } from '@/lib/pose-presets';
 import { getSessionUserId } from '@/lib/auth';
 import { downscaleImage, runWithConcurrency } from '@/lib/image-utils';
-import { resultImageToBuffer, runGptImageEdit } from '@/lib/gpt-image-edit';
+import { parseBase64Image, resultImageToBuffer, runGptImageEdit } from '@/lib/gpt-image-edit';
 import { getReferenceShot } from '@/lib/lookbook-store';
 
 export const runtime = 'nodejs';
@@ -172,6 +172,17 @@ export async function POST(req: Request) {
           // 보조를 아예 빼고 [모델, 대표 기준컷, 포즈사진, 앵커, 배경] 5장으로 좁힌다.
           const extrasForThisCall = poseRefImage ? [] : batchAnchor ? extraRefs.slice(0, 1) : extraRefs;
 
+          // (2026-07-31) 근본 수정 — gpt-image-2 edit는 "첫 이미지"를 편집 대상으로 취급한다.
+          // 지금까지 1번이 모델 사진이라 AI는 모델 사진을 편집했고, 그 사진의 포즈·구도가
+          // 기준이 되어 포즈 참고사진은 텍스트로 아무리 1차 권위를 줘도 밀렸다(대표님 3회 신고).
+          // 포즈 사진이 있으면 그 사진 자체를 편집 베이스로 삼아 "이 사진의 사람과 옷만 바꾼다"로
+          // 문제를 뒤집는다. 이 코드베이스에 이미 적혀 있던 교훈("이미지 순서가 역할보다 중요").
+          const poseAsBase = !!poseRefImage;
+          const baseImageBase64 = poseAsBase
+            ? `data:${poseRefImage!.mimeType};base64,${poseRefImage!.buffer.toString('base64')}`
+            : primaryRef;
+          const primaryRefParsed = parseBase64Image(primaryRef);
+
           const prompt = buildLookbookFittingPrompt(category, garmentAnalysis, preset.poseInstruction, bodySpec, {
             extraReferenceCount: extrasForThisCall.length,
             hasPoseRefImage: !!poseRefImage,
@@ -182,23 +193,37 @@ export async function POST(req: Request) {
             selectedSize,
             framing: preset.framing,
             hasPoseAnchor: !!batchAnchor,
+            poseAsBase,
           });
 
-          // 이미지 순서는 buildLookbookFittingPrompt의 번호 계산과 반드시 일치해야 한다:
-          // [identity, 대표 기준컷, 나머지 기준컷…, 포즈 참고, 배치 앵커, 배경]
-          // 포즈 참고는 styleReferenceImages 슬롯을, 배치 앵커는 poseAnchorImage 슬롯을 쓴다.
-          const imageUrl = await runGptImageEdit(
-            openai,
-            primaryRef,
-            prompt,
-            identityReferenceImage,
-            backgroundReferenceImage,
-            draftMode ? 'low' : 'medium',
-            extrasForThisCall,
-            [],
-            poseRefImage ? [poseRefImage] : [],
-            batchAnchor,
-          );
+          // 이미지 순서는 buildLookbookFittingPrompt의 번호 계산과 반드시 일치해야 한다.
+          //  poseAsBase: [포즈사진, 모델, 대표 기준컷, 나머지…, 앵커, 배경]
+          //  일반 모드 : [모델, 대표 기준컷, 나머지…, 포즈사진, 앵커, 배경]
+          const imageUrl = poseAsBase
+            ? await runGptImageEdit(
+                openai,
+                baseImageBase64,
+                prompt,
+                null, // identity를 앞에 붙이지 않는다 — 포즈 사진이 1번이어야 하므로
+                backgroundReferenceImage,
+                draftMode ? 'low' : 'medium',
+                [identityReferenceImage!, primaryRefParsed, ...extrasForThisCall],
+                [],
+                [],
+                batchAnchor,
+              )
+            : await runGptImageEdit(
+                openai,
+                primaryRef,
+                prompt,
+                identityReferenceImage,
+                backgroundReferenceImage,
+                draftMode ? 'low' : 'medium',
+                extrasForThisCall,
+                [],
+                poseRefImage ? [poseRefImage] : [],
+                batchAnchor,
+              );
 
           const { buffer, mimeType } = await resultImageToBuffer(imageUrl);
           await markGenerationCompleted(generationId, { outputBuffer: buffer, outputMimeType: mimeType, prompt });
