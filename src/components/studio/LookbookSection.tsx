@@ -167,10 +167,12 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
   /** 기준컷 생성에 실제로 넘기는 사진: 선택 색상 + 포함된 것 + 인물 없는 컷 우선 */
   const curatedIdxs = (): number[] => {
     const idxs = visibleIdxs.filter(isIncluded);
-    // 비용 절감을 위해 실제로 생성기에 넣는 참고컷은 앞의 3장만 쓴다(서버에서 다시 자름).
+    // (2026-07-29 3차) 분석은 넓게, 생성은 좁게. Gemini 분석(텍스트)은 저렴하므로 이 색상의
+    // 컷을 최대 12장까지 보여줘 "이런 옷이다"라는 결론을 정확히 뽑게 하고, 비싼 gpt-image-2
+    // 입력으로는 서버가 앞의 3장만 쓴다(대표님: "사진들을 분석해서 추론해서 결론을 내려야").
     return [...idxs]
       .sort((a, b) => Number(!!productImageHasPerson[a]) - Number(!!productImageHasPerson[b]))
-      .slice(0, 3);
+      .slice(0, 12);
   };
   const curatedImages = (): string[] => curatedIdxs().map((i) => productImages[i]);
   /** 같은 순서의 원본 URL — 서버가 썸네일 대신 고해상도를 다시 받게 한다 */
@@ -199,10 +201,14 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
       }
       if (!res.ok || !data.success) throw new Error(data.error || '링크에서 가져오지 못했습니다.');
 
-      setProductImages((data.productImages || []).slice(0, 40));
-      setProductImageColors((data.productImageColors || []).slice(0, 40));
-      setProductImageHasPerson((data.productImageHasPerson || []).slice(0, 40));
-      setProductImageUrls((data.productImageUrls || []).slice(0, 40));
+      // (2026-07-29 3차) 여기서 40장으로 자르던 게 "버건디만 나오는" 마지막 원인이었다 —
+      // 서버가 색상별로 다 가져와도 문서 순서상 앞쪽이 전부 버건디라, 앞 40장만 남기면
+      // 회색·남색 구간이 통째로 사라졌다. 서버가 준 건 전부 유지하고, 화면 정리는
+      // 색상 탭 + 전체보기 모달이 담당한다.
+      setProductImages(data.productImages || []);
+      setProductImageColors(data.productImageColors || []);
+      setProductImageHasPerson(data.productImageHasPerson || []);
+      setProductImageUrls(data.productImageUrls || []);
       setColorOptions(data.colorOptions || []);
       setDetectedColors(data.detectedColors || []);
       setMaterialImages((data.materialImages || []).slice(0, 20));

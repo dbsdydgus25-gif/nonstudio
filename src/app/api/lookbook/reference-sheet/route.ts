@@ -133,8 +133,11 @@ export async function POST(req: Request) {
       }
     };
 
+    // 분석(analyzeGarment)은 넘어온 전부를 봤지만, 비싼 gpt-image-2 입력으로는 앞의 3장만
+    // 쓴다 — 입력 이미지 장수가 곧 비용이고, 너무 많이 넣으면 오히려 서로 섞인다.
+    const genSources = productImagesBase64.slice(0, 3);
     const referenceImages = await Promise.all(
-      productImagesBase64.map(async (b64, i) => {
+      genSources.map(async (b64, i) => {
         const srcUrl = productImageUrls?.[i];
         if (srcUrl) {
           const original = await fetchOriginal(srcUrl);

@@ -495,10 +495,17 @@ export async function POST(req: Request) {
     const thumbDim = thumbnails ? 256 : undefined;
     const downloadBucket = async (urls: string[], cap: number) => {
       const out: Array<{ data: string; url: string }> = [];
+      // (2026-07-29 3차) 캡을 넘길 땐 앞에서 자르지 않고 문서 전체에 균등 분포로 고른다.
+      // 이 페이지들은 색상별로 구간이 나뉘어 있어서, 앞에서 자르면 첫 색상만 남고 나머지
+      // 색이 통째로 사라진다(대표님이 세 번 신고한 "버건디만 나온다"의 구조적 원인).
+      const picked =
+        urls.length <= cap
+          ? urls
+          : Array.from({ length: cap }, (_, k) => urls[Math.floor((k * urls.length) / cap)]);
       // 16장씩 병렬 — 6장씩으로는 100장 받는 데 라운드가 17번이라 체감이 느렸다.
       const CONC = 16;
-      for (let i = 0; i < urls.length && out.length < cap; i += CONC) {
-        const batch = urls.slice(i, i + CONC);
+      for (let i = 0; i < picked.length && out.length < cap; i += CONC) {
+        const batch = picked.slice(i, i + CONC);
         const results = await Promise.all(
           batch.map(async (u) => ({ url: u, data: await downloadImage(u, referer, thumbDim) })),
         );
