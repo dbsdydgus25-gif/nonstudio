@@ -162,7 +162,15 @@ export async function POST(req: Request) {
       angle: CleanAngle,
       anchor: { buffer: Buffer; mimeType: string } | null,
     ): Promise<{ buffer: Buffer; mimeType: string }> => {
-      const prompt = buildCleanAngleShotPrompt(category, garmentAnalysis, angle, colorOverride, !!anchor);
+      const prompt = buildCleanAngleShotPrompt(
+        category,
+        garmentAnalysis,
+        angle,
+        colorOverride,
+        !!anchor,
+        // 소재/핏/포인트는 사진만으론 안 보인다 — 판매자 스펙을 각도컷 프롬프트에도 직접 넣는다
+        [productNotes?.trim(), productText?.trim()].filter(Boolean).join(' / '),
+      );
       // identity/background 없음 — 사람이 안 들어가는 컷이라 MODEL LOCK 자체가 불필요.
       // 앵커(앞면 결과)가 있으면 그 자체가 이미 확정된 같은 옷이라 실제 사진은 1장이면
       // 충분하다(재질/색 재확인용) — 앵커 없는 앞면 생성만 2장을 다 쓴다.

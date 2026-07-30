@@ -166,7 +166,11 @@ export async function POST(req: Request) {
           // 문제가 있었다(대표님 신고: "측면1은 참고해놓은 사진을 그대로 반영을 안했어").
           // 이 코드베이스의 반복 교훈대로, 앵커가 있으면 그 앵커가 이미 옷·코디의 완성본이라
           // 기준컷 여러 장은 중복 정보다 — 뒷면 근거 1장만 남기고 줄여서 포즈 사진에 집중시킨다.
-          const extrasForThisCall = batchAnchor ? extraRefs.slice(0, 1) : extraRefs;
+          // (2026-07-31) 포즈 참고사진이 계속 무시된다는 신고가 반복됐다. 원인은 경쟁 이미지
+          // 수다 — 참고컷이 여러 장 들어가면 포즈 사진이 뒤로 밀려 존재감을 잃는다. 앵커가
+          // 있으면 옷/코디는 이미 앵커가 확정하므로, 포즈 사진이 있는 호출에서는 기준컷
+          // 보조를 아예 빼고 [모델, 대표 기준컷, 포즈사진, 앵커, 배경] 5장으로 좁힌다.
+          const extrasForThisCall = poseRefImage ? [] : batchAnchor ? extraRefs.slice(0, 1) : extraRefs;
 
           const prompt = buildLookbookFittingPrompt(category, garmentAnalysis, preset.poseInstruction, bodySpec, {
             extraReferenceCount: extrasForThisCall.length,

@@ -65,7 +65,9 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
   // 디테일 설명/원단 클로즈업 — 생성 원본이 아니라 분석 근거로만 쓴다
   const [materialImages, setMaterialImages] = useState<string[]>([]);
-  const [infoImageCount, setInfoImageCount] = useState(0);
+  // 사이즈표·소재/핏 설명 카드 — 이 몰들은 재질·핏·포인트 설명이 대부분 이미지 안 텍스트다.
+  // 생성기엔 절대 안 넣고, 분석이 그 글자를 읽게만 한다.
+  const [infoImages, setInfoImages] = useState<string[]>([]);
   // 갤러리를 다 펼치면 지저분해서 기본은 8장만 보여주고, 전체보기로 모달을 띄운다
   const [showAllImages, setShowAllImages] = useState(false);
   // 상세페이지에서 뽑은 특징 텍스트 — 분석(rawSpecs)으로 넘겨 머슬핏/크롭/골지 같은 정보를 살린다
@@ -212,7 +214,7 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
       setColorOptions(data.colorOptions || []);
       setDetectedColors(data.detectedColors || []);
       setMaterialImages((data.materialImages || []).slice(0, 20));
-      setInfoImageCount((data.infoImages || []).length);
+      setInfoImages(data.infoImages || []);
       setShowAllImages(false);
       setSelectedColor(null);
       setProductText(data.productText || '');
@@ -270,8 +272,9 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
         body: JSON.stringify({
           productImagesBase64: images,
           productImageUrls: curatedUrls(),
-          // 원단/구조 클로즈업 — 생성 원본이 아니라 재질·디테일 분석 근거로만 쓰인다
-          materialImagesBase64: materialImages.slice(0, 6),
+          // 원단 클로즈업 + 사이즈표/소재·핏 설명 카드 — 생성 원본이 아니라 분석 근거로만.
+          // 이 몰들은 재질·핏·포인트 설명이 대부분 이미지 안 글자라, 이걸 넣어야 분석에 들어온다.
+          materialImagesBase64: [...materialImages.slice(0, 6), ...infoImages.slice(0, 6)],
           category,
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
@@ -590,10 +593,10 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
             </button>
           )}
         </div>
-        {(materialImages.length > 0 || infoImageCount > 0) && (
+        {(materialImages.length > 0 || infoImages.length > 0) && (
           <p className="mt-2 text-[10px] text-gray-400">
             디테일 참고로 분리됨 — 원단·구조 클로즈업 {materialImages.length}장
-            {infoImageCount > 0 && `, 사이즈표·설명 이미지 ${infoImageCount}장(텍스트 분석용)`}. 생성 원본으로는 쓰지
+            {infoImages.length > 0 && `, 사이즈표·설명 이미지 ${infoImages.length}장(텍스트 분석용)`}. 생성 원본으로는 쓰지
             않고 재질·스펙 근거로만 씁니다.
           </p>
         )}

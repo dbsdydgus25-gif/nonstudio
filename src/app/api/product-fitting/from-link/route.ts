@@ -164,9 +164,13 @@ function extractProductText(html: string, title: string): string {
   }
   picked.push(...bullets);
 
-  // 불릿이 충분하면 그것만 쓴다 — 키워드 스캔은 리뷰/추천상품까지 긁어와 오염되기 쉽다.
-  if (bullets.length < 2) {
-    const KEY = /(소재|혼용률|안감|신축|스판|두께감|비침|촉감|골지|기모|머슬|크롭|슬림|오버핏|루즈핏|기장)/g;
+  // (2026-07-31) 예전엔 불릿이 2개 이상이면 키워드 스캔을 아예 건너뛰었는데, 불릿에는
+  // 제품명만 있고 정작 소재/핏/포인트 설명은 본문에 흩어져 있는 몰이 많아 그 정보가
+  // 통째로 누락됐다(대표님: "재질 설명도 핏 설명도 포인트 설명도 다 들어와야 해").
+  // 이제 항상 함께 긁고, 오염은 isJunkText로만 거른다.
+  {
+    const KEY =
+      /(소재|혼용률|안감|신축|스판|두께감|비침|촉감|골지|기모|머슬|크롭|슬림|오버핏|루즈핏|기장|배색|절개|넥|카라|밴딩|워싱|컬러|포인트|디테일)/g;
     const seenWin = new Set<string>();
     for (const m of plain.matchAll(KEY)) {
       const win = plain.slice(Math.max(0, m.index! - 45), Math.min(plain.length, m.index! + 60)).trim();
@@ -174,7 +178,7 @@ function extractProductText(html: string, title: string): string {
         seenWin.add(win);
         picked.push(win);
       }
-      if (seenWin.size >= 5) break;
+      if (seenWin.size >= 12) break;
     }
   }
 
@@ -184,7 +188,7 @@ function extractProductText(html: string, title: string): string {
     if (out.some((k) => k.includes(raw) || raw.includes(k))) continue;
     out.push(raw);
   }
-  return out.join(' / ').slice(0, 800);
+  return out.join(' / ').slice(0, 1600);
 }
 
 // (2026-07-23) 페이지의 <select>를 이름/id/class 힌트 없이 무차별로 다 긁으면, 언어선택
@@ -367,7 +371,14 @@ For EACH image return three things:
    - "fabric" = a close-up of the fabric surface / a construction detail (stitching, button, weave) — one garment, zoomed in.
    - "info" = anything that is NOT a clean single-garment shot even though it relates to the product: a size chart, a text-heavy spec/marketing card, a "컬러뷰/color view" swatch sheet, a grid/collage showing SEVERAL garments or SEVERAL colors together, an "overview" card with feature bullets. These carry useful text but must NEVER be used to redraw the garment.
    Be strict: if an image shows more than one garment, or is mostly text, or is a color-swatch lineup, it is "info", not "garment" — even if a garment is visible in it.
-3. colorway — WHICH single colorway of this product the garment in that photo actually is. Judge by the garment's real color${colorOptions.length ? ` and prefer EXACTLY one of these option names: ${colorOptions.join(', ')}. If the garment's real color clearly matches none of them, answer with a short plain Korean color word for what you actually see (예: 화이트, 블랙, 네이비, 그레이, 베이지) rather than forcing a wrong option` : ' — answer with a short plain Korean color word (예: 화이트, 블랙, 네이비, 그레이, 베이지)'}. If the image is "info" (size chart, text card, or a multi-color swatch/grid showing several colors at once), answer "unknown" — never pick one color off a multi-color sheet.
+3. colorway — WHICH single colorway of this product the garment in that photo actually is. Judge by the garment's real color${colorOptions.length ? ` and answer with EXACTLY one of these seller option names: ${colorOptions.join(', ')}.
+   CAREFUL — this seller's option list contains SEVERAL SIMILAR LIGHT NEUTRALS that are easy to confuse. Separate them deliberately before answering:
+   • 화이트 / 백메란지: near-white. 화이트 = flat pure white with no visible fleck; 백메란지(백멜란지) = white-based heather with fine grey flecks mixed through the knit.
+   • 오트밀: light neutral with a WARM beige/cream cast — under the same lighting it looks slightly yellow/tan next to grey.
+   • 그레이: neutral heather grey, clearly COOLER and darker than 오트밀, no beige cast.
+   • 차콜: dark grey, much darker than 그레이 but not black.
+   Compare warmth (warm beige vs cool grey) and darkness, and pick the closest option. If the garment's real color clearly matches none of the options, answer with a short plain Korean color word for what you actually see rather than forcing a wrong option` : ' — answer with a short plain Korean color word (예: 화이트, 블랙, 네이비, 그레이, 베이지)'}.
+   If a small color-name swatch/label is visible inside the photo itself (many Korean detail pages print the color name beside the garment), TRUST THAT LABEL over your own impression. If the image is "info" (size chart, text card, or a multi-color swatch/grid showing several colors at once), answer "unknown" — never pick one color off a multi-color sheet.
 4. hasPerson — true if any part of a real human (face, or a body wearing the garment) is visible in the photo; false for flat-lay, ghost-mannequin, or pure fabric/hardware close-ups with no person at all.`,
       },
     ];

@@ -54,8 +54,13 @@ export function buildCleanAngleShotPrompt(
   colorOverride?: string,
   /** 앞면 결과를 앵커로 함께 넣는 경우 — 기장/품/톤을 그 컷에 맞추게 한다 */
   hasAnchor = false,
+  /** 판매자 스펙(소재·핏·포인트) — 사진만으론 안 보이는 정보 */
+  productNotes?: string,
 ): string {
   const color = colorOverride?.trim() || garmentAnalysis.color;
+  const notesLine = productNotes?.trim()
+    ? `\n\nSELLER SPEC (authoritative over your visual guess): ${productNotes.trim()}`
+    : '';
   const anchorLine = hasAnchor
     ? `\n\nCONSISTENCY ANCHOR: the SECOND attached image is the already-approved FRONT view of this exact same garment, generated for this same set. Treat it as the ground truth for overall proportions: the total length, body width, sleeve length, shoulder width, hem line, fabric tone and the size/placement of any contrast trim MUST match it exactly. This shot is the same physical garment simply rotated — only the viewing angle changes, nothing about the garment itself.`
     : '';
@@ -75,6 +80,14 @@ Garment spec (authoritative — follow exactly, do not default to a generic vers
 - Lining: ${garmentAnalysis.lining}
 - Fit/silhouette: ${garmentAnalysis.fitType}
 - Details: ${garmentAnalysis.details}${buildConstructionSummary(garmentAnalysis.constructionMap)}
+
+${notesLine}
+
+COLOR FIDELITY (critical): sample the garment's colour straight from the attached reference photos and reproduce that exact hue, saturation and lightness. Do NOT darken, deepen, mute or "enrich" it, and do not stylise it toward a moodier tone — a mid-tone heather grey must stay a mid-tone heather grey, not charcoal; a wine red must stay exactly as light or dark as the photo. If the reference photos and your instinct disagree, the photos win.
+
+MATERIAL FIDELITY (critical): reproduce the actual fabric named in the spec. Cotton jersey / knit tee fabric must read as matte cotton with a visible fine knit grain and normal fabric body — NOT as brushed fleece, velour, suede, satin or any soft fuzzy pile. Do not add sheen, nap or plushness that is not in the reference photos.
+
+HEM & CUFFS: the body hem hangs straight and loose exactly as the real garment does — never fold, roll or tuck the bottom hem, and never crop it short. Reproduce sleeve cuffs exactly as the real product has them: if the product genuinely has a contrast rolled cuff, keep it; if it does not, leave the sleeves flat and unrolled. Do not invent a fold anywhere.
 
 If any reference photo shows a person wearing this garment, completely ignore that person (face, body, pose) and the scene/background behind them — extract ONLY the garment's real color, material, and construction from what they're wearing. Do not blend or reference any human features from those photos in the output.`;
 }
@@ -119,6 +132,9 @@ function buildStylingLines(
   return [
     'REST OF THE OUTFIT (fixed — every shot in this set must show the exact same items, never randomize between shots):',
     ...lines,
+    '- ACCESSORY CONSISTENCY: if an accessory is specified above, render that ONE exact item — same type, same metal/material, same colour, same width — in every shot. Do not swap it for a similar-looking alternative between shots, and do not add any accessory that was not specified.',
+    "- SIDE/HAND RULE: any instruction naming a side (left wrist, right hand, etc.) means the WEARER'S own side. In a front-facing photo the wearer's left wrist appears on the RIGHT side of the frame — account for that mirroring. The named side must be identical in every shot of this set; never flip it between shots.",
+    "- HEM: the sourced garment's hem hangs loose and untucked over the waistband unless explicitly told otherwise. Never tuck it in, never fold or roll the bottom hem, and never crop it short — let it fall naturally.",
   ].join('\n');
 }
 
