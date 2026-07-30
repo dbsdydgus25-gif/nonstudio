@@ -19,16 +19,18 @@ const MAX_INPUT_DIMENSION = 1024;
 export async function downscaleImage(
   buffer: Buffer,
   mimeType: string,
+  /** (2026-07-29) 갤러리 썸네일용으로 더 작게 줄일 때 지정 — 생략하면 기존 생성 입력 크기(1024) */
+  maxDim: number = MAX_INPUT_DIMENSION,
 ): Promise<{ buffer: Buffer; mimeType: string }> {
   try {
     const meta = await sharp(buffer).metadata();
     const width = meta.width || 0;
     const height = meta.height || 0;
-    if (!width || !height || Math.max(width, height) <= MAX_INPUT_DIMENSION) {
+    if (!width || !height || Math.max(width, height) <= maxDim) {
       return { buffer, mimeType };
     }
     // PNG(누끼/투명 배경)는 PNG 유지, 나머지는 JPEG로 재인코딩해 용량 추가 절감
-    const resized = sharp(buffer).resize(MAX_INPUT_DIMENSION, MAX_INPUT_DIMENSION, {
+    const resized = sharp(buffer).resize(maxDim, maxDim, {
       fit: 'inside',
       withoutEnlargement: true,
     });

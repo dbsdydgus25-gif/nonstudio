@@ -57,6 +57,8 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
   const [productImages, setProductImages] = useState<string[]>([]);
   const [productImageColors, setProductImageColors] = useState<string[]>([]);
   const [productImageHasPerson, setProductImageHasPerson] = useState<boolean[]>([]);
+  // 갤러리는 썸네일(512px)이라, 생성 시 서버가 원본을 다시 받도록 소스 URL을 같이 들고 있는다
+  const [productImageUrls, setProductImageUrls] = useState<string[]>([]);
   const [colorOptions, setColorOptions] = useState<string[]>([]);
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
   // 상세페이지에서 뽑은 특징 텍스트 — 분석(rawSpecs)으로 넘겨 머슬핏/크롭/골지 같은 정보를 살린다
@@ -90,6 +92,8 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
   const [presetTab, setPresetTab] = useState<SourcedCategory>('top');
   const [isSavingPreset, setIsSavingPreset] = useState(false);
   const [presetError, setPresetError] = useState('');
+  /** 수정 중인 프리셋 id — null이면 새로 추가 모드 */
+  const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
   const presetFileRef = useRef<HTMLInputElement>(null);
 
   // ── 2단계: 배치 생성 ──
@@ -146,13 +150,16 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
   const isIncluded = (i: number) => !excludedIdx.has(i);
 
   /** 기준컷 생성에 실제로 넘기는 사진: 선택 색상 + 포함된 것 + 인물 없는 컷 우선 */
-  const curatedImages = (): string[] => {
+  const curatedIdxs = (): number[] => {
     const idxs = visibleIdxs.filter(isIncluded);
-    const sorted = [...idxs].sort(
-      (a, b) => Number(!!productImageHasPerson[a]) - Number(!!productImageHasPerson[b]),
-    );
-    return sorted.slice(0, 6).map((i) => productImages[i]);
+    // 비용 절감을 위해 실제로 생성기에 넣는 참고컷은 앞의 3장만 쓴다(서버에서 다시 자름).
+    return [...idxs]
+      .sort((a, b) => Number(!!productImageHasPerson[a]) - Number(!!productImageHasPerson[b]))
+      .slice(0, 3);
   };
+  const curatedImages = (): string[] => curatedIdxs().map((i) => productImages[i]);
+  /** 같은 순서의 원본 URL — 서버가 썸네일 대신 고해상도를 다시 받게 한다 */
+  const curatedUrls = (): string[] => curatedIdxs().map((i) => productImageUrls[i] || '');
 
   const handleImportLink = async () => {
     const url = productLink.trim();
@@ -163,7 +170,9 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
       const res = await fetch('/api/product-fitting/from-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, geminiApiKey: geminiKey }),
+        // 썸네일 모드 — 색상별 컷을 수십 장 다 받아오려면 장당 용량을 줄여야 한다.
+        // 실제 생성엔 원본 URL로 서버가 고해상도를 다시 받는다.
+        body: JSON.stringify({ url, geminiApiKey: geminiKey, thumbnails: true }),
       });
       const data = await res.json();
       if (data.blocked) {
@@ -175,9 +184,10 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
       }
       if (!res.ok || !data.success) throw new Error(data.error || '링크에서 가져오지 못했습니다.');
 
-      setProductImages((data.productImages || []).slice(0, 20));
-      setProductImageColors((data.productImageColors || []).slice(0, 20));
-      setProductImageHasPerson((data.productImageHasPerson || []).slice(0, 20));
+      setProductImages((data.productImages || []).slice(0, 40));
+      setProductImageColors((data.productImageColors || []).slice(0, 40));
+      setProductImageHasPerson((data.productImageHasPerson || []).slice(0, 40));
+      setProductImageUrls((data.productImageUrls || []).slice(0, 40));
       setColorOptions(data.colorOptions || []);
       setSelectedColor(null);
       setProductText(data.productText || '');
@@ -234,6 +244,7 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           productImagesBase64: images,
+          productImageUrls: curatedUrls(),
           category,
           geminiApiKey: geminiKey,
           openaiApiKey: openaiKey,
@@ -271,15 +282,19 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
     setPresetError('');
     setIsSavingPreset(true);
     try {
+      // 수정 모드면 PUT, 아니면 POST. 참고사진은 새로 고른 것(data:)만 올린다
+      // (기존 프리셋의 서명 URL을 그대로 되돌려 보내면 안 되므로).
+      const isEdit = !!editingPresetId;
       const res = await fetch('/api/pose-presets', {
-        method: 'POST',
+        method: isEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...(isEdit ? { id: editingPresetId } : {}),
           name: newPresetName,
           poseInstruction: newPresetText,
           slot: presetTab,
           framing: newPresetFraming,
-          refImageBase64: newPresetRef || undefined,
+          refImageBase64: newPresetRef?.startsWith('data:') ? newPresetRef : undefined,
         }),
       });
       const data = await res.json();
@@ -287,12 +302,31 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
       setNewPresetName('');
       setNewPresetText('');
       setNewPresetRef(null);
+      setNewPresetFraming('full');
+      setEditingPresetId(null);
       await loadPresets();
     } catch (err: any) {
       setPresetError(err?.message || '프리셋 저장 중 오류가 발생했습니다.');
     } finally {
       setIsSavingPreset(false);
     }
+  };
+
+  /** 저장된 프리셋을 아래 입력창으로 불러와 수정 모드로 전환 */
+  const startEditPreset = (p: PosePresetItem) => {
+    setEditingPresetId(p.id);
+    setNewPresetName(p.name);
+    setNewPresetText(p.poseInstruction);
+    setNewPresetFraming(p.framing);
+    setNewPresetRef(p.refImageUrl);
+    setPresetError('');
+  };
+  const cancelEditPreset = () => {
+    setEditingPresetId(null);
+    setNewPresetName('');
+    setNewPresetText('');
+    setNewPresetRef(null);
+    setNewPresetFraming('full');
   };
 
   const handleDeletePreset = async (id: string) => {
@@ -499,7 +533,7 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
               )}
             </div>
           ))}
-          {productImages.length < 20 && (
+          {productImages.length < 40 && (
             <button
               onClick={() => fileInputRef.current?.click()}
               className="aspect-[3/4] rounded-lg border border-dashed border-gray-300 hover:border-gray-400 text-gray-400 hover:text-gray-600 text-[10px] font-medium transition"
@@ -740,15 +774,26 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
                     <p className="text-[10px] text-gray-400 truncate">{p.poseInstruction}</p>
                   </div>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleDeletePreset(p.id);
-                  }}
-                  className="absolute top-1 right-1.5 text-[11px] text-gray-300 hover:text-red-500 transition"
-                >
-                  ✕
-                </button>
+                <div className="absolute top-1 right-1.5 flex items-center gap-1.5">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startEditPreset(p);
+                    }}
+                    className="text-[10px] text-gray-300 hover:text-gray-900 transition"
+                  >
+                    수정
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDeletePreset(p.id);
+                    }}
+                    className="text-[11px] text-gray-300 hover:text-red-500 transition"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -760,10 +805,26 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
         </div>
 
         <div className="rounded-lg border border-gray-200 p-3 space-y-2">
-          <p className="text-[10px] text-gray-400">
-            <b className="text-gray-600">{CATEGORY_OPTIONS.find((c) => c.id === presetTab)?.label}</b> 카테고리에
-            저장됩니다
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] text-gray-400">
+              {editingPresetId ? (
+                <>
+                  <b className="text-gray-900">포즈 수정 중</b> —{' '}
+                  <b className="text-gray-600">{CATEGORY_OPTIONS.find((c) => c.id === presetTab)?.label}</b> 카테고리
+                </>
+              ) : (
+                <>
+                  <b className="text-gray-600">{CATEGORY_OPTIONS.find((c) => c.id === presetTab)?.label}</b> 카테고리에
+                  저장됩니다
+                </>
+              )}
+            </p>
+            {editingPresetId && (
+              <button onClick={cancelEditPreset} className="text-[10px] text-gray-400 hover:text-gray-900 transition">
+                수정 취소
+              </button>
+            )}
+          </div>
           <input
             value={newPresetName}
             onChange={(e) => setNewPresetName(e.target.value)}
@@ -812,7 +873,7 @@ export function LookbookSection({ geminiKey, openaiKey, onNeedKeys }: LookbookSe
               disabled={isSavingPreset}
               className="px-4 py-2 rounded-lg bg-gray-900 text-white text-xs font-medium disabled:opacity-40 transition"
             >
-              {isSavingPreset ? '저장 중…' : '포즈 추가'}
+              {isSavingPreset ? '저장 중…' : editingPresetId ? '수정 저장' : '포즈 추가'}
             </button>
           </div>
           {presetError && <p className="text-[11px] text-red-500">{presetError}</p>}

@@ -5,7 +5,13 @@
  */
 import { NextResponse } from 'next/server';
 import { getSessionUserId } from '@/lib/auth';
-import { addPosePreset, deletePosePreset, getPosePresetRefUrl, listPosePresets } from '@/lib/pose-presets';
+import {
+  addPosePreset,
+  deletePosePreset,
+  getPosePresetRefUrl,
+  listPosePresets,
+  updatePosePreset,
+} from '@/lib/pose-presets';
 import { parseBase64Image } from '@/lib/gpt-image-edit';
 
 export const runtime = 'nodejs';
@@ -45,6 +51,31 @@ export async function POST(req: Request) {
     console.error('[api/pose-presets] 저장 실패:', err);
     return NextResponse.json(
       { success: false, error: err?.message || '프리셋 저장 중 오류가 발생했습니다.' },
+      { status: 500 },
+    );
+  }
+}
+
+export async function PUT(req: Request) {
+  const uid = await getSessionUserId();
+  if (!uid) return NextResponse.json({ success: false, error: '로그인이 필요합니다.' }, { status: 401 });
+
+  try {
+    const { id, name, poseInstruction, slot, framing, refImageBase64 } = await req.json();
+    if (!id) return NextResponse.json({ success: false, error: '수정할 프리셋 id가 없습니다.' }, { status: 400 });
+    const preset = await updatePosePreset(uid, id, {
+      name,
+      poseInstruction,
+      slot,
+      framing: framing === 'close' ? 'close' : framing === 'full' ? 'full' : undefined,
+      refImage: refImageBase64 ? parseBase64Image(refImageBase64) : undefined,
+    });
+    if (!preset) return NextResponse.json({ success: false, error: '프리셋을 찾지 못했습니다.' }, { status: 404 });
+    return NextResponse.json({ success: true, preset });
+  } catch (err: any) {
+    console.error('[api/pose-presets] 수정 실패:', err);
+    return NextResponse.json(
+      { success: false, error: err?.message || '프리셋 수정 중 오류가 발생했습니다.' },
       { status: 500 },
     );
   }

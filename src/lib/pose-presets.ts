@@ -70,8 +70,55 @@ async function writeIndex(uid: string, presets: PosePreset[]): Promise<void> {
     .upload(indexPath(uid), Buffer.from(body, 'utf-8'), {
       contentType: 'application/json',
       upsert: true,
+      // (2026-07-29) Supabase Storage 기본 cacheControl은 3600초다. 이 파일은 매 추가/삭제마다
+      // 바뀌는 목록인데 1시간 캐시가 걸려서, 저장 직후 다시 읽으면 옛 목록이 돌아왔다.
+      // read-modify-write 구조라 그 옛 목록에 덧붙이는 순간 그 사이 추가분이 조용히 사라졌다
+      // (대표님 신고: "저장 삭제가 제대로 안 되고 6개 이상도 안 됨"). 캐시를 끈다.
+      cacheControl: '0',
     });
   if (error) throw error;
+}
+
+/** 저장된 프리셋 수정 — 이름/설명/카테고리/프레이밍/참고사진 교체 */
+export async function updatePosePreset(
+  uid: string,
+  presetId: string,
+  patch: {
+    name?: string;
+    poseInstruction?: string;
+    slot?: SourcedCategory;
+    framing?: 'full' | 'close';
+    refImage?: { buffer: Buffer; mimeType: string };
+  },
+): Promise<PosePreset | null> {
+  const supabase = getSupabaseAdmin();
+  const presets = await listPosePresets(uid);
+  const idx = presets.findIndex((p) => p.id === presetId);
+  if (idx < 0) return null;
+
+  if (patch.refImage) {
+    const { error } = await supabase.storage
+      .from(GENERATIONS_BUCKET)
+      .upload(refImagePath(uid, presetId), patch.refImage.buffer, {
+        contentType: patch.refImage.mimeType,
+        upsert: true,
+        cacheControl: '0',
+      });
+    if (error) throw error;
+  }
+
+  const updated: PosePreset = {
+    ...presets[idx],
+    name: patch.name?.trim() || presets[idx].name,
+    poseInstruction: patch.poseInstruction?.trim() || presets[idx].poseInstruction,
+    slot: patch.slot || presets[idx].slot,
+    framing: patch.framing || presets[idx].framing,
+    hasRefImage: patch.refImage ? true : presets[idx].hasRefImage,
+  };
+  const next = [...presets];
+  next[idx] = updated;
+  await writeIndex(uid, next);
+  return updated;
 }
 
 export async function addPosePreset(
@@ -93,6 +140,7 @@ export async function addPosePreset(
       .upload(refImagePath(uid, id), input.refImage.buffer, {
         contentType: input.refImage.mimeType,
         upsert: true,
+        cacheControl: '0',
       });
     if (error) throw error;
   }

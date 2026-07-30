@@ -41,6 +41,7 @@ export async function POST(req: Request) {
       productNotes,
       sourceUrl,
       draftMode,
+      productImageUrls,
     }: {
       /** 색상별로 큐레이션된 실제 스크래핑 사진(대표컷 먼저) */
       productImagesBase64: string[];
@@ -61,6 +62,12 @@ export async function POST(req: Request) {
       sourceUrl?: string;
       /** 재질/절개선만 빠르게 확인할 땐 저화질로 — 출력 비용 약 1/8 */
       draftMode?: boolean;
+      /**
+       * (2026-07-29) 갤러리가 썸네일(512px)을 쓰기 때문에, 생성에는 원본을 다시 받아야 한다.
+       * 선택된 컷의 원본 URL을 주면 서버가 직접 고해상도로 내려받아 사용한다(브라우저를
+       * 왕복하며 수 MB를 나르지 않는다). 실패하면 넘어온 썸네일로 폴백.
+       */
+      productImageUrls?: string[];
     } = await req.json();
     const quality = draftMode ? 'low' : 'medium';
 
@@ -90,8 +97,38 @@ export async function POST(req: Request) {
     const sheetId = providedSheetId || newSheetId();
     const targetAngles = angles?.length ? angles : ALL_ANGLES;
 
+    // 원본 URL이 있으면 서버가 고해상도로 다시 받아 쓴다(썸네일로 생성하면 재질이 뭉개진다).
+    const referer = (() => {
+      try {
+        return sourceUrl ? new URL(sourceUrl).origin + '/' : '';
+      } catch {
+        return '';
+      }
+    })();
+    const fetchOriginal = async (u: string): Promise<{ buffer: Buffer; mimeType: string } | null> => {
+      try {
+        const res = await fetch(u, {
+          headers: { 'User-Agent': 'Mozilla/5.0', ...(referer ? { Referer: referer } : {}) },
+          signal: AbortSignal.timeout(12000),
+        });
+        if (!res.ok) return null;
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.startsWith('image/')) return null;
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length < 4000) return null;
+        return downscaleImage(buf, ct);
+      } catch {
+        return null;
+      }
+    };
+
     const referenceImages = await Promise.all(
-      productImagesBase64.map(async (b64) => {
+      productImagesBase64.map(async (b64, i) => {
+        const srcUrl = productImageUrls?.[i];
+        if (srcUrl) {
+          const original = await fetchOriginal(srcUrl);
+          if (original) return original;
+        }
         const parsed = parseBase64Image(b64);
         return downscaleImage(parsed.buffer, parsed.mimeType);
       }),

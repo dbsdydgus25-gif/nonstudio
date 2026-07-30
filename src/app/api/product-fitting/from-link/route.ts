@@ -121,8 +121,12 @@ function collectImageUrls(html: string, pageUrl: string): { official: string[]; 
   // (2026-07-27) 캡 상향 — "제품 이미지를 전부 가져와 대표님이 직접 고르는" 구조로 전환.
   // 예전엔 임의로 몇 장만 잘라와 AI가 자동 선택했는데, gpt-image-2는 글보다 실제 픽셀을
   // 잘 베끼므로 좋은 참고컷을 많이·정확히 사람이 큐레이션해 넣는 게 정확도의 최대 지렛대다.
-  const official = clean(officialSet, 28);
-  const detailOnly = clean(detailSet, 30).filter((u) => !official.includes(u));
+  // (2026-07-29) 캡 재상향 — ar-es.co.kr(8색상) 실측: 상세설명에 ec-data-src 이미지가 128장
+  // 있는데 30장에서 잘려, 문서 순서상 앞쪽에 몰려 있던 버건디 컷만 들어오고 화이트/남색 룩북샷은
+  // 통째로 사라졌다(대표님 신고: "버건디색상만 가져왔어"). 색상별 큐레이션이 가능하려면 모든
+  // 색상 구간이 후보에 들어와야 하므로, URL 수집 단계에서는 잘라내지 않는다.
+  const official = clean(officialSet, 60);
+  const detailOnly = clean(detailSet, 160).filter((u) => !official.includes(u));
   return { official, detail: detailOnly };
 }
 
@@ -308,7 +312,7 @@ function decodeHtmlBody(res: Response, buf: ArrayBuffer): string {
   }
 }
 
-async function downloadImage(url: string, referer: string): Promise<string | null> {
+async function downloadImage(url: string, referer: string, maxDim?: number): Promise<string | null> {
   try {
     const res = await fetch(url, { headers: browserHeaders(referer), signal: AbortSignal.timeout(12000) });
     if (!res.ok) return null;
@@ -318,7 +322,8 @@ async function downloadImage(url: string, referer: string): Promise<string | nul
     if (rawBuf.length < 4000) return null; // 아이콘/1x1 등 너무 작은 건 제외
     // (2026-07-21) 링크 이미지는 원본(최대 1MB+)이라 8~14장 합치면 Vercel 요청 한도(413)를 넘는다.
     // 직접 업로드는 클라이언트에서 압축되는데 링크는 그 과정이 없어 서버에서 다운스케일해준다.
-    const { buffer, mimeType } = await downscaleImage(rawBuf, ct);
+    // (2026-07-29) maxDim을 작게 주면 갤러리 썸네일 모드 — 수십 장을 한 응답에 담을 수 있다.
+    const { buffer, mimeType } = await downscaleImage(rawBuf, ct, maxDim);
     return `data:${mimeType};base64,${buffer.toString('base64')}`;
   } catch {
     return null;
@@ -429,7 +434,12 @@ For EACH image return three things:
 
 export async function POST(req: Request) {
   try {
-    const { url, geminiApiKey } = (await req.json()) as { url: string; geminiApiKey?: string };
+    const { url, geminiApiKey, thumbnails } = (await req.json()) as {
+      url: string;
+      geminiApiKey?: string;
+      /** true면 갤러리용 저용량 썸네일 + 원본 URL 반환(수십 장 수집 가능). AI 룩북이 사용. */
+      thumbnails?: boolean;
+    };
     if (!url || !/^https?:\/\//i.test(url.trim())) {
       return NextResponse.json({ success: false, error: '올바른 상품 링크(http/https)를 입력해주세요.' }, { status: 400 });
     }
@@ -470,20 +480,28 @@ export async function POST(req: Request) {
       }
     })();
 
+    // (2026-07-29) 썸네일 모드 — 갤러리에 수십 장을 보여주려면 장당 용량을 줄여야 한다.
+    // 이미지 원본 URL을 같이 반환해, 실제 생성 단계에서 선택된 것만 서버가 고해상도로
+    // 다시 받아 쓰도록 한다(브라우저를 왕복하며 수 MB를 나르지 않는다).
+    const thumbDim = thumbnails ? 512 : undefined;
     const downloadBucket = async (urls: string[], cap: number) => {
-      const out: string[] = [];
-      for (const u of urls) {
-        if (out.length >= cap) break;
-        const data = await downloadImage(u, referer);
-        if (data) out.push(data);
+      const out: Array<{ data: string; url: string }> = [];
+      // 순차 다운로드는 60장 넘어가면 너무 느리다 — 6장씩 병렬로 받는다.
+      for (let i = 0; i < urls.length && out.length < cap; i += 6) {
+        const batch = urls.slice(i, i + 6);
+        const results = await Promise.all(
+          batch.map(async (u) => ({ url: u, data: await downloadImage(u, referer, thumbDim) })),
+        );
+        for (const r of results) {
+          if (r.data && out.length < cap) out.push({ data: r.data, url: r.url });
+        }
       }
       return out;
     };
 
-    // (2026-07-27) 캡 상향 — 제품 이미지를 최대한 다 가져와 프론트에서 색상별로 보여주고
-    // 대표님이 직접 선택. downloadImage 내부에서 다운스케일되므로 페이로드는 관리됨.
-    const productImagesRaw = await downloadBucket(official, 20);
-    const materialImagesRaw = await downloadBucket(detail, 15);
+    // 썸네일 모드에서는 장당 용량이 1/4 이하라 훨씬 많이 담을 수 있다.
+    const productImagesRaw = await downloadBucket(official, thumbnails ? 40 : 20);
+    const materialImagesRaw = await downloadBucket(detail, thumbnails ? 60 : 15);
 
     // 무관 이미지 필터 + 이미지별 역할(garment/fabric/info)·컬러웨이 판별 — 두 버킷을 합쳐
     // 한 번에 검사(호출 절약)한다. (2026-07-23) 예전엔 URL 출처(official/detail)로만 버킷을
@@ -492,8 +510,13 @@ export async function POST(req: Request) {
     // 다시 버킷을 나눈다: garment=생성 가능한 단독 착용/누끼 컷, fabric=원단 클로즈업,
     // info=사이즈표/스와치/그리드/텍스트 카드(분석 텍스트로만 쓰고 생성기엔 절대 안 넣음).
     const combined = [...productImagesRaw, ...materialImagesRaw];
-    const verdicts = await filterRelevantImages(combined, title, options.colors, geminiApiKey);
-    const kept = combined.map((img, i) => ({ img, v: verdicts[i] })).filter((x) => x.v.keep);
+    const verdicts = await filterRelevantImages(
+      combined.map((x) => x.data),
+      title,
+      options.colors,
+      geminiApiKey,
+    );
+    const kept = combined.map((x, i) => ({ img: x.data, srcUrl: x.url, v: verdicts[i] })).filter((x) => x.v.keep);
 
     const garmentKept = kept.filter((x) => x.v.role === 'garment');
     const fabricKept = kept.filter((x) => x.v.role === 'fabric');
@@ -508,6 +531,9 @@ export async function POST(req: Request) {
     const materialImages = materialKept.map((x) => x.img);
     const productImageColors = productKept.map((x) => x.v.colorway);
     const materialImageColors = materialKept.map((x) => x.v.colorway);
+    // 썸네일 모드에서 실제 생성 시 고해상도로 다시 받기 위한 원본 URL (인덱스 정렬 유지)
+    const productImageUrls = productKept.map((x) => x.srcUrl);
+    const materialImageUrls = materialKept.map((x) => x.srcUrl);
     // (2026-07-28) 이 컷에 실제 사람(다른 판매처 모델 등)이 찍혀 있는지 — 프론트가 생성 입력으로
     // 쓸 보조컷을 고를 때 인물 없는 컷을 우선하도록. 대표컷 1장이 사람 착용샷인 건 정상(항상 그래왔음).
     const productImageHasPerson = productKept.map((x) => x.v.hasPerson);
@@ -534,6 +560,9 @@ export async function POST(req: Request) {
       // 이미지별 판별된 컬러웨이(빈 문자열 = 판별 불가) — 프론트가 선택 색상에 맞는 컷만 쓰도록
       productImageColors,
       materialImageColors,
+      // 썸네일 모드용 원본 URL — 생성 단계에서 선택된 것만 서버가 고해상도로 다시 받는다
+      productImageUrls,
+      materialImageUrls,
       // 대표컷 외 보조(otherAngles) 후보 선택 시 인물 사진을 뒤로 미루기 위한 플래그
       productImageHasPerson,
       title,
