@@ -56,6 +56,9 @@ export async function middleware(request: NextRequest) {
 
   // 로그인/로그아웃/세션조회는 보호 대상에서 제외
   if (pathname.startsWith('/api/auth/')) return NextResponse.next();
+  // (2026-08-04) Vercel Cron이 호출하는 라우트 — 로그인 세션이 없으므로 세션 검증에서
+  // 제외하고, 라우트 안에서 CRON_SECRET 헤더로 별도 인증한다.
+  if (pathname.startsWith('/api/cron/')) return NextResponse.next();
 
   const session = decodeSession(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session) return unauthorized();
