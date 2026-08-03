@@ -212,7 +212,8 @@ export function buildLookbookFittingPrompt(
     '=== TASK: DRESS THE FIXED MODEL IN THIS PRODUCT (LOOKBOOK SHOT) ===',
     '',
     poseAsBase
-      ? `Image ${poseRefNum} is the POSE BASE — you are editing THIS photograph. Keep its composition exactly: the same body posture, the same limb positions, the same head and gaze direction, the same camera angle, distance and crop. Replace only WHO is in it and WHAT they are wearing. The person becomes the fixed model defined by Image ${identityNum}, and the clothing becomes the outfit specified below. Everything about the pose stays as it is in Image ${poseRefNum}.`
+      ? `Image ${poseRefNum} is the POSE BASE — you are editing THIS photograph. Keep its composition exactly: the same body posture, the same limb positions, the same head and gaze direction, the same camera angle, distance and crop. Replace only WHO is in it and WHAT they are wearing. The person becomes the fixed model defined by Image ${identityNum}, and the clothing becomes the outfit specified below. Everything about the pose stays as it is in Image ${poseRefNum}.
+STRIP THE BASE: because you are editing that photo, its own details will try to survive — actively remove them. Every ring, bracelet, watch, necklace, earring and bag worn by the person in Image ${poseRefNum} must be DELETED unless the outfit list below explicitly asks for it. Their tattoos, nail polish, hairstyle and skin tone are theirs, not our model's — replace all of it with our model's. Bare wrists and bare hands are the correct default.`
       : '',
     `Image ${identityNum} is the FIXED MODEL reference — the face, body proportions, and skin tone of the one person this brand always shoots. Match that person exactly. Do NOT copy the clothing, background, or pose from Image ${identityNum}; the outfit comes from the product references below${poseAsBase ? ` and the pose comes from Image ${poseRefNum}` : ' and the pose comes from the POSE section'}.`,
     '',
@@ -252,7 +253,8 @@ export function buildLookbookFittingPrompt(
         ].join('\n')
       : `- ${poseInstruction} — follow every part of this literally, especially exact hand placement (a "back pocket" means the hand is behind the body in a rear pocket, never in a front pocket) and gaze direction.`,
     framing === 'close'
-      ? `- CLOSE-UP framing: crop in tight on the sourced ${SLOT_LABEL_EN[category]} so it fills most of the frame, showing the fabric weave, stitching, and trims at real scale. The face may be partly or fully out of frame — that is expected. Keep the crop natural and photographic, not a zoomed-in blur.`
+      ? `- CLOSE-UP framing: crop in tight on the sourced ${SLOT_LABEL_EN[category]} so it fills most of the frame, showing the fabric weave, stitching, and trims at real scale. The face may be partly or fully out of frame — that is expected. Keep the crop natural and photographic, not a zoomed-in blur.
+- CLOSE-UP CONSISTENCY: a tighter crop must NOT change the person. Skin tone, skin texture, body-hair amount, muscle definition, arm and torso thickness and the garment's fit on the body stay exactly as in the full-body shots of this set — you are simply moving the camera closer to the same person in the same clothes, not rendering a different, leaner or darker body. Do not add extra definition or tan just because the skin is now larger in frame.`
       : '- FULL-BODY commercial lookbook framing: the entire figure from head to shoes is inside the frame with comfortable margin, the whole outfit visible, photorealistic, shot on a professional camera.',
     '- Keep the camera distance and lens feel consistent with the rest of this set; do not zoom in or out arbitrarily.',
     '',

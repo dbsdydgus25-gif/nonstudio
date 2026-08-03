@@ -10,7 +10,7 @@ interface HistoryEntry {
   prompt: string;
   poseLabel: string | null;
   createdAt: string;
-  pipeline: 'fitting' | 'product' | 'variation';
+  pipeline: 'fitting' | 'product' | 'variation' | 'lookbook' | 'video';
   isHd: boolean;
 }
 
@@ -21,7 +21,7 @@ interface Collection {
   generationIds: string[];
 }
 
-type FilterTab = 'all' | 'fitting' | 'product' | 'variation';
+type FilterTab = 'all' | 'fitting' | 'product' | 'variation' | 'lookbook' | 'video';
 
 const HD_PREFIX = '[HD] ';
 
@@ -29,9 +29,11 @@ const PIPELINE_LABEL: Record<HistoryEntry['pipeline'], string> = {
   fitting: 'AI 피팅',
   product: 'AI 제품 피팅',
   variation: 'AI 바리에이션',
+  lookbook: 'AI 룩북',
+  video: 'AI 영상',
 };
 
-async function fetchSource(source: 'fitting' | 'product' | 'variation'): Promise<HistoryEntry[]> {
+async function fetchSource(source: HistoryEntry['pipeline']): Promise<HistoryEntry[]> {
   try {
     const res = await fetch(`/api/generations/history?source=${source}`);
     const data = await res.json();
@@ -75,6 +77,8 @@ export function HistorySection() {
       fetchSource('fitting'),
       fetchSource('product'),
       fetchSource('variation'),
+      fetchSource('lookbook'),
+      fetchSource('video'),
     ]);
     const merged = [...fitting, ...product, ...variation].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -151,6 +155,8 @@ export function HistorySection() {
       fitting: entries.filter((e) => e.pipeline === 'fitting').length,
       product: entries.filter((e) => e.pipeline === 'product').length,
       variation: entries.filter((e) => e.pipeline === 'variation').length,
+      lookbook: entries.filter((e) => e.pipeline === 'lookbook').length,
+      video: entries.filter((e) => e.pipeline === 'video').length,
     }),
     [entries],
   );
@@ -160,6 +166,8 @@ export function HistorySection() {
     { id: 'fitting', label: `AI 피팅 ${counts.fitting}` },
     { id: 'product', label: `AI 제품 피팅 ${counts.product}` },
     { id: 'variation', label: `AI 바리에이션 ${counts.variation}` },
+    { id: 'lookbook', label: `AI 룩북 ${counts.lookbook}` },
+    { id: 'video', label: `AI 영상 ${counts.video}` },
   ];
 
   const selectedCount = selectedIds.size;

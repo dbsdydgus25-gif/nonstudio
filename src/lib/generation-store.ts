@@ -269,7 +269,7 @@ export interface GenerationHistoryItem {
  * React state 대신 Supabase에서 직접 불러온다. 이미지는 비공개 버킷이라 서명된 URL로 반환.
  */
 export async function listRecentGenerations(
-  source: 'fitting' | 'variation' | 'product' | 'video',
+  source: 'fitting' | 'variation' | 'product' | 'video' | 'lookbook',
   limit = 24,
 ): Promise<GenerationHistoryItem[]> {
   try {
@@ -285,7 +285,11 @@ export async function listRecentGenerations(
       .limit(limit);
     if (source === 'variation') query = query.eq('mode_or_category', 'variation');
     else if (source === 'product') query = query.eq('mode_or_category', 'product');
-    else if (source === 'fitting') query = query.not('mode_or_category', 'in', '("variation","product")');
+    else if (source === 'lookbook') query = query.eq('mode_or_category', 'lookbook');
+    // (2026-07-31) 제외 목록에 lookbook을 안 넣어서 AI 룩북 결과가 전부 "AI 피팅"으로
+    // 섞여 들어갔다(대표님 신고). 새 파이프라인을 추가할 때 여기도 같이 고쳐야 한다.
+    else if (source === 'fitting')
+      query = query.not('mode_or_category', 'in', '("variation","product","lookbook")');
 
     const { data, error } = await query;
     if (error) throw error;

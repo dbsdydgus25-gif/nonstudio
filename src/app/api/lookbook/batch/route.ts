@@ -240,7 +240,14 @@ export async function POST(req: Request) {
       // gpt-image-2는 seed가 없어 같은 텍스트 스펙만으로는 수렴하지 않는다 — 이 코드베이스에서
       // 반복 확인된 해법은 "이미 확정된 사진"을 기준으로 주는 것이라, 첫 컷을 먼저 만들고
       // 그 결과를 나머지 전부의 앵커로 넣는다.
-      const [firstJob, ...restJobs] = jobs;
+      // (2026-07-31) 앵커는 반드시 전신컷이어야 한다 — 클로즈업이 먼저 생성돼 앵커가 되면
+      // 그 컷엔 몸 전체가 없어서 이후 전신컷들이 체형·키를 참고할 근거가 없고, 피부톤도
+      // 얼굴 확대분만 보고 맞추게 되어 컷마다 달라졌다(대표님 신고: "클로즈업이랑 전신
+      // 모델 핏, 피부톤이 다름"). 전신 프리셋을 앞으로 정렬해 첫 컷이 전신이 되게 한다.
+      const orderedJobs = [...jobs].sort(
+        (a, b) => (a.preset.framing === 'full' ? 0 : 1) - (b.preset.framing === 'full' ? 0 : 1),
+      );
+      const [firstJob, ...restJobs] = orderedJobs;
       const firstOut = await generateOne(firstJob, null);
       const batchAnchor = firstOut ? await downscaleImage(firstOut.buffer, firstOut.mimeType) : null;
       // 첫 컷을 순차로 먼저 만드느라 라운드가 한 번 늘었으므로, 나머지는 3장씩 돌려
