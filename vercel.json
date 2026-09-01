@@ -1,6 +1,7 @@
 {
   "crons": [
     { "path": "/api/cron/morning-agenda", "schedule": "0 23 * * *" },
-    { "path": "/api/cron/evening-report", "schedule": "0 12 * * *" }
+    { "path": "/api/cron/evening-report", "schedule": "0 12 * * *" },
+    { "path": "/api/cron/cleanup-old-generations", "schedule": "0 17 * * *" }
   ]
 }
